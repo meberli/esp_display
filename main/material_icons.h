@@ -25,6 +25,8 @@ LV_FONT_DECLARE(font_icons_80)
 LV_FONT_DECLARE(font_icons_38)
 LV_FONT_DECLARE(font_icons_32)
 LV_FONT_DECLARE(font_icons_24)
+LV_FONT_DECLARE(font_icon_bolt_24)  // only ICON_BOLT (U+EA0B "bolt"), Energie
+#define ICON_BOLT "\xEE\xA8\x8B"
 LV_FONT_DECLARE(font_icons_16)
 
 #define ICON_STAR "\xEF\x82\x9A"          // U+F09A

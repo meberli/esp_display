@@ -127,10 +127,13 @@ int64_t days_from_civil_ui(int y, unsigned m, unsigned d) {  // H. Hinnant
 
 void txt_go_back() {
   if (txt_back == Nav::Maint) open_maint();
+  else if (txt_back == Nav::EnSet) open_enset();
   else open_calset();
 }
 
+void open_enset();
 void info_hide_all() {
+  hide(enset_root);
   hide(trset_root);
   hide(st_root);
   hide(calset_root);
@@ -143,6 +146,8 @@ void info_hide_views() {
   hide(tr_root);
   hide(calv_root);
   hide(rain_root);
+  hide(en_root[0]);
+  hide(en_root[1]);
 }
 
 void enter_view(Nav n, lv_obj_t* root) {
@@ -492,8 +497,11 @@ void home_warn_refresh() {
   show(home_warn);
 }
 
+void energy_chip_refresh();
+void energy_enter(int page);
 void home_chips_refresh() {
   if (chip_tr_main == nullptr) return;
+  energy_chip_refresh();
   // ÖV: next departure from station 1.
   const Board& b = boards[0];
   const int64_t now = time(nullptr);
@@ -567,28 +575,29 @@ void on_info_tap(lv_event_t* e) {
   console_printf("Activate info %d\n", which);
   if (which == 0) tr_enter(0);
   else if (which == 1) calv_enter();
+  else if (which == 3) energy_enter(0);
   else rain_enter();
 }
 
 lv_obj_t* make_chip(lv_obj_t* parent, int x, int which, const char* key, uint32_t color, const char* icon,
-                    lv_obj_t** ic, lv_obj_t** top, lv_obj_t** main) {
+                    lv_obj_t** ic, lv_obj_t** top, lv_obj_t** main, int w = 136) {
   lv_obj_t* c = lv_btn_create(parent);
   lv_obj_set_pos(c, x, 380);
-  lv_obj_set_size(c, 210, 76);
+  lv_obj_set_size(c, w, 76);
   style_tile(c, color);
   lv_obj_add_event_cb(c, on_info_tap, LV_EVENT_CLICKED, reinterpret_cast<void*>(static_cast<intptr_t>(which)));
   watch(c);
   reg(key, c);
-  *ic = make_label(c, &font_icons_24, lv_color_hex(color));
+  *ic = make_label(c, strcmp(icon, ICON_BOLT) == 0 ? &font_icon_bolt_24 : &font_icons_24, lv_color_hex(color));
   lv_label_set_text(*ic, icon);
-  lv_obj_set_pos(*ic, 14, 12);
+  lv_obj_set_pos(*ic, 12, 12);
   *top = make_label(c, &font_inter_14, lv_color_hex(kTextDim));
-  lv_obj_set_pos(*top, 46, 15);
-  lv_obj_set_width(*top, 152);
+  lv_obj_set_pos(*top, 42, 15);
+  lv_obj_set_width(*top, w - 52);
   lv_label_set_long_mode(*top, LV_LABEL_LONG_DOT);
   *main = make_label(c, &font_inter_sb16, lv_color_hex(kText));
-  lv_obj_set_pos(*main, 14, 44);
-  lv_obj_set_width(*main, 184);
+  lv_obj_set_pos(*main, 12, 44);
+  lv_obj_set_width(*main, w - 22);
   lv_obj_set_height(*main, 20);
   lv_label_set_long_mode(*main, LV_LABEL_LONG_DOT);
   return c;
@@ -596,8 +605,11 @@ lv_obj_t* make_chip(lv_obj_t* parent, int x, int which, const char* key, uint32_
 
 void build_home_info(lv_obj_t* weather_card) {
   chip_tr_icon = nullptr;
+  // Three tiles: ÖV, Kalender/Abfuhr, Energie (136 px each, 12 px gaps).
   make_chip(home_root, 24, 0, "home:oev", kAccent, ICON_TRAIN, &chip_tr_icon, &chip_tr_top, &chip_tr_main);
-  make_chip(home_root, 246, 1, "home:cal", kPurple, ICON_EVENT, &chip_cal_icon, &chip_cal_top, &chip_cal_main);
+  make_chip(home_root, 172, 1, "home:cal", kPurple, ICON_EVENT, &chip_cal_icon, &chip_cal_top, &chip_cal_main);
+  lv_obj_t* en_icon = nullptr;
+  make_chip(home_root, 320, 3, "home:energy", kAmber, ICON_BOLT, &en_icon, &chip_en_top, &chip_en_main);
 
   home_warn = lv_btn_create(weather_card);
   lv_obj_set_size(home_warn, LV_SIZE_CONTENT, 34);
@@ -702,7 +714,10 @@ bool st_kb_ready(lv_obj_t* ta) {
 // --- Settings: generic text (calendar URLs, update URL) ---------------------------
 
 const char* kTextTitle[kTextSettingN] = {"Familienkalender (iCal)", "Abfallkalender-API", "Update-URL",
-                                         "MeteoSchweiz PLZ",        "Gemeinde (BFS-Nr.)", "Abfuhr-Zone"};
+                                         "MeteoSchweiz PLZ",        "Gemeinde (BFS-Nr.)", "Abfuhr-Zone",
+                                         "whatwatt-Adresse",        "Einheitstarif (Rp./kWh)", "Hochtarif (Rp./kWh)",
+                                         "Niedertarif (Rp./kWh)",   "Einspeiseverg\xC3\xBCtung (Rp./kWh)",
+                                         "Wasserpreis (CHF/m\xC2\xB3)", "HT-Zeiten Mo-Fr", "HT/NT ab Datum"};
 
 // "https://calendar.google.com/…e4f825" style summary; secrets show host only.
 void url_summary(char* out, size_t n, uint8_t which, const char* v, bool own) {
@@ -792,6 +807,10 @@ void open_text(uint8_t which, Nav back) {
                                 : which == kUrlWaste ? "Basis-Adresse der API (https://...), dann OK"
                                 : which == kTextWasteBfs ? "BFS-Nummer der Gemeinde (Buchs SG = 3271), dann OK"
                                 : which == kTextWasteZone ? "Zone/Tour genau wie in der API, dann OK"
+                                : which == kTextEnHost ? "IP oder Name, ohne http:// (leer = keine), dann OK"
+                                : which == kTextEnHtWin ? "z.B. 06:00-10:00,17:00-21:00 (leer = Standard)"
+                                : which == kTextEnSwitch ? "Datum JJJJ-MM-TT (leer = 2027-01-01), dann OK"
+                                : which >= kTextEnFlat ? "Preis z.B. 27.27 (leer = Standard), dann OK"
                                                      : "Neue Adresse eingeben, dann OK");
   show(txt_root);
 }
@@ -848,6 +867,29 @@ bool txt_kb_ready(lv_obj_t* ta) {
     for (const char* c = v; *c != '\0'; ++c) ok = ok && *c >= '0' && *c <= '9';
     if (!ok) {
       lv_label_set_text(txt_status, "BFS-Nummer: 4 Ziffern, z.B. 3271");
+      return true;
+    }
+  }
+  if (txt_which >= kTextEnHost && v[0] != '\0') {
+    uint16_t p, w[2][2];
+    int32_t ymd;
+    bool ok = true;
+    const char* msg = "";
+    if (txt_which == kTextEnHost) {
+      for (const char* c = v; *c; ++c) ok = ok && (isalnum(static_cast<unsigned char>(*c)) || *c == '.' || *c == '-');
+      msg = "Nur IP-Adresse oder Name, ohne http://";
+    } else if (txt_which == kTextEnHtWin) {
+      ok = energy_parse_windows(v, w);
+      msg = "Format: 06:00-10:00,17:00-21:00";
+    } else if (txt_which == kTextEnSwitch) {
+      ok = energy_parse_date(v, &ymd);
+      msg = "Format: 2027-01-01";
+    } else {
+      ok = energy_parse_price(v, &p);
+      msg = "Preis als Zahl, z.B. 27.27";
+    }
+    if (!ok) {
+      lv_label_set_text(txt_status, msg);
       return true;
     }
   }
@@ -1124,6 +1166,7 @@ void build_info_screens(lv_obj_t* screen) {
                  &calset_val[3]);
   make_value_row(calset_root, 460, "Abfallkalender-API", ICON_RECYCLE, kGreen, on_calset_row, kUrlWaste, "calset:waste",
                  &calset_val[2]);
+  make_page_scrollable(calset_root);  // the API row ends at 532: was unreachable before 0.9.0
 
   txt_root = make_screen_root(screen, "");
   txt_title = lv_obj_get_child(txt_root, 0);
@@ -1255,6 +1298,9 @@ void info_tick() {
   rem_tick(false);
   if (scr_off) return;
   if (nav == Nav::Maint) maint_refresh();
+  if (nav == Nav::Energy) energy_refresh();
+  if (nav == Nav::EnSet && lv_tick_get() % 5000 < 1000) enset_refresh();
+  if (nav == Nav::Home) energy_chip_refresh();
   if (now_ms() - last < 20000) return;  // relative times ("5'")
   last = now_ms();
   if (nav == Nav::Home) home_chips_refresh();
@@ -1282,6 +1328,12 @@ bool info_describe(char* out, size_t n) {
       return true;
     case Nav::CalSet:
       snprintf(out, n, "calset");
+      return true;
+    case Nav::Energy:
+      snprintf(out, n, "energy page=%d", en_page);
+      return true;
+    case Nav::EnSet:
+      snprintf(out, n, "enset");
       return true;
     case Nav::TextEdit: {
       char v[256];

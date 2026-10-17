@@ -353,7 +353,9 @@ bool settings_save_station(int i, const Station& st) {
 }
 
 namespace {
-const char* const kTextKey[kTextSettingN] = {"ical_url", "waste_api", "ota_url", "meteo_plz", "waste_bfs", "waste_zone"};
+const char* const kTextKey[kTextSettingN] = {"ical_url", "waste_api", "ota_url",  "meteo_plz", "waste_bfs",
+                                             "waste_zone", "en_host",  "en_flat",  "en_ht",     "en_nt",
+                                             "en_feed",    "wa_price", "en_htwin", "en_switch"};
 }  // namespace
 
 const char* settings_text_default(TextSetting which) {
@@ -363,6 +365,13 @@ const char* settings_text_default(TextSetting which) {
     case kTextWasteBfs: return CONFIG_PANEL_WASTE_BFS;
     case kUrlOta: return CONFIG_PANEL_OTA_URL;
     case kTextPlz: return CONFIG_PANEL_METEO_PLZ;
+    case kTextEnFlat: return "27.27";
+    case kTextEnHt: return "30.00";
+    case kTextEnNt: return "25.67";
+    case kTextEnFeed: return "10.04";
+    case kTextWaPrice: return "2.44";
+    case kTextEnHtWin: return "06:00-10:00,17:00-21:00";
+    case kTextEnSwitch: return "2027-01-01";
     default: return "";
   }
 }
@@ -613,11 +622,78 @@ void settings_migrate() {
       console_printf("Settings: calendar lead %u -> timed %u min, all-day from %02u:%02u\n", lead, cl, cf / 60,
                      cf % 60);
     }
+    // 3 -> 4: Energie settings (en_*, wa_*) are new; defaults apply, nothing to convert.
     nvs_set_u8(h, "cfg_ver", kCfgVersion);
     nvs_commit(h);
     console_printf("Settings: config version %u -> %u\n", v, kCfgVersion);
   }
   nvs_close(h);
+}
+
+// --- Energie ---------------------------------------------------------------------
+
+EnergySettings settings_load_energy() {
+  EnergySettings e = {};
+  e.on = true;
+  e.poll_s = 10;
+  e.model = kTariffAuto;
+  e.show_exp = true;
+  e.water_on = true;
+  e.water_bus = 2;
+  tariff_defaults(&e.tariff);
+  nvs_handle_t h;
+  if (nvs_open(kNs, NVS_READONLY, &h) == ESP_OK) {
+    uint8_t v = 0;
+    uint16_t w = 0;
+    if (nvs_get_u8(h, "en_on", &v) == ESP_OK) e.on = v != 0;
+    if (nvs_get_u16(h, "en_poll", &w) == ESP_OK && w >= 5 && w <= 300) e.poll_s = w;
+    if (nvs_get_u8(h, "en_model", &v) == ESP_OK && v <= kTariffHtNt) e.model = v;
+    if (nvs_get_u8(h, "en_exp", &v) == ESP_OK) e.show_exp = v != 0;
+    if (nvs_get_u8(h, "wa_on", &v) == ESP_OK) e.water_on = v != 0;
+    if (nvs_get_u8(h, "wa_bus", &v) == ESP_OK && v >= 1 && v <= 4) e.water_bus = v;
+    nvs_close(h);
+  }
+  e.tariff.model = e.model;
+  char t[64];
+  settings_load_text(kTextEnHost, e.host, sizeof(e.host), nullptr);
+  uint16_t p;
+  if (settings_load_text(kTextEnFlat, t, sizeof(t), nullptr) && energy_parse_price(t, &p)) e.tariff.flat = p;
+  if (settings_load_text(kTextEnHt, t, sizeof(t), nullptr) && energy_parse_price(t, &p)) e.tariff.ht = p;
+  if (settings_load_text(kTextEnNt, t, sizeof(t), nullptr) && energy_parse_price(t, &p)) e.tariff.nt = p;
+  if (settings_load_text(kTextEnFeed, t, sizeof(t), nullptr) && energy_parse_price(t, &p)) e.tariff.feed = p;
+  if (settings_load_text(kTextWaPrice, t, sizeof(t), nullptr) && energy_parse_price(t, &p)) e.tariff.water = p;
+  if (settings_load_text(kTextEnHtWin, t, sizeof(t), nullptr)) energy_parse_windows(t, e.tariff.win);
+  int32_t ymd;
+  if (settings_load_text(kTextEnSwitch, t, sizeof(t), nullptr) && energy_parse_date(t, &ymd)) e.tariff.switch_ymd = ymd;
+  return e;
+}
+
+bool settings_save_energy_flags(const EnergySettings& e) {
+  Tx tx;
+  tx.u8("en_on", e.on ? 1 : 0);
+  tx.u16("en_poll", e.poll_s);
+  tx.u8("en_model", e.model);
+  tx.u8("en_exp", e.show_exp ? 1 : 0);
+  tx.u8("wa_on", e.water_on ? 1 : 0);
+  tx.u8("wa_bus", e.water_bus);
+  return tx.commit();
+}
+
+bool settings_load_energy_hist(EnergyHist* hist) {
+  energy_hist_clear(hist);
+  nvs_handle_t h;
+  if (nvs_open(kNs, NVS_READONLY, &h) != ESP_OK) return false;
+  size_t sz = sizeof(*hist);
+  bool ok = nvs_get_blob(h, "en_hist", hist, &sz) == ESP_OK && sz == sizeof(*hist) && hist->magic == kEnergyHistMagic;
+  nvs_close(h);
+  if (!ok) energy_hist_clear(hist);
+  return ok;
+}
+
+bool settings_save_energy_hist(const EnergyHist& hist) {
+  Tx tx;
+  tx.blob("en_hist", &hist, sizeof(hist));
+  return tx.commit();
 }
 
 // --- Termin-Erinnerungen ---------------------------------------------------------

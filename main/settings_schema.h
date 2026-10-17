@@ -7,7 +7,7 @@
 #include <stdint.h>
 
 // Bumped when a key changes meaning, type or range; settings_migrate() converts.
-constexpr uint8_t kCfgVersion = 3;  // 2: wst_from replaces rem_lwst; 3: cal_lead/cal_from replace rem_lcal
+constexpr uint8_t kCfgVersion = 4;  // 2: wst_from replaces rem_lwst; 3: cal_lead/cal_from replace rem_lcal; 4: Energie
 
 enum class KeyType : uint8_t { U8, U16, Str, Blob };
 

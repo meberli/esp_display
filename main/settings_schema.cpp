@@ -3,6 +3,7 @@
 #include <ctype.h>
 #include <string.h>
 
+#include "energy.h"
 #include "info.h"
 #include "settings.h"
 
@@ -55,6 +56,21 @@ const KeySpec kSchema[] = {
     {"lox_user", KeyType::Str, 0, 32, 0, 0},
     {"lox_pass", KeyType::Str, 0, 64, kKeySecret, 0},
     {"lox_auth", KeyType::Str, 1, 7, 0, 0},
+    {"en_on", KeyType::U8, 0, 1, 0, 0},
+    {"en_poll", KeyType::U16, 5, 300, 0, 0},
+    {"en_model", KeyType::U8, 0, 2, 0, 0},
+    {"en_exp", KeyType::U8, 0, 1, 0, 0},
+    {"wa_on", KeyType::U8, 0, 1, 0, 0},
+    {"wa_bus", KeyType::U8, 1, 4, 0, 0},
+    {"en_host", KeyType::Str, 1, 63, kKeyHost, 0},
+    {"en_flat", KeyType::Str, 1, 7, 0, 0},
+    {"en_ht", KeyType::Str, 1, 7, 0, 0},
+    {"en_nt", KeyType::Str, 1, 7, 0, 0},
+    {"en_feed", KeyType::Str, 1, 7, 0, 0},
+    {"wa_price", KeyType::Str, 1, 7, 0, 0},
+    {"en_htwin", KeyType::Str, 1, 31, 0, 0},
+    {"en_switch", KeyType::Str, 10, 10, 0, 0},
+    {"en_hist", KeyType::Blob, sizeof(EnergyHist), sizeof(EnergyHist), kKeyInternal, 0},  // history: never exported
 };
 
 bool printable(const char* v) {

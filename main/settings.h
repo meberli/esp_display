@@ -1,4 +1,6 @@
 #pragma once
+
+#include "energy.h"
 // User settings kept in NVS (namespace "panel"): Wi-Fi credentials and the
 // weather location. Types shared between the UI and the network task.
 
@@ -110,12 +112,38 @@ enum TextSetting : uint8_t {
   kTextPlz = 3,
   kTextWasteBfs = 4,
   kTextWasteZone = 5,
-  kTextSettingN = 6
+  // Einstellungen > Energie (whatwatt Go); prices as decimal text ("27.27")
+  kTextEnHost = 6,     // host name or IPv4 of the whatwatt Go
+  kTextEnFlat = 7,     // Einheitstarif Rp./kWh
+  kTextEnHt = 8,       // Hochtarif Rp./kWh
+  kTextEnNt = 9,       // Niedertarif Rp./kWh
+  kTextEnFeed = 10,    // Einspeisevergütung Rp./kWh
+  kTextWaPrice = 11,   // Wasser CHF/m3 (incl. Abwasser)
+  kTextEnHtWin = 12,   // HT-Zeiten Mo-Fr "06:00-10:00,17:00-21:00"
+  kTextEnSwitch = 13,  // Wechsel auf HT/NT ab "2027-01-01"
+  kTextSettingN = 14
 };
 // own = true when the value came from NVS. Returns false if empty.
 bool settings_load_text(TextSetting which, char* out, size_t n, bool* own);
 bool settings_save_text(TextSetting which, const char* value);  // "" = back to the build default
 const char* settings_text_default(TextSetting which);
+
+// --- Energie (whatwatt Go) ---
+struct EnergySettings {
+  bool on;            // "en_on" (default on; polls only with a host)
+  uint16_t poll_s;    // "en_poll" 5..300 s (default 10)
+  uint8_t model;      // "en_model" TariffModel (default automatic)
+  bool show_exp;      // "en_exp" show export / feed-in
+  bool water_on;      // "wa_on"
+  uint8_t water_bus;  // "wa_bus" M-Bus number of the water meter (default 2)
+  char host[64];      // text kTextEnHost
+  Tariff tariff;      // text prices / windows / switch date (defaults: ewb Buchs 2026/2027 incl. VAT)
+};
+EnergySettings settings_load_energy();
+bool settings_save_energy_flags(const EnergySettings& e);  // on, poll, model, exp, water on/bus
+// History (internal, excluded from backups): one blob, written at most hourly.
+bool settings_load_energy_hist(EnergyHist* h);
+bool settings_save_energy_hist(const EnergyHist& h);
 
 // --- Termin-Erinnerungen ---
 // Lead presets (index): 15 min, 1 h, 3 h, 1 Tag, Vorabend 18:00, am Tag 07:00.

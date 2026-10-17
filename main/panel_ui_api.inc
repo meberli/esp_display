@@ -317,6 +317,7 @@ void ui_text_saved(bool ok, uint8_t which) {
   if (ok && (which == kUrlIcal || which == kUrlWaste || which == kTextWasteBfs || which == kTextWasteZone))
     cal_next_ms = now_ms();  // reload the calendar
   if (ok && which == kTextPlz) meteo_next_ms = now_ms();
+  if (ok && which >= kTextEnHost) energy_kick();
   if (nav == Nav::TextEdit) {
     if (ok) txt_go_back();
     else lv_label_set_text(txt_status, "Speichern fehlgeschlagen");
@@ -424,3 +425,91 @@ void ui_ota_done(bool ok, const char* err) {
 
 // Write pending display choices now (before a restart). UI task only.
 void ui_flush_settings() { disp_save_flush(true); }
+
+// --- Test harness: scroll-to-end check -------------------------------------------
+// Scrolls every scrollable container of the visible page to its end, then checks
+// that the bottom-most clickable widget is fully on screen (above the home bar
+// edge), inside all its ancestors and the topmost hit at its centre (tappable).
+namespace {
+void sc_scroll_all(lv_obj_t* o, bool to_end, int* n) {
+  if (lv_obj_has_flag(o, LV_OBJ_FLAG_HIDDEN)) return;
+  if (lv_obj_has_flag(o, LV_OBJ_FLAG_SCROLLABLE)) {
+    lv_coord_t b = lv_obj_get_scroll_bottom(o);
+    if (to_end && b > 0) {
+      lv_obj_scroll_to_y(o, lv_obj_get_scroll_y(o) + b, LV_ANIM_OFF);
+      ++*n;
+    } else if (!to_end && lv_obj_get_scroll_y(o) != 0) {
+      lv_obj_scroll_to_y(o, 0, LV_ANIM_OFF);
+    }
+  }
+  for (uint32_t i = 0; i < lv_obj_get_child_cnt(o); ++i) sc_scroll_all(lv_obj_get_child(o, i), to_end, n);
+}
+// clickable: bottom-most clickable widget; else bottom-most visible leaf (labels,
+// bars) for pages without buttons (lists of departures, events, ...).
+void sc_lowest(lv_obj_t* o, lv_obj_t** best, lv_coord_t* best_y, bool clickable) {
+  if (lv_obj_has_flag(o, LV_OBJ_FLAG_HIDDEN)) return;
+  bool want = clickable ? lv_obj_has_flag(o, LV_OBJ_FLAG_CLICKABLE) && lv_obj_get_height(o) < 400
+                        : lv_obj_get_child_cnt(o) == 0 && lv_obj_get_height(o) > 8;  // not the home bar
+  if (want && o != lv_scr_act()) {
+    lv_area_t a;
+    lv_obj_get_coords(o, &a);
+    if (a.y2 > *best_y) {
+      *best_y = a.y2;
+      *best = o;
+    }
+  }
+  for (uint32_t i = 0; i < lv_obj_get_child_cnt(o); ++i) sc_lowest(lv_obj_get_child(o, i), best, best_y, clickable);
+}
+const char* sc_name(lv_obj_t* o) {
+  for (lv_obj_t* p = o; p != nullptr; p = lv_obj_get_parent(p))
+    for (int i = 0; i < named_n; ++i)
+      if (named[i].obj == p) return named[i].name;
+  return "?";
+}
+}  // namespace
+
+bool ui_scroll_check(char* out, size_t n) {
+  lv_obj_t* scr = lv_scr_act();
+  int scrolled = 0;
+  sc_scroll_all(scr, true, &scrolled);
+  lv_obj_update_layout(scr);
+  lv_obj_t* last = nullptr;
+  lv_coord_t y2 = -1;
+  sc_lowest(scr, &last, &y2, true);
+  const bool tappable = last != nullptr;
+  if (last == nullptr) sc_lowest(scr, &last, &y2, false);
+  bool ok = true;
+  const char* why = "ok";
+  if (last != nullptr) {
+    lv_area_t a;
+    lv_obj_get_coords(last, &a);
+    lv_point_t c = {static_cast<lv_coord_t>((a.x1 + a.x2) / 2), static_cast<lv_coord_t>((a.y1 + a.y2) / 2)};
+    if (a.y2 > kScreen - 1 || a.y1 < 0) {
+      ok = false;
+      why = "off-screen";
+    }
+    for (lv_obj_t* p = lv_obj_get_parent(last); ok && p != nullptr; p = lv_obj_get_parent(p)) {
+      lv_area_t pa;
+      lv_obj_get_coords(p, &pa);
+      if (a.y2 > pa.y2 + 1 || a.y1 < pa.y1 - 1) {
+        ok = false;
+        why = "clipped";
+      }
+    }
+    lv_obj_t* hit = lv_indev_search_obj(scr, &c);
+    bool hit_ok = false;
+    for (lv_obj_t* h = hit; h != nullptr; h = lv_obj_get_parent(h))
+      if (h == last) hit_ok = true;
+    if (ok && tappable && !hit_ok) {
+      ok = false;
+      why = "covered";
+    }
+    snprintf(out, n, "%s last=%s y=%d..%d scrolled=%d %s%s", ok ? "ok" : "FAIL", sc_name(last), a.y1, a.y2, scrolled, why,
+             tappable ? "" : " (no buttons: last visible item)");
+  } else {
+    snprintf(out, n, "ok none scrolled=%d", scrolled);
+  }
+  int dummy = 0;
+  sc_scroll_all(scr, false, &dummy);  // back to the top
+  return ok;
+}

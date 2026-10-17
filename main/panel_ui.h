@@ -1,4 +1,5 @@
 #pragma once
+// (see also ui_scroll_check below)
 
 #include <stddef.h>
 
@@ -159,3 +160,7 @@ bool ui_waste_test();  // test harness: inject a waste collection today
 int ui_rem_pending();
 void ui_saver_describe(char* out, size_t n);  // screensaver state for DIAGFB
 void ui_saver_runtime(int saver);              // DIAGSAVER: not saved to NVS
+
+// Test harness: scroll every container of the visible page to its end and check
+// that the bottom-most clickable widget is visible and tappable.
+bool ui_scroll_check(char* out, size_t n);

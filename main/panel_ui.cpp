@@ -8,6 +8,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <ctype.h>
 #include <string.h>
 #include <strings.h>
 
@@ -18,6 +19,7 @@
 #include <time.h>
 #include "material_icons.h"
 #include "settings.h"
+#include "energy_task.h"
 #include "panel_hw.h"
 #include "weather_derive.h"
 #include <esp_heap_caps.h>
@@ -66,7 +68,7 @@ enum Section : uint8_t { kSecFav = 0, kSecLight = 1, kSecShutter = 2, kSecOther 
 enum class Nav : uint8_t {
   Home, Category, Weather, Settings, WifiList, WifiPass, Location, Display, Time,
   Cameras, CamSettings, CamId, CamSearch, CamKey,
-  Transit, Calendar, Rain, TransitSet, StationSearch, CalSet, TextEdit, Maint, RemSet
+  Transit, Calendar, Rain, TransitSet, StationSearch, CalSet, TextEdit, Maint, RemSet, Energy, EnSet
 };
 
 const char* kShutterLabel[2] = {"Auf", "Ab"};
@@ -228,6 +230,20 @@ lv_obj_t* set_tr_val = nullptr;
 lv_obj_t* set_cal_val = nullptr;
 lv_obj_t* set_maint_val = nullptr;
 lv_obj_t* set_rem_val = nullptr;
+lv_obj_t* set_en_val = nullptr;
+// Energie (panel_ui_energy.inc)
+lv_obj_t* en_root[2] = {nullptr, nullptr};  // 0 Strom, 1 Wasser
+int en_page = 0;
+lv_obj_t* enset_root = nullptr;
+lv_obj_t* chip_en_top = nullptr;
+lv_obj_t* chip_en_main = nullptr;
+void energy_swipe(int dir);
+void energy_enter(int page);
+void energy_refresh();
+void energy_chip_refresh();
+void open_enset();
+void enset_refresh();
+void enset_summary();
 lv_obj_t* remset_root = nullptr;
 void open_remset();
 void rem_tick(bool force);
@@ -263,7 +279,7 @@ struct Named {
   char name[16];
   lv_obj_t* obj;
 };
-Named named[128];
+Named named[192];
 int named_n = 0;
 void reg(const char* name, lv_obj_t* obj) {
   for (int i = 0; i < named_n; ++i) {
@@ -272,7 +288,7 @@ void reg(const char* name, lv_obj_t* obj) {
       return;
     }
   }
-  if (named_n < 128) {
+  if (named_n < 192) {
     snprintf(named[named_n].name, sizeof(named[named_n].name), "%s", name);
     named[named_n].obj = obj;
     named_n++;
@@ -430,6 +446,7 @@ int round_c(float v) { return static_cast<int>(v >= 0.f ? v + 0.5f : v - 0.5f); 
 
 #include "panel_ui_info.inc"
 #include "panel_ui_rem.inc"
+#include "panel_ui_energy.inc"
 
 }  // namespace
 
@@ -780,6 +797,8 @@ void ui_init() {
   build_settings_screens(screen);
   build_camera_screens(screen);
   build_info_screens(screen);
+  build_energy_screens(screen);
+  build_enset_screen(screen);
   lv_obj_move_foreground(kb);
   build_sleep_layer();
   build_reminders(screen);

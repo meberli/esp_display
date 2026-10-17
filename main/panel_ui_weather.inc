@@ -587,6 +587,14 @@ void swipe_page(int dir) {
     tr_swipe(dir);
     return;
   }
+  if (nav == Nav::Energy) {
+    energy_swipe(dir);
+    return;
+  }
+  if (nav == Nav::EnSet) {
+    if (dir < 0) settings_back();
+    return;
+  }
   if (nav == Nav::Rain) {
     if (dir > 0) open_weather_day(0);
     return;

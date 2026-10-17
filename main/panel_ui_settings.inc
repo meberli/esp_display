@@ -19,6 +19,15 @@ lv_obj_t* make_screen_root(lv_obj_t* screen, const char* title) {
   return root;
 }
 
+// A page whose rows run past the screen: the whole page scrolls vertically
+// (horizontal swipes still page back), with room for the home bar at the end.
+void make_page_scrollable(lv_obj_t* root) {
+  lv_obj_add_flag(root, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scroll_dir(root, LV_DIR_VER);
+  lv_obj_set_scrollbar_mode(root, LV_SCROLLBAR_MODE_OFF);
+  lv_obj_set_style_pad_bottom(root, 28, 0);
+}
+
 lv_obj_t* make_list(lv_obj_t* parent, int y, int h) {
   lv_obj_t* list = lv_obj_create(parent);
   lv_obj_set_pos(list, kMargin, y);
@@ -39,7 +48,8 @@ lv_obj_t* make_row(lv_obj_t* parent, int h, const char* icon, uint32_t icon_colo
   lv_obj_add_event_cb(row, cb, LV_EVENT_CLICKED, reinterpret_cast<void*>(static_cast<intptr_t>(user)));
   watch(row);
   if (icon != nullptr) {
-    lv_obj_t* ic = make_label(row, &font_icons_24, lv_color_hex(icon_color));
+    lv_obj_t* ic = make_label(row, strcmp(icon, ICON_BOLT) == 0 ? &font_icon_bolt_24 : &font_icons_24,
+                              lv_color_hex(icon_color));
     lv_label_set_text(ic, icon);
     lv_obj_align(ic, LV_ALIGN_LEFT_MID, 16, 0);
   }
@@ -346,7 +356,15 @@ void screen_off() {
   console_printf("Screen off (saver %d hint %d)\n", disp.saver, disp.hint ? 1 : 0);
 }
 
+void go_home();
 void hide_sleep_layer(void*) {
+  // Waking always shows the home page (not the page open before the screen
+  // went off); open messages (e.g. Wi-Fi failed) stay.
+  if (nav != Nav::Home && home_root != nullptr) {
+    disp_save_flush(true);
+    go_home();
+    console_printf("Wake: home\n");
+  }
   lv_scr_load(main_screen);
   rem_tick(true);
 }
@@ -524,6 +542,7 @@ void open_settings() {
   refresh_display_settings();
   refresh_time_settings();
   camset_value();
+  enset_summary();
   show(set_root);
 }
 
@@ -697,6 +716,7 @@ void on_settings_row(lv_event_t* e) {
   if (which == 6) open_calset();
   if (which == 7) open_remset();
   if (which == 8) open_maint();
+  if (which == 9) open_enset();
 }
 
 void on_msg_wifi(lv_event_t*) {
@@ -750,18 +770,20 @@ void build_settings_screens(lv_obj_t* screen) {
   set_root = make_screen_root(screen, "Einstellungen");
   // Scrollable list: eight rows do not fit on one screen.
   lv_obj_t* set_list = make_list(set_root, 56, 404);
-  constexpr int kRows = 9;
+  constexpr int kRows = 10;
+  // Row order on screen; the callback gets the row id (Wartung stays 8, Energie is 9).
   const char* names[kRows] = {"WLAN", "Wetter-Ort", "Bildschirm", "Uhrzeit", "Kameras", "\xC3\x96V", "Kalender",
-                              "Erinnerungen", "Wartung"};
+                              "Erinnerungen", "Energie", "Wartung"};
   const char* icons[kRows] = {ICON_WIFI3, ICON_PLACE, ICON_SCREEN, ICON_SCHEDULE, ICON_VIDEOCAM, ICON_TRAIN,
-                              ICON_EVENT, ICON_NOTIFY, ICON_MEMORY};
-  const uint32_t colors[kRows] = {kAccent, kAmber, kPurple, kGreen, kTeal, kAccent, kPurple, kAmber, kOrange};
+                              ICON_EVENT, ICON_NOTIFY, ICON_BOLT, ICON_MEMORY};
+  const uint32_t colors[kRows] = {kAccent, kAmber, kPurple, kGreen, kTeal, kAccent, kPurple, kAmber, kAmber, kOrange};
   lv_obj_t** vals[kRows] = {&set_wifi_val, &set_loc_val, &set_disp_val, &set_time_val, &set_cam_val,
-                            &set_tr_val,   &set_cal_val, &set_rem_val,  &set_maint_val};
+                            &set_tr_val,   &set_cal_val, &set_rem_val,  &set_en_val,   &set_maint_val};
   const char* keys[kRows] = {"set:wifi", "set:loc", "set:disp", "set:time", "set:cams",
-                             "set:oev",  "set:cal", "set:rem",  "set:maint"};
+                             "set:oev",  "set:cal", "set:rem",  "set:energy", "set:maint"};
+  const int ids[kRows] = {0, 1, 2, 3, 4, 5, 6, 7, 9, 8};
   for (int i = 0; i < kRows; ++i) {
-    lv_obj_t* row = make_row(set_list, 72, icons[i], colors[i], on_settings_row, i);
+    lv_obj_t* row = make_row(set_list, 72, icons[i], colors[i], on_settings_row, ids[i]);
     reg(keys[i], row);
     lv_obj_t* name = make_label(row, &font_inter_sb16, lv_color_hex(kText));
     lv_label_set_text(name, names[i]);

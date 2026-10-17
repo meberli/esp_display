@@ -224,13 +224,20 @@ idf.py -B build-test -DSDKCONFIG="build-test/sdkconfig" -p COM14 flash
 | `info_test.py`, `ota_test.py`, `ota_url_test.py` | Status, OTA |
 | `v4_test.py` | Dark-Glass-Screens |
 | `diag_log.py` | Live-Diagnose auch mit normaler Firmware: Touch-Rohdaten, Loop-Zeiten, Speicher; `--noreset`, `--tap`, `--raw` |
+| `ui_pages_test.py` | **Pflicht in jedem UI-Testlauf:** jede Seite (Home, Kategorien, Wetter, Warnungen, ÖV, Kalender, Strom, Wasser, Einstellungen und alle Unterseiten, Textfeld) bis ganz unten scrollen (`SCROLLCHK`), letztes Element sichtbar und antippbar; scrollbare Einstellungsseiten zusätzlich per Finger-Swipe und echtem Tap |
+| `wake_home_test.py` | Nach Bildschirmschoner/Aus zeigt das Aufwecken immer die Hauptseite |
+| `energy_test.py COM14 <IP>` | Energie (whatwatt Go): Live-Daten, Strom/Wasser-Seiten, Home-Kachel, veraltet-Erkennung, Screenshots `v12_*` |
 | `serial_log.py` | serielles Log |
 | `check_secrets.py` | Binary auf Geheimnisse prüfen |
-| `test_ical.cpp`, `test_weather_derive.cpp` | Host-Unit-Tests (`g++ -std=c++17 -I main …`) |
+| `test_ical.cpp`, `test_weather_derive.cpp`, `test_energy.cpp` | Host-Unit-Tests (`g++ -std=c++17 -I main …`, siehe CI) |
 
 Beispiel: `python tools/diag_log.py --port COM14 --noreset --secs 120`.
 
 Die normale Firmware hat zusätzlich Diagnosebefehle auf der Konsole: `DIAGTAP`, `DIAGSWIPE`, `DIAGRAW` (Touch auf Treiberebene einspeisen), `DIAGGT` (GT911-Register), `DIAGSTATS` (CPU-Last je Task).
+
+## Energie (whatwatt Go)
+
+Das Panel fragt `http://<Adresse>/api/v1/report` des whatwatt Go im LAN ab (Einstellungen → Energie, Standard alle 10 s; eigener Task auf Core 0 mit tieferer Priorität als Netz- und Loxone-Task). Daten älter als 60 s gelten als veraltet. Das Gerät speichert keinen Verlauf: das Panel bildet Heute (stündlich) und die letzten 8 Tage aus Zählerständen selbst (NVS-Blob `en_hist`, höchstens stündlich geschrieben, nicht im Backup). Rückwärts laufende Zähler werden ignoriert, ein Zählerwechsel startet eine neue Basis; unvollständige Tage (Start mitten am Tag, Lücke über Mitternacht) sind mit `*` / `~` markiert. Tarif: bis 31.12.2026 Einheitstarif 27.27 Rp./kWh, ab 1.1.2027 automatisch HT 30.00 / NT 25.67 Rp. (HT Mo–Fr 06–10 und 17–21 Uhr), Einspeisung 10.04 Rp. inkl. HKN, Wasser 2.44 CHF/m³ inkl. Abwasser (EW Buchs, inkl. MWST, ohne Grundgebühren) – alles einstellbar. Kosten werden je Messung mit dem Preis des Zeitfensters (HT/NT) gerechnet. Ein Web-UI-Passwort des whatwatt (HTTP Digest) wird nicht unterstützt.
 
 ## Datenquellen, Attribution & Nutzungsbedingungen
 
