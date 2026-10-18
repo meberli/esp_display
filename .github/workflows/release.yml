@@ -18,6 +18,11 @@ jobs:
     container: espressif/idf:v6.1
     steps:
       - uses: actions/checkout@v4
+      - name: Tag must match version.txt
+        shell: bash
+        run: |
+          v=$(tr -d ' \r\n' < version.txt)
+          if [ "${GITHUB_REF_NAME}" != "v$v" ]; then echo "::error::tag $GITHUB_REF_NAME does not match version.txt ($v)"; exit 1; fi
       - name: Check that no local secret files are present
         shell: bash
         run: |
