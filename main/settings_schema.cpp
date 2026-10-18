@@ -70,6 +70,9 @@ const KeySpec kSchema[] = {
     {"wa_price", KeyType::Str, 1, 7, 0, 0},
     {"en_htwin", KeyType::Str, 1, 31, 0, 0},
     {"en_switch", KeyType::Str, 10, 10, 0, 0},
+    {"pv_on", KeyType::U8, 0, 1, 0, 0},
+    {"pv_ip", KeyType::Str, 7, 15, kKeyHost, 0},
+    {"pv_port", KeyType::Str, 1, 5, kKeyDigits, 0},
     {"en_hist", KeyType::Blob, sizeof(EnergyHist), sizeof(EnergyHist), kKeyInternal, 0},  // history: never exported
 };
 

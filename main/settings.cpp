@@ -355,7 +355,8 @@ bool settings_save_station(int i, const Station& st) {
 namespace {
 const char* const kTextKey[kTextSettingN] = {"ical_url", "waste_api", "ota_url",  "meteo_plz", "waste_bfs",
                                              "waste_zone", "en_host",  "en_flat",  "en_ht",     "en_nt",
-                                             "en_feed",    "wa_price", "en_htwin", "en_switch"};
+                                             "en_feed",    "wa_price", "en_htwin", "en_switch",
+                                             "pv_ip",      "pv_port"};
 }  // namespace
 
 const char* settings_text_default(TextSetting which) {
@@ -372,6 +373,8 @@ const char* settings_text_default(TextSetting which) {
     case kTextWaPrice: return "2.44";
     case kTextEnHtWin: return "06:00-10:00,17:00-21:00";
     case kTextEnSwitch: return "2027-01-01";
+    case kTextPvIp: return "192.168.1.39";
+    case kTextPvPort: return "5279";
     default: return "";
   }
 }
@@ -623,6 +626,7 @@ void settings_migrate() {
                      cf % 60);
     }
     // 3 -> 4: Energie settings (en_*, wa_*) are new; defaults apply, nothing to convert.
+    // 4 -> 5: PV (pv_on, pv_ip, pv_port) are new; defaults apply, nothing to convert.
     nvs_set_u8(h, "cfg_ver", kCfgVersion);
     nvs_commit(h);
     console_printf("Settings: config version %u -> %u\n", v, kCfgVersion);
@@ -676,6 +680,22 @@ bool settings_save_energy_flags(const EnergySettings& e) {
   tx.u8("en_exp", e.show_exp ? 1 : 0);
   tx.u8("wa_on", e.water_on ? 1 : 0);
   tx.u8("wa_bus", e.water_bus);
+  return tx.commit();
+}
+
+bool settings_load_pv_on() {
+  uint8_t v = 1;
+  nvs_handle_t h;
+  if (nvs_open(kNs, NVS_READONLY, &h) == ESP_OK) {
+    nvs_get_u8(h, "pv_on", &v);
+    nvs_close(h);
+  }
+  return v != 0;
+}
+
+bool settings_save_pv_on(bool on) {
+  Tx tx;
+  tx.u8("pv_on", on ? 1 : 0);
   return tx.commit();
 }
 

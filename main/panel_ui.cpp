@@ -20,6 +20,7 @@
 #include "material_icons.h"
 #include "settings.h"
 #include "energy_task.h"
+#include "pv_task.h"
 #include "panel_hw.h"
 #include "weather_derive.h"
 #include <esp_heap_caps.h>

@@ -121,7 +121,9 @@ enum TextSetting : uint8_t {
   kTextWaPrice = 11,   // Wasser CHF/m3 (incl. Abwasser)
   kTextEnHtWin = 12,   // HT-Zeiten Mo-Fr "06:00-10:00,17:00-21:00"
   kTextEnSwitch = 13,  // Wechsel auf HT/NT ab "2027-01-01"
-  kTextSettingN = 14
+  kTextPvIp = 14,      // PV: IPv4 of the Growatt ShineLan stick (only this peer is accepted)
+  kTextPvPort = 15,    // PV: TCP port the panel listens on (5279)
+  kTextSettingN = 16
 };
 // own = true when the value came from NVS. Returns false if empty.
 bool settings_load_text(TextSetting which, char* out, size_t n, bool* own);
@@ -141,6 +143,9 @@ struct EnergySettings {
 };
 EnergySettings settings_load_energy();
 bool settings_save_energy_flags(const EnergySettings& e);  // on, poll, model, exp, water on/bus
+// PV (Growatt ShineLan, on-panel Grott server): "pv_on" (default on).
+bool settings_load_pv_on();
+bool settings_save_pv_on(bool on);
 // History (internal, excluded from backups): one blob, written at most hourly.
 bool settings_load_energy_hist(EnergyHist* h);
 bool settings_save_energy_hist(const EnergyHist& h);

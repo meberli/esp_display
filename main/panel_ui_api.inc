@@ -318,6 +318,7 @@ void ui_text_saved(bool ok, uint8_t which) {
     cal_next_ms = now_ms();  // reload the calendar
   if (ok && which == kTextPlz) meteo_next_ms = now_ms();
   if (ok && which >= kTextEnHost) energy_kick();
+  if (ok && (which == kTextPvIp || which == kTextPvPort)) pv_kick();
   if (nav == Nav::TextEdit) {
     if (ok) txt_go_back();
     else lv_label_set_text(txt_status, "Speichern fehlgeschlagen");

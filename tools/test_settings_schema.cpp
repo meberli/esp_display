@@ -38,6 +38,7 @@ int main() {
   CHECK(schema_find("cal_from") != nullptr);
   CHECK(schema_find("en_host") != nullptr && (schema_find("en_host")->flags & kKeyHost));
   CHECK(schema_find("en_hist") != nullptr && (schema_find("en_hist")->flags & kKeyInternal));
+  CHECK(schema_find("pv_ip") != nullptr && schema_find("pv_port") != nullptr && schema_find("pv_on") != nullptr);
   CHECK(schema_find("wa_bus") != nullptr && schema_find("en_switch") != nullptr);
   CHECK(str("waste_bfs", "3271"));
   CHECK(!str("waste_bfs", "327"));

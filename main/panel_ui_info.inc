@@ -717,7 +717,8 @@ const char* kTextTitle[kTextSettingN] = {"Familienkalender (iCal)", "Abfallkalen
                                          "MeteoSchweiz PLZ",        "Gemeinde (BFS-Nr.)", "Abfuhr-Zone",
                                          "whatwatt-Adresse",        "Einheitstarif (Rp./kWh)", "Hochtarif (Rp./kWh)",
                                          "Niedertarif (Rp./kWh)",   "Einspeiseverg\xC3\xBCtung (Rp./kWh)",
-                                         "Wasserpreis (CHF/m\xC2\xB3)", "HT-Zeiten Mo-Fr", "HT/NT ab Datum"};
+                                         "Wasserpreis (CHF/m\xC2\xB3)", "HT-Zeiten Mo-Fr", "HT/NT ab Datum",
+                                         "Growatt-Stick (IP)",      "PV-Port (TCP)"};
 
 // "https://calendar.google.com/…e4f825" style summary; secrets show host only.
 void url_summary(char* out, size_t n, uint8_t which, const char* v, bool own) {
@@ -810,6 +811,8 @@ void open_text(uint8_t which, Nav back) {
                                 : which == kTextEnHost ? "IP oder Name, ohne http:// (leer = keine), dann OK"
                                 : which == kTextEnHtWin ? "z.B. 06:00-10:00,17:00-21:00 (leer = Standard)"
                                 : which == kTextEnSwitch ? "Datum JJJJ-MM-TT (leer = 2027-01-01), dann OK"
+                                : which == kTextPvIp ? "IPv4 des ShineLan-Sticks (nur er wird angenommen)"
+                                : which == kTextPvPort ? "TCP-Port, Standard 5279 (leer = Standard)"
                                 : which >= kTextEnFlat ? "Preis z.B. 27.27 (leer = Standard), dann OK"
                                                      : "Neue Adresse eingeben, dann OK");
   show(txt_root);
@@ -875,7 +878,16 @@ bool txt_kb_ready(lv_obj_t* ta) {
     int32_t ymd;
     bool ok = true;
     const char* msg = "";
-    if (txt_which == kTextEnHost) {
+    if (txt_which == kTextPvIp) {
+      int a, b2, c2, d, n2 = 0;
+      ok = sscanf(v, "%d.%d.%d.%d%n", &a, &b2, &c2, &d, &n2) == 4 && v[n2] == '\0' && a >= 0 && a < 256 &&
+           b2 >= 0 && b2 < 256 && c2 >= 0 && c2 < 256 && d > 0 && d < 255;
+      msg = "IPv4-Adresse, z.B. 192.168.1.39";
+    } else if (txt_which == kTextPvPort) {
+      int port = 0, n2 = 0;
+      ok = sscanf(v, "%d%n", &port, &n2) == 1 && v[n2] == '\0' && port > 0 && port < 65536;
+      msg = "Port 1-65535";
+    } else if (txt_which == kTextEnHost) {
       for (const char* c = v; *c; ++c) ok = ok && (isalnum(static_cast<unsigned char>(*c)) || *c == '.' || *c == '-');
       msg = "Nur IP-Adresse oder Name, ohne http://";
     } else if (txt_which == kTextEnHtWin) {
