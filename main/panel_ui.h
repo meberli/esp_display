@@ -25,6 +25,7 @@ struct LoxoneStateRequest {
 };
 
 void ui_init();
+extern size_t g_ui_build_int, g_ui_build_psram;  // heap taken by building the UI (bytes)
 // Writes pending display choices to NVS now (UI task only).
 void ui_flush_settings();
 // Every touch sample (real or simulated), before LVGL sees it. Decides tap vs

@@ -1,3 +1,4 @@
+#include "esp_attr.h"
 #include "diag.h"
 
 #include <stdio.h>
@@ -7,6 +8,10 @@
 #include <atomic>
 
 #include "esp_heap_caps.h"
+#include "lwip/sockets.h"
+#include "net.h"
+#include "nvs.h"
+#include <fcntl.h>
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -31,7 +36,7 @@ volatile uint32_t inj_t0, inj_dur, inj_hold;
 
 void stats() {
 #if CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS
-  static char buf[1536];
+  EXT_RAM_BSS_ATTR static char buf[1536];
   vTaskGetRunTimeStats(buf);
   console_puts("DIAG tasks (name, abs time, % since boot):");
   console_write(buf, strlen(buf));
@@ -82,6 +87,27 @@ void stacks(bool warn_only) {
                    (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) / 1024),
                    (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024),
                    (unsigned)(heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM) / 1024));
+    // DMA-capable internal, internal minimum with the action that caused it,
+    // open sockets, NVS usage, LVGL (system heap) attribution.
+    heap_note("other");
+    int socks = 0;
+    for (int fd = LWIP_SOCKET_OFFSET; fd < LWIP_SOCKET_OFFSET + CONFIG_LWIP_MAX_SOCKETS; ++fd)
+      if (fcntl(fd, F_GETFL, 0) >= 0) socks++;
+    nvs_stats_t ns = {};
+    nvs_get_stats(nullptr, &ns);
+    size_t ns_used = 0;
+    nvs_handle_t h;
+    if (nvs_open("panel", NVS_READONLY, &h) == ESP_OK) {
+      nvs_get_used_entry_count(h, &ns_used);
+      nvs_close(h);
+    }
+    console_printf("DIAG mem dma free=%uKB block=%uKB | int min=%uB during %s | sockets=%d/%d | "
+                   "nvs used=%u free=%u total=%u ns=%u panel=%u | lvgl ui int=%uKB psram=%uKB\n",
+                   (unsigned)(heap_caps_get_free_size(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL) / 1024),
+                   (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL) / 1024),
+                   (unsigned)int_min, heap_min_label(), socks, CONFIG_LWIP_MAX_SOCKETS, (unsigned)ns.used_entries,
+                   (unsigned)ns.free_entries, (unsigned)ns.total_entries, (unsigned)ns.namespace_count,
+                   (unsigned)ns_used, (unsigned)(g_ui_build_int / 1024), (unsigned)(g_ui_build_psram / 1024));
   }
 #endif
 }

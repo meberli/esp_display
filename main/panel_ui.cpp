@@ -1,3 +1,6 @@
+#include "esp_attr.h"
+#include "esp_heap_caps.h"
+#include "net.h"
 #include "panel_ui.h"
 #include "strings_de.h"
 #include "waste_window.h"
@@ -206,7 +209,7 @@ bool wp_connecting = false;
 char wp_ssid[33] = "";
 char cur_ssid[33] = "";
 char cur_place[48] = "Buchs SG";
-SettingsRequest settings_req;
+EXT_RAM_BSS_ATTR SettingsRequest settings_req;
 bool settings_pending = false;
 
 // Kameras (implementation at the end of the namespace).
@@ -280,7 +283,7 @@ struct Named {
   char name[16];
   lv_obj_t* obj;
 };
-Named named[192];
+EXT_RAM_BSS_ATTR Named named[192];
 int named_n = 0;
 void reg(const char* name, lv_obj_t* obj) {
   for (int i = 0; i < named_n; ++i) {
@@ -321,7 +324,7 @@ lv_obj_t* message_title = nullptr;
 lv_obj_t* message_body = nullptr;
 lv_obj_t* retry_btn = nullptr;
 
-LoxoneControl controls[kLoxoneControlCap];
+EXT_RAM_BSS_ATTR LoxoneControl controls[kLoxoneControlCap];
 size_t control_count = 0;
 char server_name[48] = "";
 PagePlan pages[kMaxPages];
@@ -522,7 +525,19 @@ void ui_touch_sample(bool pressed, int x, int y) {
   }
 }
 
+// LVGL heap attribution (LV_MEM_CUSTOM: LVGL allocates from the system heap):
+// what building all screens took, internal and PSRAM (printed by DIAG mem).
+size_t g_ui_build_int = 0, g_ui_build_psram = 0;
+static void ui_init_impl();
 void ui_init() {
+  size_t i0 = heap_caps_get_free_size(MALLOC_CAP_INTERNAL), p0 = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+  ui_init_impl();
+  size_t i1 = heap_caps_get_free_size(MALLOC_CAP_INTERNAL), p1 = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+  g_ui_build_int = i0 > i1 ? i0 - i1 : 0;
+  g_ui_build_psram = p0 > p1 ? p0 - p1 : 0;
+  heap_note("ui-build");
+}
+static void ui_init_impl() {
   lv_obj_t* screen = lv_scr_act();
   lv_obj_set_style_bg_color(screen, lv_color_hex(kBgTop), 0);
   lv_obj_set_style_bg_grad_color(screen, lv_color_hex(kBgBottom), 0);

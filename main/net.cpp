@@ -1,5 +1,7 @@
+#include "esp_attr.h"
 #include "net.h"
 
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -14,6 +16,9 @@
 #include "esp_http_client.h"
 #include "esp_netif.h"
 #include "esp_wifi.h"
+#include "esp_heap_caps.h"
+#include "freertos/semphr.h"
+#include "sys.h"
 
 namespace {
 std::atomic<bool> g_connected{false};
@@ -141,8 +146,77 @@ int wifi_auth_fails() { return g_auth_fails; }
 int wifi_noap_fails() { return g_noap_fails; }
 int wifi_last_reason() { return g_last_reason; }
 
+namespace {
+SemaphoreHandle_t g_tls_mu = nullptr;
+portMUX_TYPE g_heap_mux = portMUX_INITIALIZER_UNLOCKED;
+size_t g_heap_min = SIZE_MAX;
+char g_heap_label[40] = "boot";
+}  // namespace
+
+void heap_note(const char* label) {
+  size_t m = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
+  bool dropped = false;
+  portENTER_CRITICAL(&g_heap_mux);
+  if (m < g_heap_min) {
+    dropped = g_heap_min != SIZE_MAX;
+    g_heap_min = m;
+    snprintf(g_heap_label, sizeof(g_heap_label), "%s", label);
+  }
+  portEXIT_CRITICAL(&g_heap_mux);
+  if (dropped) console_printf("HEAP: new internal minimum %u B during %s\n", (unsigned)m, label);
+}
+const char* heap_min_label() { return g_heap_label; }
+size_t heap_min_value() { return g_heap_min; }
+
+bool tls_lock(const char* label, uint32_t wait_ms) {
+  static portMUX_TYPE init_mux = portMUX_INITIALIZER_UNLOCKED;
+  portENTER_CRITICAL(&init_mux);
+  bool create = g_tls_mu == nullptr;
+  portEXIT_CRITICAL(&init_mux);
+  if (create) {
+    SemaphoreHandle_t m = xSemaphoreCreateRecursiveMutex();
+    portENTER_CRITICAL(&init_mux);
+    if (g_tls_mu == nullptr) { g_tls_mu = m; m = nullptr; }
+    portEXIT_CRITICAL(&init_mux);
+    if (m != nullptr) vSemaphoreDelete(m);
+  }
+  heap_note("other");  // a drop before this request is not ours
+  if (xSemaphoreTakeRecursive(g_tls_mu, wait_ms == 0 ? portMAX_DELAY : pdMS_TO_TICKS(wait_ms)) != pdTRUE) {
+    console_printf("TLS: %s waited %lu ms, giving up\n", label, (unsigned long)wait_ms);
+    return false;
+  }
+  return true;
+}
+
+void tls_unlock(const char* label) {
+  heap_note(label);
+  xSemaphoreGiveRecursive(g_tls_mu);
+}
+
 HttpGetResult http_get(const char* url, const char* user, const char* password, uint8_t* body, size_t cap,
                        int timeout_ms, const char* hdr_name, const char* hdr_value) {
+  // Label = host only (never the path: it may carry tokens, e.g. the iCal URL).
+  char label[40];
+  const char* h = strstr(url, "://");
+  h = h != nullptr ? h + 3 : url;
+  size_t hl = strcspn(h, "/:?");
+  snprintf(label, sizeof(label), "%.*s", static_cast<int>(hl < 39 ? hl : 39), h);
+  if (strncmp(url, "https://", 8) == 0) {
+    TlsGuard g(label);
+    if (!g.ok) {
+      HttpGetResult r = {};
+      snprintf(r.error, sizeof(r.error), "TLS busy");
+      return r;
+    }
+    return http_get_raw(url, user, password, body, cap, timeout_ms, hdr_name, hdr_value);
+  }
+  HttpGetResult r = http_get_raw(url, user, password, body, cap, timeout_ms, hdr_name, hdr_value);
+  heap_note(label);
+  return r;
+}
+
+HttpGetResult http_get_raw(const char* url, const char* user, const char* password, uint8_t* body, size_t cap,
+                           int timeout_ms, const char* hdr_name, const char* hdr_value) {
   HttpGetResult r = {};
   esp_http_client_config_t cfg = {};
   cfg.url = url;
@@ -230,7 +304,7 @@ int wifi_scan(WifiAp* out, int cap) {
   // is refused or comes back empty).
   esp_err_t err = ESP_FAIL;
   uint16_t num = 0;
-  static wifi_ap_record_t recs[32];
+  EXT_RAM_BSS_ATTR static wifi_ap_record_t recs[32];
   for (int i = 0; i < 5; ++i) {
     err = esp_wifi_scan_start(&sc, true);
     num = 32;

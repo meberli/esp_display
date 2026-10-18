@@ -1,3 +1,4 @@
+#include "esp_attr.h"
 #include <ArduinoJson.h>
 
 #include "esp_heap_caps.h"
@@ -64,7 +65,7 @@ uint32_t next_weather_ms = 0;
 // hourly time array is filtered out; hour i of day d is index d*24+i).
 // The parsed document (~15 KB) is allocated from the heap, which puts large
 // blocks in PSRAM on this board.
-static WeatherDetailDay week[kWxDays];
+EXT_RAM_BSS_ATTR static WeatherDetailDay week[kWxDays];
 // Weather location; written only by the network task (and before it starts).
 Location g_loc;
 WifiAp g_aps[kMaxAps];
@@ -308,8 +309,8 @@ bool windy_key(char* key, size_t n) {
 // the result, read by the UI task in handle_result (one request in flight).
 Board g_board;
 OtaCheck g_ota;
-Calendar g_cal;
-MeteoNow g_meteo;
+EXT_RAM_BSS_ATTR Calendar g_cal;
+EXT_RAM_BSS_ATTR MeteoNow g_meteo;
 Station g_hits[kMaxStationHits];
 
 QueueHandle_t net_q = nullptr;
@@ -320,7 +321,7 @@ QueueHandle_t res_q = nullptr;
 QueueHandle_t lox_q = nullptr;
 bool net_busy = false;
 bool lox_busy = false;
-LoxoneControl controls[kLoxoneControlCap];
+EXT_RAM_BSS_ATTR LoxoneControl controls[kLoxoneControlCap];
 
 void net_post(const NetRequest& r) {
   net_busy = true;

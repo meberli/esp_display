@@ -209,6 +209,11 @@ void ota_set_version_override(const char* v) {
 
 bool ota_check(const char* cfg_url, bool own, OtaCheck* out) {
   memset(out, 0, sizeof(*out));
+  TlsGuard tls("ota-check");
+  if (!tls.ok) {
+    snprintf(out->err, sizeof(out->err), "Netz belegt");
+    return false;
+  }
   char api[160];
   bool ok = (!own && github_api(cfg_url, api, sizeof(api))) ? check_github(api, out) : check_image(cfg_url, out);
   out->ok = ok;

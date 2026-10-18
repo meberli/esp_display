@@ -1,3 +1,4 @@
+#include "esp_attr.h"
 #include "loxone_client.h"
 
 #include <ArduinoJson.h>
@@ -310,7 +311,7 @@ LoxoneHttpResult loxone_read_state(LoxoneAuthorizer& auth, const char* action, c
   }
   value[0] = '\0';
 
-  static StaticJsonDocument<1536> doc;
+  EXT_RAM_BSS_ATTR static StaticJsonDocument<1536> doc;
   char fallback[48];
   fallback[0] = '\0';
   bool have_action = loxone_id_ok(action, 40);

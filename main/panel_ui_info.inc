@@ -13,7 +13,7 @@ constexpr uint32_t kInfoRetryMs = 120000;
 constexpr int kTrRows = 7;
 
 Station stations[kStationN];
-Board boards[kStationN];
+EXT_RAM_BSS_ATTR Board boards[kStationN];
 uint32_t tr_next_ms[kStationN] = {0, 0};
 bool tr_inflight = false;
 int tr_idx = 0;
@@ -23,7 +23,7 @@ bool cal_have = false;
 uint32_t cal_next_ms = 0;
 bool cal_inflight = false;
 
-MeteoNow meteo = {};
+EXT_RAM_BSS_ATTR MeteoNow meteo;
 bool meteo_have = false;
 uint32_t meteo_next_ms = 0;
 bool meteo_inflight = false;

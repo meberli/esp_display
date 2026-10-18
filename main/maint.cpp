@@ -11,6 +11,7 @@
 #include "esp_heap_caps.h"
 #include "esp_http_server.h"
 #include "esp_https_ota.h"
+#include "net.h"
 #include "esp_netif.h"
 #include "esp_ota_ops.h"
 #include "esp_random.h"
@@ -381,6 +382,7 @@ void maint_mark_valid() {
 int maint_ota_progress() { return g_ota_pct; }
 
 bool maint_ota_from_url(const char* url, char* err, size_t n) {
+  TlsGuard tls("ota-install", 0);  // waits for a running fetch, then holds TLS for the download
   esp_http_client_config_t http = {};
   http.url = url;
   http.timeout_ms = 20000;
