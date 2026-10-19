@@ -18,7 +18,8 @@ struct EnergyReading {
   int tariff;           // report.tariff 1/2, 0 = not reported
   bool has_water;
   double water_m3;      // volume[bus].cumulative
-  int64_t ts;           // report.date_time_utc (Unix seconds), 0 = missing
+  int64_t ts;           // report.date_time_utc (Unix seconds), 0 = missing: electricity meter time
+  int64_t water_ts;     // volume[bus].date_time (with its UTC offset), 0 = missing: M-Bus reading time
   uint32_t meter;       // hash of meter.id (meter change guard)
 };
 
@@ -81,10 +82,26 @@ constexpr int kHistHour = 2;       // a new hour started (persist)
 constexpr int kHistDay = 4;        // a new day started (persist)
 constexpr int kHistReset = 8;      // first reading / meter changed (persist)
 constexpr int kHistRejected = 16;  // counter went backwards: ignored
+constexpr int kHistLate = 32;      // a late reading corrected a finished day (persist once)
+
+// Booking by meter time: each delta goes to the local hour/day of its meter
+// timestamp (minus 1 s: a reading at 00:00:00 closes the previous interval),
+// not the panel's receive time. A delta spanning several hours is booked as a
+// whole in the hour of its timestamp (not split). Fallback to the receive time
+// when the timestamp is missing, more than kTsAheadS ahead, before 2024 or
+// older than the previous one of the same meter. Deltas for a finished day in
+// the 8-day ring are added to that day (with the tariff at that time); older
+// ones are dropped (the counter baseline still advances, nothing is counted twice).
+constexpr int64_t kTsAheadS = 120;
+struct EnergyTsState {  // runtime only (not persisted): last meter timestamps
+  int64_t last_e, last_w;
+};
 constexpr int64_t kHistGapS = 900; // longer gaps over midnight mark both days approximate
 
 void energy_hist_clear(EnergyHist* h);
-int energy_hist_update(EnergyHist* h, const EnergyReading& r, int64_t now, const Tariff& t);
+int energy_hist_update(EnergyHist* h, const EnergyReading& r, int64_t now, const Tariff& t, EnergyTsState* ts = nullptr);
+// Effective booking time for a meter timestamp (see above); updates *last.
+int64_t energy_book_time(int64_t meter_ts, int64_t now, int64_t* last);
 // Today so far.
 float energy_today_in(const EnergyHist& h);
 float energy_today_out(const EnergyHist& h);

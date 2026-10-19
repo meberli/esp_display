@@ -67,13 +67,17 @@ void task(void*) {
     // The M-Bus water value is not in every report: keep the last one meanwhile.
     static bool have_water = false;
     static double last_water = 0;
+    static int64_t last_water_ts = 0;
+    static EnergyTsState tss = {};
     if (parsed && r.ok && s.water_on) {
       if (r.has_water) {
         have_water = true;
         last_water = r.water_m3;
+        last_water_ts = r.water_ts;
       } else if (have_water) {
         r.has_water = true;
         r.water_m3 = last_water;
+        r.water_ts = last_water_ts;
       }
     }
     if (parsed && r.ok) {
@@ -83,8 +87,9 @@ void task(void*) {
         console_printf("Energie: first reading %.0f W, water %s (bus %u, %u bytes)\n", r.p_in_kw * 1000,
                        r.has_water ? "yes" : "no", s.water_bus, static_cast<unsigned>(http.length));
       }
-      int res = energy_hist_update(hist, r, now, s.tariff);
-      if (res & (kHistHour | kHistDay | kHistReset)) {
+      int res = energy_hist_update(hist, r, now, s.tariff, &tss);
+      if (res & kHistLate) console_printf("Energie: late reading booked to a finished day\n");
+      if (res & (kHistHour | kHistDay | kHistReset | kHistLate)) {
         bool ok = settings_save_energy_hist(*hist);  // at most hourly (and on the first reading / meter change)
         console_printf("Energie: history saved=%d%s\n", ok ? 1 : 0, (res & kHistDay) ? " (new day)" : "");
       }

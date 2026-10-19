@@ -240,6 +240,8 @@ Die normale Firmware hat zusÃ¤tzlich Diagnosebefehle auf der Konsole: `DIAGTAP
 
 Das Panel fragt `http://<Adresse>/api/v1/report` des whatwatt Go im LAN ab (Einstellungen â†’ Energie, Standard alle 10 s; eigener Task auf Core 0 mit tieferer PrioritÃ¤t als Netz- und Loxone-Task). Daten Ã¤lter als 60 s gelten als veraltet. Das GerÃ¤t speichert keinen Verlauf: das Panel bildet Heute (stÃ¼ndlich) und die letzten 8 Tage aus ZÃ¤hlerstÃ¤nden selbst (NVS-Blob `en_hist`, hÃ¶chstens stÃ¼ndlich geschrieben, nicht im Backup). RÃ¼ckwÃ¤rts laufende ZÃ¤hler werden ignoriert, ein ZÃ¤hlerwechsel startet eine neue Basis; unvollstÃ¤ndige Tage (Start mitten am Tag, LÃ¼cke Ã¼ber Mitternacht) sind mit `*` / `~` markiert. Tarif: bis 31.12.2026 Einheitstarif 27.27 Rp./kWh, ab 1.1.2027 automatisch HT 30.00 / NT 25.67 Rp. (HT Moâ€“Fr 06â€“10 und 17â€“21 Uhr), Einspeisung 10.04 Rp. inkl. HKN, Wasser 2.44 CHF/mÂ³ inkl. Abwasser (EW Buchs, inkl. MWST, ohne GrundgebÃ¼hren) â€“ alles einstellbar. Kosten werden je Messung mit dem Preis des Zeitfensters (HT/NT) gerechnet. Ein Web-UI-Passwort des whatwatt (HTTP Digest) wird nicht unterstÃ¼tzt.
 
+- Zuordnung nach Zählerzeit: jede Differenz wird der lokalen Stunde/dem Tag des Zeitstempels des Zählers zugeordnet (Strom `report.date_time_utc`, Wasser `volume[].date_time`), nicht der Empfangszeit; späte Werte nach Mitternacht korrigieren den Vortag. Fallback Empfangszeit bei fehlendem/zukünftigem (>2 min)/rückwärts laufendem Zeitstempel.
+
 ## Datenquellen, Attribution & Nutzungsbedingungen
 
 - **Open-Meteo** â€“ Wetter und Geocoding, <https://open-meteo.com>, Daten unter CC BY 4.0. Nicht-kommerzielle Nutzung ohne Key.

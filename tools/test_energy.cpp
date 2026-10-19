@@ -171,8 +171,97 @@ static void test_hist() {
   CHECK((r & kHistDay) && NEAR(h4.days[0].in_kwh, 2, 1e-6), "DST end day closed once (until the last reading)");
 }
 
+static EnergyReading rdt(double in, double water, int64_t ts, int64_t wts) {
+  EnergyReading r = rd(in, 0, water);
+  r.ts = ts;
+  r.water_ts = wts;
+  return r;
+}
+
+static void test_meter_time() {
+  Tariff t;
+  tariff_defaults(&t);
+  // Offsets / Z parsing via a minimal report
+  const char* js = "{\"report\":{\"date_time_utc\":\"2026-10-19T06:37:30Z\",\"energy\":{\"active\":{\"positive\":{\"total\":5}}},"
+                   "\"volume\":[{\"bus\":2,\"date_time\":\"2026-10-19T08:30:00+02:00\",\"cumulative\":1400.158}]},"
+                   "\"meter\":{\"status\":\"OK\",\"id\":\"x\"}}";
+  EnergyReading pr;
+  CHECK(energy_parse_report(js, strlen(js), 2, &pr), "parse with timestamps");
+  CHECK(pr.ts == 1792391850 && pr.water_ts == 1792391400, "utc Z and +02:00 offset parsed");
+
+  // 1) Late water reading after midnight lands on the previous day; today excludes it.
+  EnergyHist h;
+  energy_hist_clear(&h);
+  EnergyTsState ts = {};
+  energy_hist_update(&h, rdt(100, 10.000, at(2026, 10, 18, 0, 5), at(2026, 10, 18, 0, 0)), at(2026, 10, 18, 0, 5), t, &ts);
+  energy_hist_update(&h, rdt(110, 10.500, at(2026, 10, 18, 23, 59), at(2026, 10, 18, 23, 30)), at(2026, 10, 18, 23, 59), t, &ts);
+  // 00:02: panel rolls over; the water reading (240 L) is stamped 00:00:00 = end of yesterday
+  int r = energy_hist_update(&h, rdt(110.1, 10.740, at(2026, 10, 19, 0, 1), at(2026, 10, 19, 0, 0)), at(2026, 10, 19, 0, 2), t, &ts);
+  CHECK((r & kHistDay) && (r & kHistLate), "rollover + late correction flagged");
+  CHECK(h.days[0].ymd == 20261018 && NEAR(h.days[0].water_l, 740, 1e-3), "240 L added to 18.10 (500 + 240)");
+  CHECK(NEAR(energy_today_water_l(h), 0, 1e-3) && NEAR(h.h_water[0], 0, 1e-6), "today has no water yet");
+  CHECK(NEAR(h.days[0].in_kwh, 10, 1e-4) && NEAR(energy_today_in(h), 0.1, 1e-4) && NEAR(h.h_in[0], 0.1, 1e-4),
+        "electricity at 00:01 meter time stays today");
+  // Next water reading 01:00 -> today hour 0 (reading at 01:00:00 closes hour 0)
+  r = energy_hist_update(&h, rdt(110.2, 10.800, at(2026, 10, 19, 1, 5), at(2026, 10, 19, 1, 0)), at(2026, 10, 19, 1, 5), t, &ts);
+  CHECK(NEAR(h.h_water[0], 60, 1e-3) && NEAR(energy_today_water_l(h), 60, 1e-3) && !(r & kHistLate), "hour 0 water, no late flag");
+  float sum = 0;
+  for (float x : h.h_water) sum += x;
+  CHECK(NEAR(sum, energy_today_water_l(h), 1e-3), "hour bars = today (no double counting)");
+  // Late electricity at 23:59:58 meter time after rollover adds cost to yesterday at that time's tariff
+  EnergyHist e;
+  energy_hist_clear(&e);
+  EnergyTsState es = {};
+  energy_hist_update(&e, rdt(0, -1, at(2026, 10, 18, 0, 0), 0), at(2026, 10, 18, 0, 0), t, &es);
+  energy_hist_update(&e, rdt(1, -1, at(2026, 10, 18, 23, 59), 0), at(2026, 10, 18, 23, 59), t, &es);
+  r = energy_hist_update(&e, rdt(2, -1, at(2026, 10, 18, 23, 59) + 58, 0), at(2026, 10, 19, 0, 0) + 3, t, &es);
+  CHECK((r & kHistLate) && NEAR(e.days[0].in_kwh, 2, 1e-4) && NEAR(e.days[0].cost_chf, 2 * 0.2727, 1e-4) &&
+            NEAR(energy_today_in(e), 0, 1e-4), "late kWh + cost on yesterday");
+
+  // 2) Fallbacks: missing, future, pre-2024, backwards -> receive time
+  int64_t last = 0;
+  const int64_t now = at(2026, 10, 19, 10, 0);
+  CHECK(energy_book_time(0, now, &last) == now, "missing -> now");
+  CHECK(energy_book_time(now + 121, now, &last) == now && energy_book_time(now + 119, now, &last) == now + 119, "future > 2 min -> now");
+  CHECK(energy_book_time(at(2023, 6, 1, 0, 0), now, &last) == now, "pre-2024 -> now");
+  CHECK(energy_book_time(now - 600, now, &last) == now, "backwards vs last -> now");
+  last = now - 900;
+  CHECK(energy_book_time(now - 300, now, &last) == now - 300 && last == now - 300, "monotonic accepted");
+  // Water stamped far in the future at runtime -> booked now (hour 10)
+  EnergyHist f;
+  energy_hist_clear(&f);
+  EnergyTsState fs = {};
+  energy_hist_update(&f, rdt(0, 1.0, 0, 0), at(2026, 10, 19, 0, 0), t, &fs);
+  energy_hist_update(&f, rdt(0, 1.1, 0, at(2027, 1, 1, 0, 0)), now, t, &fs);
+  CHECK(NEAR(f.h_water[10], 100, 1e-3), "future water stamp -> receive hour");
+  // Older than the ring: dropped, baseline advanced, no double count
+  energy_hist_update(&f, rdt(0, 1.2, 0, at(2026, 10, 1, 12, 0)), now + 60, t, &fs);
+  CHECK(NEAR(energy_today_water_l(f), 100, 1e-3), "too old: dropped, today unchanged");
+  // Past hour of today
+  energy_hist_update(&f, rdt(0, 1.25, 0, at(2026, 10, 19, 7, 30)), now + 120, t, &fs);
+  CHECK(NEAR(f.h_water[7], 50, 1e-3) && NEAR(energy_today_water_l(f), 150, 1e-3), "past hour of today");
+
+  // 3) DST: autumn 2026-10-25 03:00 CEST -> 02:00 CET; spring 2027-03-28 02:00 -> 03:00.
+  EnergyHist d;
+  energy_hist_clear(&d);
+  EnergyTsState ds = {};
+  const int64_t a0 = 1792879200;  // 2026-10-25T00:00:00+02:00 (22:00Z)
+  energy_hist_update(&d, rdt(0, 0, a0 + 60, a0 + 60), a0 + 60, t, &ds);
+  energy_hist_update(&d, rdt(0, 0.010, 0, a0 + 2 * 3600 + 1800), a0 + 3 * 3600, t, &ds);  // 02:30 CEST
+  energy_hist_update(&d, rdt(0, 0.030, 0, a0 + 3 * 3600 + 1800), a0 + 4 * 3600, t, &ds);  // 02:30 CET
+  CHECK(NEAR(d.h_water[2], 30, 1e-3) && NEAR(energy_today_water_l(d), 30, 1e-3), "autumn: both 02:xx in hour 2");
+  EnergyHist s;
+  energy_hist_clear(&s);
+  EnergyTsState ss = {};
+  const int64_t b0 = 1806188400;  // 2027-03-28T00:00:00+01:00 (23:00Z prev day)
+  energy_hist_update(&s, rdt(0, 0, b0 + 60, b0 + 60), b0 + 60, t, &ss);
+  energy_hist_update(&s, rdt(0, 0.020, 0, b0 + 2 * 3600 + 600), b0 + 3 * 3600, t, &ss);  // 03:10 CEST
+  CHECK(NEAR(s.h_water[3], 20, 1e-3) && NEAR(s.h_water[2], 0, 1e-6), "spring: 01:00Z+10min is 03:10 local");
+}
+
 int main() {
   test_parse();
+  test_meter_time();
   test_tariff();
   test_hist();
   printf("%s (%d failures)\n", fails ? "FAILED" : "OK", fails);

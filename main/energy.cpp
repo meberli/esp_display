@@ -26,11 +26,19 @@ int64_t days_from_civil(int y, unsigned m, unsigned d) {
   return static_cast<int64_t>(era) * 146097 + static_cast<int64_t>(doe) - 719468;
 }
 
-// "2026-10-17T17:30:10Z" -> Unix seconds (UTC), 0 if malformed.
+// "2026-10-17T17:30:10Z" / "...+02:00" / "...-05:30" -> Unix seconds (UTC),
+// 0 if malformed. No suffix = UTC.
 int64_t parse_utc(const char* s) {
-  int y, mo, d, h, mi, se;
-  if (s == nullptr || sscanf(s, "%4d-%2d-%2dT%2d:%2d:%2d", &y, &mo, &d, &h, &mi, &se) != 6) return 0;
-  return days_from_civil(y, mo, d) * 86400 + h * 3600 + mi * 60 + se;
+  int y, mo, d, h, mi, se, n = 0;
+  if (s == nullptr || sscanf(s, "%4d-%2d-%2dT%2d:%2d:%2d%n", &y, &mo, &d, &h, &mi, &se, &n) != 6) return 0;
+  int64_t t = days_from_civil(y, mo, d) * 86400 + h * 3600 + mi * 60 + se;
+  const char* z = s + n;
+  if (*z == '.') while (*++z >= '0' && *z <= '9') {}
+  if (*z == '+' || *z == '-') {
+    int oh = 0, om = 0;
+    if (sscanf(z + 1, "%2d:%2d", &oh, &om) >= 1) t -= (*z == '+' ? 1 : -1) * (oh * 3600 + om * 60);
+  }
+  return t;
 }
 
 void local(int64_t t, struct tm* lt) {
@@ -92,6 +100,7 @@ bool energy_parse_report(const char* json, size_t len, int water_bus, EnergyRead
       if (c >= 0) {
         out->has_water = true;
         out->water_m3 = c;
+        out->water_ts = parse_utc(v["date_time"] | "");
       }
     }
   }
@@ -230,7 +239,61 @@ float energy_today_water_l(const EnergyHist& h) {
   return h.have_water ? static_cast<float>((h.last_water - h.day_water) * 1000.0) : 0;
 }
 
-int energy_hist_update(EnergyHist* h, const EnergyReading& r, int64_t now, const Tariff& t) {
+int64_t energy_book_time(int64_t ts, int64_t now, int64_t* last) {
+  constexpr int64_t k2024 = 1704067200;  // 2024-01-01T00:00:00Z
+  if (ts <= 0 || ts < k2024 || ts > now + kTsAheadS || (last != nullptr && ts < *last)) return now;
+  if (last != nullptr) *last = ts;
+  return ts;
+}
+
+namespace {
+enum Kind { kIn, kOut, kWater };
+
+// Book one delta (kWh or litres) at meter time `at` (effective, see header).
+// Returns kHistLate if a finished day was corrected.
+int book(EnergyHist* h, Kind k, double d, int64_t at, int64_t now, const Tariff& t) {
+  if (d == 0) return 0;
+  struct tm lt;
+  const int64_t slot = at == now ? now : at - 1;  // a meter reading at hh:00:00 closes the previous hour
+  local(slot, &lt);
+  const int32_t ymd = ymd_of(lt);
+  struct tm ln;
+  local(now, &ln);
+  int hour = lt.tm_hour;
+  if (ymd >= h->ymd) {  // today (or a little ahead): never later than the current hour
+    int64_t price_at = slot;
+    if (ymd > h->ymd || hour > ln.tm_hour) {
+      hour = ln.tm_hour;
+      price_at = now;
+    }
+    float* bars = k == kIn ? h->h_in : k == kOut ? h->h_out : h->h_water;
+    bars[hour] += static_cast<float>(d);
+    if (k == kIn) h->cost += static_cast<float>(d * tariff_price(t, price_at) / 10000.0);
+    if (k == kOut) h->credit += static_cast<float>(d * t.feed / 10000.0);
+    return 0;
+  }
+  // An earlier day: it is no longer part of today's counter span.
+  double& base = k == kIn ? h->day_in : k == kOut ? h->day_out : h->day_water;
+  base += k == kWater ? d / 1000.0 : d;
+  for (int i = 0; i < kEnergyDays; ++i) {
+    EnergyDay& day = h->days[i];
+    if (day.ymd != ymd) continue;
+    if (k == kIn) {
+      day.in_kwh += static_cast<float>(d);
+      day.cost_chf += static_cast<float>(d * tariff_price(t, slot) / 10000.0);
+    } else if (k == kOut) {
+      day.out_kwh += static_cast<float>(d);
+      day.credit_chf += static_cast<float>(d * t.feed / 10000.0);
+    } else {
+      day.water_l += static_cast<float>(d);
+    }
+    return kHistLate;
+  }
+  return 0;  // older than the ring: dropped
+}
+}  // namespace
+
+int energy_hist_update(EnergyHist* h, const EnergyReading& r, int64_t now, const Tariff& t, EnergyTsState* tss) {
   if (!r.ok) return 0;
   struct tm lt;
   local(now, &lt);
@@ -291,10 +354,9 @@ int energy_hist_update(EnergyHist* h, const EnergyReading& r, int64_t now, const
   }
   const double din = r.e_in - h->last_in;
   const double dout = r.e_out - h->last_out;
-  h->h_in[hour] += static_cast<float>(din);
-  h->h_out[hour] += static_cast<float>(dout);
-  h->cost += static_cast<float>(din * tariff_price(t, now) / 10000.0);
-  h->credit += static_cast<float>(dout * t.feed / 10000.0);
+  const int64_t at_e = energy_book_time(r.ts, now, tss != nullptr ? &tss->last_e : nullptr);
+  res |= book(h, kIn, din, at_e, now, t);
+  res |= book(h, kOut, dout, at_e, now, t);
   h->last_in = r.e_in;
   h->last_out = r.e_out;
   if (r.has_water) {
@@ -303,7 +365,8 @@ int energy_hist_update(EnergyHist* h, const EnergyReading& r, int64_t now, const
       h->day_water = r.water_m3;
       h->flags |= kDayWaterApprox;
     } else {
-      h->h_water[hour] += static_cast<float>((r.water_m3 - h->last_water) * 1000.0);
+      const int64_t at_w = energy_book_time(r.water_ts, now, tss != nullptr ? &tss->last_w : nullptr);
+      res |= book(h, kWater, (r.water_m3 - h->last_water) * 1000.0, at_w, now, t);
     }
     h->last_water = r.water_m3;
   }
