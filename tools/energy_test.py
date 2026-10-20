@@ -51,6 +51,7 @@ def main():
     pin = float(e.get("p_in", "-1"))
     check(0 <= pin < 30000, f"import power plausible ({pin:.0f} W)")
     check(float(e.get("water_l", "-1")) >= 0, "water today >= 0")
+    check("water_y" in e, "yesterday water reported (" + e.get("water_y", "?") + " L)")
     check(e.get("slot") == "0", "2026: flat tariff slot")
     # Pages
     home(p); time.sleep(1.5)

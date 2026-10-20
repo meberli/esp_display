@@ -84,6 +84,8 @@ constexpr int kHistReset = 8;      // first reading / meter changed (persist)
 constexpr int kHistRejected = 16;  // counter went backwards: ignored
 constexpr int kHistLate = 32;      // a late reading corrected a finished day (persist once)
 
+// Water is different: every increase goes to the previous local day (see
+// book_water in energy.cpp); only electricity uses the meter time below.
 // Booking by meter time: each delta goes to the local hour/day of its meter
 // timestamp (minus 1 s: a reading at 00:00:00 closes the previous interval),
 // not the panel's receive time. A delta spanning several hours is booked as a
@@ -99,6 +101,10 @@ struct EnergyTsState {  // runtime only (not persisted): last meter timestamps
 constexpr int64_t kHistGapS = 900; // longer gaps over midnight mark both days approximate
 
 void energy_hist_clear(EnergyHist* h);
+// Day before ymd (YYYYMMDD).
+int32_t energy_prev_ymd(int32_t ymd);
+// Water of the previous local day (the meter reports once a day), < 0 if unknown; *flags = that day's flags.
+float energy_yesterday_water_l(const EnergyHist& h, uint8_t* flags = nullptr);
 int energy_hist_update(EnergyHist* h, const EnergyReading& r, int64_t now, const Tariff& t, EnergyTsState* ts = nullptr);
 // Effective booking time for a meter timestamp (see above); updates *last.
 int64_t energy_book_time(int64_t meter_ts, int64_t now, int64_t* last);

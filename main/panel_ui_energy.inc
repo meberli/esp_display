@@ -27,7 +27,7 @@ lv_obj_t* ew_big = nullptr;
 lv_obj_t* ew_meter = nullptr;
 lv_obj_t* ew_val[3] = {};
 lv_obj_t* ew_price = nullptr;
-lv_obj_t* ew_h[24] = {};
+lv_obj_t* ew_hint = nullptr;
 lv_obj_t* ew_wk_tot = nullptr;
 lv_obj_t* ew_d[7] = {};
 lv_obj_t* ew_dval[7] = {};
@@ -175,12 +175,12 @@ void build_energy_screens(lv_obj_t* screen) {
   lv_obj_set_pos(ic, 22, 19);
   en_build_status(r, &ew_status);
   c = en_card(r, 56, 206);
-  en_lbl(c, &font_inter_14, kTextDim, 18, 14, "Wasser heute");
+  en_lbl(c, &font_inter_14, kTextDim, 18, 14, "Wasser gestern");
   ew_big = en_lbl(c, &font_inter_light_40, kText, 16, 36, "-");
   en_lbl(c, &font_inter_20, kTextDim, 0, 0, "Liter");
   ew_meter = en_lbl(c, &font_inter_14, kTextDim, 18, 94, "");
   make_bar(c, 228, 14, 1, 106, kBorder, LV_OPA_COVER);
-  const char* wn[3] = {"Gestern", "\xC3\x98 7 Tage", "Kosten heute"};
+  const char* wn[3] = {"Kosten gestern", "\xC3\x98 7 Tage", "Vorgestern"};
   for (int i = 0; i < 3; ++i) {
     en_lbl(c, &font_inter_14, kTextDim, 244, 14 + i * 30, wn[i]);
     ew_val[i] = make_label(c, &font_inter_sb16, lv_color_hex(i == 2 ? kText : kAccent));
@@ -191,9 +191,11 @@ void build_energy_screens(lv_obj_t* screen) {
   ew_price = en_lbl(c, &font_inter_14, kTextDim, 244, 102, "");
   lv_obj_set_width(ew_price, 184);
   lv_label_set_long_mode(ew_price, LV_LABEL_LONG_DOT);
-  for (int h = 0; h < 24; ++h) ew_h[h] = en_rect(c, 22 + h * 16, kEsBase + kEsDown - 1, 11, 1, kAccent);
-  make_bar(c, 18, kEsBase + kEsDown, 396, 1, kBorder, LV_OPA_COVER);
-  for (int h = 0; h <= 24; h += 6) en_lbl(c, &font_inter_14, kTextDim, h == 24 ? 386 : 18 + h * 16, kEsBase + kEsDown + 6, h == 24 ? "24" : h == 0 ? "0" : h == 6 ? "6" : h == 12 ? "12" : "18");
+  // No hourly bars: the water meter reports its total once a day.
+  make_bar(c, 18, 132, 396, 1, kBorder, LV_OPA_COVER);
+  ew_hint = en_lbl(c, &font_inter_14, kTextDim, 18, 144,
+                   "Der Wasserz\xC3\xA4hler meldet einmal t\xC3\xA4glich.\nDer Verbrauch z\xC3\xA4hlt jeweils f\xC3\xBCr den Vortag.");
+  lv_obj_set_width(ew_hint, 396);
   c = en_card(r, 272, 172);
   en_lbl(c, &font_inter_sb16, kText, 18, 12, "Letzte 7 Tage");
   ew_wk_tot = en_lbl(c, &font_inter_14, kTextDim, 154, 14, "");
@@ -337,9 +339,10 @@ void energy_refresh_wasser() {
   const EnergyHist& h = v.h;
   char b[48];
   en_status_text(ew_status);
-  const bool have = v.water_on && h.have_water;
-  const float today = energy_today_water_l(h);
-  if (have) lv_label_set_text_fmt(ew_big, "%d", static_cast<int>(today + 0.5f));
+  uint8_t yfl = 0;
+  const float yest = v.water_on ? energy_yesterday_water_l(h, &yfl) : -1;
+  const bool have = yest >= 0;
+  if (have) lv_label_set_text_fmt(ew_big, "%s%d", (yfl & kDayWaterApprox) ? "~" : "", static_cast<int>(yest + 0.5f));
   else lv_label_set_text(ew_big, "-");
   lv_obj_t* unit = lv_obj_get_child(lv_obj_get_parent(ew_big), 2);
   lv_obj_align_to(unit, ew_big, LV_ALIGN_OUT_RIGHT_BOTTOM, 6, -7);
@@ -351,46 +354,37 @@ void energy_refresh_wasser() {
   } else {
     lv_label_set_text(ew_meter, "kein Wasserz\xC3\xA4hler gemeldet");
   }
+  // 7 finished days, yesterday rightmost (days[0]).
   float d[7], tot = 0, dmax = 50;
   int32_t ymd[7];
   uint8_t fl[7];
   int n7 = 0;
+  float sum = 0;
   for (int i = 0; i < 7; ++i) {
-    if (i == 6) {
-      d[i] = have ? today : 0;
-      ymd[i] = have ? h.ymd : 0;
-      fl[i] = h.flags;
-    } else {
-      const EnergyDay& e = h.days[5 - i];
-      d[i] = e.ymd ? e.water_l : 0;
-      ymd[i] = e.ymd;
-      fl[i] = e.flags;
-      if (e.ymd && !(e.flags & kDayWaterApprox)) ++n7;
+    const EnergyDay& e = h.days[6 - i];
+    d[i] = (v.water_on && e.ymd) ? e.water_l : 0;
+    ymd[i] = e.ymd;
+    fl[i] = e.flags;
+    if (e.ymd && !(e.flags & kDayWaterApprox)) {
+      ++n7;
+      sum += e.water_l;
     }
     tot += d[i];
     if (d[i] > dmax) dmax = d[i];
   }
-  const EnergyDay& y = h.days[0];
-  if (y.ymd) snprintf(b, sizeof(b), "%s%.0f L", (y.flags & kDayWaterApprox) ? "~" : "", y.water_l);
+  if (have) snprintf(b, sizeof(b), "CHF %.2f", yest / 1000.0f * v.tariff.water / 100.0f);
   else snprintf(b, sizeof(b), "-");
   lv_label_set_text(ew_val[0], b);
-  float sum6 = 0;
-  for (int i = 0; i < 6; ++i)
-    if (h.days[i].ymd && !(h.days[i].flags & kDayWaterApprox)) sum6 += h.days[i].water_l;
-  if (n7 > 0) snprintf(b, sizeof(b), "%.0f L", sum6 / n7);
+  if (n7 > 0) snprintf(b, sizeof(b), "%.0f L", sum / n7);
   else snprintf(b, sizeof(b), "-");
   lv_label_set_text(ew_val[1], b);
-  if (have) snprintf(b, sizeof(b), "CHF %.2f", today / 1000.0f * v.tariff.water / 100.0f);
+  const EnergyDay& y2 = h.days[1];
+  if (v.water_on && y2.ymd) snprintf(b, sizeof(b), "%s%.0f L", (y2.flags & kDayWaterApprox) ? "~" : "", y2.water_l);
   else snprintf(b, sizeof(b), "-");
   lv_label_set_text(ew_val[2], b);
   char p[12];
   energy_format_price(p, sizeof(p), v.tariff.water);
   lv_label_set_text_fmt(ew_price, "%s CHF/m\xC2\xB3 mit Abwasser", p);
-  float hm = 20;
-  for (int i = 0; i < 24; ++i)
-    if (h.h_water[i] > hm) hm = h.h_water[i];
-  for (int i = 0; i < 24; ++i)
-    en_set_bar(ew_h[i], kEsBase + kEsDown, have ? static_cast<int>(h.h_water[i] / hm * (kEsUp + kEsDown) + 0.5f) : 0, true);
   for (int i = 0; i < 7; ++i) {
     int bh = static_cast<int>(d[i] / dmax * (kDayH - 22) + 0.5f);
     en_set_bar(ew_d[i], kDayBase + 18, bh, true);
@@ -398,10 +392,11 @@ void energy_refresh_wasser() {
     else b[0] = '\0';
     lv_label_set_text(ew_dval[i], b);
     lv_obj_set_y(ew_dval[i], kDayBase + 18 - bh - 19);
-    lv_label_set_text_fmt(ew_dlbl[i], "%s%s", i == 6 ? "Heute" : en_wday(ymd[i]),
+    const bool yday = i == 6 && ymd[i] && ymd[i] == energy_prev_ymd(h.ymd);
+    lv_label_set_text_fmt(ew_dlbl[i], "%s%s", yday ? "Gestern" : en_wday(ymd[i]),
                           (fl[i] & kDayWaterApprox) && ymd[i] ? "*" : "");
-    lv_obj_set_x(ew_dlbl[i], i == 6 ? 30 + i * 56 - 6 : 30 + i * 56 + 8);
-    lv_obj_set_style_text_color(ew_dlbl[i], lv_color_hex(i == 6 ? kText : kTextDim), 0);
+    lv_obj_set_x(ew_dlbl[i], yday ? 30 + i * 56 - 10 : 30 + i * 56 + 8);
+    lv_obj_set_style_text_color(ew_dlbl[i], lv_color_hex(yday ? kText : kTextDim), 0);
   }
   snprintf(b, sizeof(b), "%.2f m\xC2\xB3 \xC2\xB7 CHF %.2f", tot / 1000.0f, tot / 1000.0f * v.tariff.water / 100.0f);
   lv_label_set_text(ew_wk_tot, b);
@@ -418,13 +413,32 @@ void energy_chip_refresh() {
     lv_label_set_text(chip_en_main, "einrichten");
     return;
   }
-  char w[16] = "- W", l[16] = "";
+  char w[16] = "- W";
   if (v.have && !v.stale) {
     float net = (v.r.p_in_kw - v.r.p_out_kw) * 1000.0f;
     snprintf(w, sizeof(w), "%d W", static_cast<int>(net < 0 ? net - 0.5f : net + 0.5f));
   }
-  if (v.water_on && v.h.have_water) snprintf(l, sizeof(l), " \xC2\xB7 %d L", static_cast<int>(energy_today_water_l(v.h) + 0.5f));
-  lv_label_set_text_fmt(chip_en_main, "%s%s", w, l);
+  lv_label_set_text(chip_en_main, w);
+  // Second line: yesterday's water (the meter reports once a day); longest form that fits.
+  if (chip_en_sub != nullptr) {
+    const float yl = v.water_on ? energy_yesterday_water_l(v.h) : -1;
+    if (yl < 0) {
+      lv_label_set_text(chip_en_sub, "");
+    } else {
+      const int L = static_cast<int>(yl + 0.5f);
+      char t[3][32];
+      snprintf(t[0], sizeof(t[0]), "Wasser gestern: %d L", L);
+      snprintf(t[1], sizeof(t[1]), "Wasser gest. %d L", L);
+      snprintf(t[2], sizeof(t[2]), "gestern %d L", L);
+      int pick = 2;
+      for (int k = 0; k < 2; ++k) {
+        lv_point_t sz;
+        lv_txt_get_size(&sz, t[k], &font_inter_14, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+        if (sz.x <= lv_obj_get_width(chip_en_sub)) { pick = k; break; }
+      }
+      lv_label_set_text(chip_en_sub, t[pick]);
+    }
+  }
 }
 
 void energy_refresh() {

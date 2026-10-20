@@ -151,7 +151,7 @@ void handle(char* cmd) {
                    v.enabled, v.have, v.stale, v.http_status, v.r.p_in_kw * 1000, v.r.p_out_kw * 1000,
                    energy_today_in(v.h), energy_today_out(v.h), energy_today_water_l(v.h), v.h.cost, v.h.credit,
                    (int)tariff_slot(v.tariff, time(nullptr)), (long)v.h.days[0].ymd, (long)v.h.days[1].ymd, v.h.flags,
-                   v.r.has_water, v.h.have_water, v.r.water_m3, v.error);
+                   v.r.has_water, v.h.have_water, v.r.water_m3, energy_yesterday_water_l(v.h), v.error);
   } else if (strcmp(cmd, "PV") == 0) {
     static PvView v;
     pv_get(&v);

@@ -241,6 +241,7 @@ int en_page = 0;
 lv_obj_t* enset_root = nullptr;
 lv_obj_t* chip_en_top = nullptr;
 lv_obj_t* chip_en_main = nullptr;
+lv_obj_t* chip_en_sub = nullptr;  // energy tile: "Wasser gestern: N L"
 void energy_swipe(int dir);
 void energy_enter(int page);
 void energy_refresh();

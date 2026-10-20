@@ -46,6 +46,21 @@ void local(int64_t t, struct tm* lt) {
   localtime_r(&tt, lt);
 }
 
+int32_t prev_ymd(int32_t ymd) {
+  int64_t n = days_from_civil(ymd / 10000, (ymd / 100) % 100, ymd % 100) - 1;
+  // civil_from_days (H. Hinnant)
+  n += 719468;
+  const int64_t era = (n >= 0 ? n : n - 146096) / 146097;
+  const unsigned doe = static_cast<unsigned>(n - era * 146097);
+  const unsigned yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+  const unsigned doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+  const unsigned mp = (5 * doy + 2) / 153;
+  const unsigned dd = doy - (153 * mp + 2) / 5 + 1;
+  const unsigned mm = mp < 10 ? mp + 3 : mp - 9;
+  const int64_t yy = static_cast<int64_t>(yoe) + era * 400 + (mm <= 2);
+  return static_cast<int32_t>(yy * 10000 + mm * 100 + dd);
+}
+
 int32_t ymd_of(const struct tm& lt) { return (lt.tm_year + 1900) * 10000 + (lt.tm_mon + 1) * 100 + lt.tm_mday; }
 
 double num(JsonVariantConst v, double dflt) { return v.is<double>() || v.is<long>() ? v.as<double>() : dflt; }
@@ -233,6 +248,13 @@ void energy_hist_clear(EnergyHist* h) {
   h->hour = -1;
 }
 
+int32_t energy_prev_ymd(int32_t ymd) { return prev_ymd(ymd); }
+float energy_yesterday_water_l(const EnergyHist& h, uint8_t* flags) {
+  if (!h.have_water || h.days[0].ymd != prev_ymd(h.ymd)) return -1;
+  if (flags != nullptr) *flags = h.days[0].flags;
+  return h.days[0].water_l;
+}
+
 float energy_today_in(const EnergyHist& h) { return h.have ? static_cast<float>(h.last_in - h.day_in) : 0; }
 float energy_today_out(const EnergyHist& h) { return h.have ? static_cast<float>(h.last_out - h.day_out) : 0; }
 float energy_today_water_l(const EnergyHist& h) {
@@ -251,6 +273,29 @@ enum Kind { kIn, kOut, kWater };
 
 // Book one delta (kWh or litres) at meter time `at` (effective, see header).
 // Returns kHistLate if a finished day was corrected.
+
+// Water (bus 2) reports its total once a day around midnight, and reads can be
+// missed: every increase is credited to the local day before the day it is
+// detected on (today's water stays 0). A missing yesterday entry is created.
+int book_water(EnergyHist* h, double litres) {
+  if (litres == 0) return 0;
+  h->day_water += litres / 1000.0;
+  const int32_t y = prev_ymd(h->ymd);
+  for (int i = 0; i < kEnergyDays; ++i)
+    if (h->days[i].ymd == y) {
+      h->days[i].water_l += static_cast<float>(litres);
+      return kHistLate;
+    }
+  if (h->days[0].ymd > y) return 0;  // cannot happen (ring is newest first)
+  memmove(&h->days[1], &h->days[0], sizeof(EnergyDay) * (kEnergyDays - 1));
+  EnergyDay e = {};
+  e.ymd = y;
+  e.water_l = static_cast<float>(litres);
+  e.flags = kDayApprox;  // the panel did not record electricity for that day
+  h->days[0] = e;
+  return kHistLate;
+}
+
 int book(EnergyHist* h, Kind k, double d, int64_t at, int64_t now, const Tariff& t) {
   if (d == 0) return 0;
   struct tm lt;
@@ -365,8 +410,7 @@ int energy_hist_update(EnergyHist* h, const EnergyReading& r, int64_t now, const
       h->day_water = r.water_m3;
       h->flags |= kDayWaterApprox;
     } else {
-      const int64_t at_w = energy_book_time(r.water_ts, now, tss != nullptr ? &tss->last_w : nullptr);
-      res |= book(h, kWater, (r.water_m3 - h->last_water) * 1000.0, at_w, now, t);
+      res |= book_water(h, (r.water_m3 - h->last_water) * 1000.0);
     }
     h->last_water = r.water_m3;
   }

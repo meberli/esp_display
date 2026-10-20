@@ -609,7 +609,12 @@ void build_home_info(lv_obj_t* weather_card) {
   make_chip(home_root, 24, 0, "home:oev", kAccent, ICON_TRAIN, &chip_tr_icon, &chip_tr_top, &chip_tr_main);
   make_chip(home_root, 172, 1, "home:cal", kPurple, ICON_EVENT, &chip_cal_icon, &chip_cal_top, &chip_cal_main);
   lv_obj_t* en_icon = nullptr;
-  make_chip(home_root, 320, 3, "home:energy", kAmber, ICON_BOLT, &en_icon, &chip_en_top, &chip_en_main);
+  lv_obj_t* en_tile = make_chip(home_root, 320, 3, "home:energy", kAmber, ICON_BOLT, &en_icon, &chip_en_top, &chip_en_main);
+  lv_obj_set_y(chip_en_main, 36);
+  chip_en_sub = make_label(en_tile, &font_inter_14, lv_color_hex(kTextDim));
+  lv_obj_set_pos(chip_en_sub, 12, 56);
+  lv_obj_set_width(chip_en_sub, 136 - 22);
+  lv_label_set_long_mode(chip_en_sub, LV_LABEL_LONG_DOT);
 
   home_warn = lv_btn_create(weather_card);
   lv_obj_set_size(home_warn, LV_SIZE_CONTENT, 34);
