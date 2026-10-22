@@ -133,6 +133,7 @@ void shot(bool test_pattern) {
   send_range(0, shot_len);
   console_printf("%s", "SHOT_END\n");
   esp_log_level_set("*", ESP_LOG_ERROR);
+  diag_quiet_http_logs();  // "*" clears the per-tag levels
 }
 
 void handle(char* cmd) {

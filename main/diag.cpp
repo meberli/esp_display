@@ -22,8 +22,88 @@
 #include "ota_check.h"
 #include "sys.h"
 #include "test_harness.h"
+#include "clock_sync.h"
+#include "energy_task.h"
+#include "pv_task.h"
+#include "esp_system.h"
+#include "esp_wifi.h"
+#include "esp_ota_ops.h"
+#include <time.h>
 
 namespace {
+std::atomic<uint32_t> svc_ok[kSvcCount], svc_err[kSvcCount];
+std::atomic<int> svc_last[kSvcCount];  // last failed status (0 = no connection)
+std::atomic<uint32_t> wifi_drops{0};
+const char* const kSvcName[kSvcCount] = {"weather", "meteo", "cal", "oev", "waste", "windy", "ota", "whatwatt"};
+
+const char* reset_name(esp_reset_reason_t r) {
+  switch (r) {
+    case ESP_RST_POWERON: return "power-on";
+    case ESP_RST_EXT: return "external";
+    case ESP_RST_SW: return "software";
+    case ESP_RST_PANIC: return "PANIC";
+    case ESP_RST_INT_WDT: return "INT_WDT";
+    case ESP_RST_TASK_WDT: return "TASK_WDT";
+    case ESP_RST_WDT: return "WDT";
+    case ESP_RST_DEEPSLEEP: return "deep-sleep";
+    case ESP_RST_BROWNOUT: return "BROWNOUT";
+    case ESP_RST_SDIO: return "sdio";
+    case ESP_RST_USB: return "usb";
+    case ESP_RST_JTAG: return "jtag";
+    default: return "unknown";
+  }
+}
+
+void health() {
+  static PvView pv;  // static: keep the diag stack small
+  pv_get(&pv);
+  static wifi_ap_record_t ap;
+  int rssi = esp_wifi_sta_get_ap_info(&ap) == ESP_OK ? ap.rssi : 0;
+  uint32_t up = static_cast<uint32_t>(esp_timer_get_time() / 1000000);
+  unsigned last = clock_last_sync_s();
+  static char svc[300];
+  size_t u = 0;
+  for (int i = 0; i < kSvcCount; ++i)
+    u += snprintf(svc + u, sizeof(svc) - u, "%s%s=%lu/%lu", i ? " " : "", kSvcName[i], (unsigned long)svc_err[i].load(),
+                  (unsigned long)(svc_ok[i].load() + svc_err[i].load()));
+  const esp_partition_t* run = esp_ota_get_running_partition();
+  console_printf("DIAG health up=%lus reset=%s wifi=%ddBm drops=%lu ntp=%s age=%lds | err/req %s | pv %s%s rec=%lu rej=%lu | %s %s\n",
+                 (unsigned long)up, reset_name(esp_reset_reason()), rssi, (unsigned long)wifi_drops.load(),
+                 clock_synced() ? "ok" : "no", last > 0 ? (long)(up - last) : -1L, svc,
+                 !pv.enabled ? "off" : pv.connected ? "connected" : pv.listening ? "listening" : "down",
+                 pv.have ? (pv.stale ? " stale" : " live") : "", (unsigned long)pv.records, (unsigned long)pv.rejected,
+                 esp_app_get_description()->version, run != nullptr ? run->label : "?");
+}
+
+void fmt_local(int64_t ts, char* out, size_t n) {
+  if (ts <= 0) { snprintf(out, n, "-"); return; }
+  time_t t = static_cast<time_t>(ts);
+  struct tm lt;
+  localtime_r(&t, &lt);
+  strftime(out, n, "%Y-%m-%d %H:%M:%S", &lt);
+}
+
+void energy_dump() {
+  EXT_RAM_BSS_ATTR static EnergyView v;
+  energy_get(&v);
+  char wts[24], fts[24];
+  fmt_local(v.r.water_ts, wts, sizeof(wts));
+  fmt_local(v.fetched, fts, sizeof(fts));
+  console_printf("DIAG energy on=%d have=%d today=%ld in=%.3f out=%.3f water=%.0fL cost=%.2f credit=%.2f flags=%u | "
+                 "last reading %s, water %.3f m3 at %s%s\n",
+                 v.enabled, v.have, (long)v.h.ymd, energy_today_in(v.h), energy_today_out(v.h), energy_today_water_l(v.h),
+                 v.h.cost, v.h.credit, v.h.flags, fts, v.r.water_m3, wts, v.r.has_water ? "" : " (no water)");
+  for (int i = 0; i < kEnergyDays; ++i) {
+    const EnergyDay& d = v.h.days[i];
+    if (d.ymd == 0) {
+      console_printf("DIAG energy day%d -\n", i);
+      continue;
+    }
+    console_printf("DIAG energy day%d %ld in=%.3f out=%.3f water=%.0fL cost=%.2f credit=%.2f flags=%u\n", i, (long)d.ymd,
+                   d.in_kwh, d.out_kwh, d.water_l, d.cost_chf, d.credit_chf, d.flags);
+  }
+}
+
 std::atomic<uint32_t> t_reads{0}, t_err{0}, t_fresh{0}, t_pressed{0};
 std::atomic<uint32_t> ui_loops{0}, ui_lv_max{0}, ui_poll_max{0}, ui_loop_max{0}, ui_slow{0};
 std::atomic<uint32_t> interactive_ms{0};
@@ -114,7 +194,7 @@ void stacks(bool warn_only) {
 
 bool read_only(const char* line) {
   return strcmp(line, "DIAGGT") == 0 || strcmp(line, "DIAGFB") == 0 || strcmp(line, "DIAGSTATS") == 0 ||
-         strcmp(line, "DIAGSTACK") == 0;
+         strcmp(line, "DIAGSTACK") == 0 || strcmp(line, "DIAGENERGY") == 0 || strcmp(line, "DIAGHEALTH") == 0;
 }
 
 void handle(const char* line) {
@@ -182,6 +262,10 @@ void handle(const char* line) {
     stats();
   } else if (strcmp(line, "DIAGSTACK") == 0) {
     stacks(false);
+  } else if (strcmp(line, "DIAGENERGY") == 0) {
+    energy_dump();
+  } else if (strcmp(line, "DIAGHEALTH") == 0) {
+    health();
   }
 }
 
@@ -200,7 +284,8 @@ void diag_task(void*) {
   char line[64];
   size_t len = 0;
   uint32_t start = now_ms(), last = start;
-  bool stats30 = false, stats90 = false;
+  bool stats30 = false, stats90 = false, health1 = false;
+  uint32_t next_health = 3600;
   for (;;) {
 #ifndef CONFIG_PANEL_TEST_HARNESS
     // The release image has no harness: read the console here.
@@ -226,6 +311,8 @@ void diag_task(void*) {
     }
     if (!stats30 && up >= 30) { stats30 = true; stats(); stacks(false); }
     if (!stats90 && up >= 90) { stats90 = true; stats(); }
+    if (!health1 && up >= 150) { health1 = true; health(); }  // once after the first fetches
+    if (up >= next_health) { next_health += 3600; health(); }
     vTaskDelay(pdMS_TO_TICKS(20));
   }
 }
@@ -233,7 +320,29 @@ void diag_task(void*) {
 
 void diag_command(const char* line) { handle(line); }
 
-void diag_start() { xTaskCreatePinnedToCore(diag_task, "diag", 4096, nullptr, 2, nullptr, 0); }
+void diag_svc(DiagSvc s, bool ok, int status) {
+  if (s >= kSvcCount) return;
+  if (ok) {
+    ++svc_ok[s];
+  } else {
+    ++svc_err[s];
+    svc_last[s] = status;
+  }
+}
+
+void diag_wifi_disconnect() { ++wifi_drops; }
+
+void diag_quiet_http_logs() {
+  esp_log_level_set("esp-tls", ESP_LOG_NONE);
+  esp_log_level_set("transport_base", ESP_LOG_NONE);
+  esp_log_level_set("HTTP_CLIENT", ESP_LOG_NONE);
+}
+
+void diag_start() {
+  console_printf("Boot: reset reason %s (%d)\n", reset_name(esp_reset_reason()), (int)esp_reset_reason());
+  diag_quiet_http_logs();
+  xTaskCreatePinnedToCore(diag_task, "diag", 6144, nullptr, 2, nullptr, 0);  // 6 KB: health/energy dumps format many doubles
+}
 
 void diag_touch_poll(bool i2c_ok, bool fresh, bool pressed) {
   ++t_reads;

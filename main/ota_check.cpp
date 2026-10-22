@@ -1,3 +1,4 @@
+#include "diag.h"
 #include "ota_check.h"
 
 #include <ArduinoJson.h>
@@ -93,6 +94,7 @@ bool check_github(const char* api, OtaCheck* out) {
   } else if (!r.ok || r.status != 200) {
     snprintf(out->err, sizeof(out->err), "GitHub-Fehler HTTP %d", r.status);
   }
+  diag_svc(kSvcOta, r.ok && r.status == 200, r.status);
   console_printf("OTA check %s: HTTP %d, %u bytes\n", api, r.status, static_cast<unsigned>(r.length));
   if (out->err[0] != '\0') {
     heap_caps_free(body);

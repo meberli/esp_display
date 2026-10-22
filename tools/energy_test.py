@@ -53,6 +53,15 @@ def main():
     check(float(e.get("water_l", "-1")) >= 0, "water today >= 0")
     check("water_y" in e, "yesterday water reported (" + e.get("water_y", "?") + " L)")
     check(e.get("slot") == "0", "2026: flat tariff slot")
+    # Read-only diagnostics (also in the release image)
+    p.cmd("DIAGENERGY", expect=("DIAG energy on",))
+    days = [p.cmd("", expect=("DIAG energy day",), timeout=3) for _ in range(8)]
+    for d in days: print(" ", d)
+    check(len(days) == 8 and days[0].startswith("DIAG energy day0 "), "DIAGENERGY prints 8 days")
+    h = p.cmd("DIAGHEALTH", expect=("DIAG health",))
+    print(" ", h)
+    check(" reset=" in h and " whatwatt=" in h and " pv " in h, "DIAGHEALTH line")
+    check("://" not in h, "health line has no URLs")
     # Pages
     home(p); time.sleep(1.5)
     s = state(p)

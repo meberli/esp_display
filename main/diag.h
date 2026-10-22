@@ -8,6 +8,15 @@
 #include <stddef.h>
 #include <stdint.h>
 
+// Health counters (any task): per-service request results since boot,
+// summarised in the hourly "DIAG health" line (and DIAGHEALTH).
+enum DiagSvc : uint8_t { kSvcWeather, kSvcMeteo, kSvcCalendar, kSvcOev, kSvcWaste, kSvcWindy, kSvcOta, kSvcWhatwatt, kSvcCount };
+void diag_svc(DiagSvc s, bool ok, int status);
+void diag_wifi_disconnect();             // net.cpp: lost a working connection
+// IDF transport logs (esp-tls / transport_base / HTTP_CLIENT) off: every failed
+// request printed three error lines; the counters above replace them.
+void diag_quiet_http_logs();
+
 void diag_command(const char* line);  // DIAG* console command (also from the test harness)
 void diag_start();                       // after the UI task runs
 void diag_touch_poll(bool i2c_ok, bool fresh, bool pressed);  // gt_poll

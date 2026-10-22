@@ -1,3 +1,4 @@
+#include "diag.h"
 #include "webcams.h"
 
 #include <ArduinoJson.h>
@@ -98,6 +99,7 @@ bool get_json(const char* key, const char* url, bool list, DynamicJsonDocument& 
   if (body == nullptr) return false;
   HttpGetResult http = http_get(url, nullptr, nullptr, body, kJsonCap, 10000, kKeyHeader, key);
   if (status != nullptr) *status = http.status;
+  diag_svc(kSvcWindy, http.ok && http.status == 200, http.status);
   if (!http.ok || http.status != 200) {
     ESP_LOGW(TAG, "Windy HTTP %d %s", http.status, http.error);
     heap_caps_free(body);
@@ -172,6 +174,7 @@ bool windy_cam_image(const char* url, uint16_t* frame, char* err, size_t err_n) 
     return false;
   }
   HttpGetResult http = http_get(url, nullptr, nullptr, jpg, kJpegCap, 15000);
+  diag_svc(kSvcWindy, http.ok && http.status == 200, http.status);
   if (!http.ok || http.status != 200) {
     snprintf(err, err_n, "Bild HTTP %d %s", http.status, http.error);
     heap_caps_free(jpg);

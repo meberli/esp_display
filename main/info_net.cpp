@@ -1,3 +1,4 @@
+#include "diag.h"
 #include "info.h"
 
 #include <ArduinoJson.h>
@@ -117,6 +118,7 @@ bool transit_board(const Station& st, Board* out) {
   uint8_t* body = psram(kCap);
   if (body == nullptr) return false;
   HttpGetResult http = http_get(url, nullptr, nullptr, body, kCap, 10000);
+  diag_svc(kSvcOev, http.ok && http.status == 200, http.status);
   if (!http.ok || http.status != 200) {
     ESP_LOGW(TAG, "Stationboard %s HTTP %d %s", st.id, http.status, http.error);
     heap_caps_free(body);
@@ -197,6 +199,7 @@ void waste_update(const char* base, const char* bfs, const char* zone, int64_t n
   uint8_t* body = psram(kCap + 1);
   if (body == nullptr) return;
   HttpGetResult http = http_get(url, nullptr, nullptr, body, kCap, 20000);
+  diag_svc(kSvcWaste, http.ok && http.status == 200, http.status);
   g_waste.http = http.status;
   if (http.ok && http.status == 200) {
     CalEvent ev[kMaxWaste];
@@ -243,6 +246,7 @@ bool calendar_fetch(const char* ical_url, const char* waste_base, const char* bf
     uint8_t* body = psram(kCap + 1);
     if (body != nullptr) {
       HttpGetResult http = http_get(ical_url, nullptr, nullptr, body, kCap, 20000);
+      diag_svc(kSvcCalendar, http.ok && http.status == 200, http.status);
       if (http.ok && http.status == 200 && http.length > 15 && memcmp(body, "BEGIN:VCALENDAR", 15) == 0) {
         out->n_events = ical_parse(reinterpret_cast<char*>(body), http.length, now, now + 60LL * 86400, out->events,
                                    kMaxEvents, 0, local_mktime);
@@ -277,6 +281,7 @@ bool meteo_fetch(const char* plz, MeteoNow* out) {
   uint8_t* body = psram(kCap);
   if (body == nullptr) return false;
   HttpGetResult http = http_get(url, nullptr, nullptr, body, kCap, 15000, "Accept-Language", "de");
+  diag_svc(kSvcMeteo, http.ok && http.status == 200, http.status);
   if (!http.ok || http.status != 200) {
     ESP_LOGW(TAG, "MeteoSchweiz HTTP %d %s", http.status, http.error);
     heap_caps_free(body);

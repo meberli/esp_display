@@ -1,5 +1,6 @@
 #include "esp_attr.h"
 #include "net.h"
+#include "diag.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -72,6 +73,7 @@ void on_event(void*, esp_event_base_t base, int32_t id, void* data) {
   if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
     if (g_ssid[0] != '\0') esp_wifi_connect();  // empty SSID: station only for scanning
   } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
+    if (g_connected) diag_wifi_disconnect();
     g_connected = false;
     xEventGroupClearBits(wifi_events(), kBitIp);
     xEventGroupSetBits(wifi_events(), kBitDisc);

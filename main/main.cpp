@@ -145,6 +145,7 @@ bool fetch_buchs_weather(int* temp_c, int* code, WeatherDay* days, int* week_cou
            "&timezone=Europe%%2FZurich&forecast_days=7",
            g_loc.lat, g_loc.lon);
   HttpGetResult http = http_get(url, nullptr, nullptr, payload, kCap, 10000);
+  diag_svc(kSvcWeather, http.ok && http.status == 200, http.status);
   if (!http.ok || http.status != 200) {
     ESP_LOGW(TAG, "Weather HTTP %d %s", http.status, http.error);
     heap_caps_free(payload);

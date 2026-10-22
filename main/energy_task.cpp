@@ -5,6 +5,7 @@
 #include <time.h>
 
 #include "clock_sync.h"
+#include "diag.h"
 #include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -49,7 +50,19 @@ void task(void*) {
   bool loaded = settings_load_energy_hist(hist);
   console_printf("Energie: history %s (%u bytes)\n", loaded ? "loaded" : "new", static_cast<unsigned>(sizeof(EnergyHist)));
   int fails = 0;
+  // Hourly summary instead of error lines per attempt.
+  struct { uint32_t polls, ok, failed, retries, retry_ok; char last_err[40]; } st = {};
+  uint32_t sum_t0 = now_ms();
   for (;;) {
+    if (now_ms() - sum_t0 >= 3600u * 1000u) {
+      sum_t0 = now_ms();
+      if (st.polls > 0)
+        console_printf("Energie: last hour polls=%lu ok=%lu failed=%lu retries=%lu retry_ok=%lu%s%s\n",
+                       (unsigned long)st.polls, (unsigned long)st.ok, (unsigned long)st.failed,
+                       (unsigned long)st.retries, (unsigned long)st.retry_ok, st.last_err[0] ? " last error: " : "",
+                       st.last_err);
+      memset(&st, 0, sizeof(st));
+    }
     EnergySettings s = settings_load_energy();
     uint32_t wait_s = s.poll_s;
     if (!s.on || s.host[0] == '\0' || !wifi_connected() || !clock_synced()) {
@@ -60,6 +73,16 @@ void task(void*) {
     char url[96];
     snprintf(url, sizeof(url), "http://%s/api/v1/report", s.host);
     HttpGetResult http = http_get(url, nullptr, nullptr, body, kBodyCap, 4000);
+    ++st.polls;
+    if (!http.ok && http.status == 0) {
+      // Connect failure / timeout: the reader's Wi-Fi drops single requests
+      // (about 6 %); one quick retry before this counts as a failure.
+      ++st.retries;
+      vTaskDelay(pdMS_TO_TICKS(500));
+      http = http_get(url, nullptr, nullptr, body, kBodyCap, 4000);
+      if (http.ok) ++st.retry_ok;
+    }
+    diag_svc(kSvcWhatwatt, http.ok && http.status == 200, http.status);
     const int64_t now = time(nullptr);
     EnergyReading r;
     bool parsed = http.ok && http.status == 200 && energy_parse_report(reinterpret_cast<const char*>(body), http.length,
@@ -95,6 +118,7 @@ void task(void*) {
       }
       if (res & kHistRejected) console_printf("Energie: counter went backwards, reading ignored\n");
       publish(s, &r, *hist, http.status, "", now);
+      ++st.ok;
       fails = 0;
     } else {
       char err[40];
@@ -102,7 +126,10 @@ void task(void*) {
       else if (http.status != 200) snprintf(err, sizeof(err), "HTTP %d", http.status);
       else if (!parsed) snprintf(err, sizeof(err), "Antwort unlesbar");
       else snprintf(err, sizeof(err), "Z\xC3\xA4hler meldet keine Daten");
-      if (++fails == 1 || fails % 30 == 0) console_printf("Energie: %s (%d)\n", err, fails);
+      ++st.failed;
+      snprintf(st.last_err, sizeof(st.last_err), "%s", err);
+      // Single failures go into the hourly summary; a reader that stays away is logged.
+      if (++fails % 30 == 0) console_printf("Energie: %s (%d in a row)\n", err, fails);
       publish(s, nullptr, *hist, http.status, err, now);
       if (fails > 3) wait_s = s.poll_s < 30 ? 30 : s.poll_s;  // back off while the reader is away
     }

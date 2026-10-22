@@ -242,6 +242,7 @@ Das Panel fragt `http://<Adresse>/api/v1/report` des whatwatt Go im LAN ab (Eins
 
 - Zuordnung nach Zählerzeit: jede Differenz wird der lokalen Stunde/dem Tag des Zeitstempels des Zählers zugeordnet (Strom `report.date_time_utc`, Wasser `volume[].date_time`), nicht der Empfangszeit; späte Werte nach Mitternacht korrigieren den Vortag. Fallback Empfangszeit bei fehlendem/zukünftigem (>2 min)/rückwärts laufendem Zeitstempel.
 - Wasser (M-Bus Bus 2) meldet seinen Zählerstand nur einmal täglich (und Lesungen fallen manchmal aus): jede Zunahme wird dem lokalen Vortag gutgeschrieben, auch wenn sie erst nach 00:00 erkannt wird. Die Wasserseite zeigt deshalb nur Tageswerte (gestern, 7 Tage, Kosten), keine Stundenbalken; die Home-Kachel zeigt „Wasser gestern: N L“.
+- Diagnose (seriell, 115200 Baud, nur lesend, auch im Release): `DIAGENERGY` zeigt heute und die 8 gespeicherten Tage (Strom Bezug/Einspeisung kWh, Wasser L, Kosten, Flags) und den letzten Wasser-Zeitstempel; `DIAGHEALTH` bzw. stündlich `DIAG health`: Laufzeit, Reset-Grund, WLAN-RSSI und Abbrüche, NTP-Alter, Fehler/Anfragen je Dienst (Wetter, MeteoSchweiz, Kalender, ÖV, Abfall, Windy, OTA, whatwatt), PV-Zustand. Der whatwatt-Abruf wiederholt einen Verbindungsfehler einmal sofort und meldet stündlich eine Zusammenfassung statt drei Fehlerzeilen pro Versuch.
 
 ## Datenquellen, Attribution & Nutzungsbedingungen
 
