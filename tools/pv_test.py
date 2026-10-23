@@ -62,7 +62,10 @@ def main():
         check(abs(float(d["hist_today"]) - float(d["today"])) < 0.05 or float(d["hist_today"]) == 0.0, "history follows Eac today")
         print("rated power", d.get("rated"), "W")
         time.sleep(0.3)
-        regs = fc04(gw)
+        try:
+            regs = fc04(gw)
+        except OSError as e:
+            regs = None; print("note: PC cannot reach the gateway directly:", e)
         if regs is None:
             print("note: direct read got no answer (inverter just went to sleep?)")
         else:
