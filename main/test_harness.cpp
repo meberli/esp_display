@@ -156,11 +156,13 @@ void handle(char* cmd) {
   } else if (strcmp(cmd, "PV") == 0) {
     static PvView v;
     pv_get(&v);
-    console_printf("PV on=%d listen=%d conn=%d have=%d stale=%d proto=%u records=%lu rejected=%lu interval=%ld "
-                   "dc=%.1f ac=%.1f today=%.1f total=%.1f temp=%.1f v1=%.1f gv3=%.1f status=%d inv=%s err=%s\n",
-                   v.enabled, v.listening, v.connected, v.have, v.stale, v.proto, (unsigned long)v.records,
-                   (unsigned long)v.rejected, (long)v.interval_s, v.r.pv_w, v.r.ac_w, v.r.today_kwh, v.r.total_kwh,
-                   v.r.temp_c, v.r.pv1_v, v.r.grid_v[2], v.r.status, v.r.inverter, v.error);
+    console_printf("PV on=%d conn=%d have=%d stale=%d asleep=%d down=%d polls=%lu ok=%lu errors=%lu rated=%lu "
+                   "gw=%s:%u unit=%u dc=%.1f ac=%.1f hz=%.2f today=%.1f total=%.1f temp=%.1f v1=%.1f gv1=%.1f gv2=%.1f "
+                   "gv3=%.1f status=%d hist_today=%.1f err=%s\n",
+                   v.enabled, v.connected, v.have, v.stale, v.asleep, v.down, (unsigned long)v.polls,
+                   (unsigned long)v.ok, (unsigned long)v.errors, (unsigned long)v.rated_w, v.host, v.port, v.unit,
+                   v.r.pv_w, v.r.ac_w, v.r.grid_hz, v.r.today_kwh, v.r.total_kwh, v.r.temp_c, v.r.pv1_v, v.r.grid_v[0],
+                   v.r.grid_v[1], v.r.grid_v[2], v.r.status, v.hist.today, v.error);
   } else if (strcmp(cmd, "STATE") == 0) {
     char text[64];
     ui_describe(text, sizeof(text));

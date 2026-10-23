@@ -67,11 +67,11 @@ void health() {
     u += snprintf(svc + u, sizeof(svc) - u, "%s%s=%lu/%lu", i ? " " : "", kSvcName[i], (unsigned long)svc_err[i].load(),
                   (unsigned long)(svc_ok[i].load() + svc_err[i].load()));
   const esp_partition_t* run = esp_ota_get_running_partition();
-  console_printf("DIAG health up=%lus reset=%s wifi=%ddBm drops=%lu ntp=%s age=%lds | err/req %s | pv %s%s rec=%lu rej=%lu | %s %s\n",
+  console_printf("DIAG health up=%lus reset=%s wifi=%ddBm drops=%lu ntp=%s age=%lds | err/req %s | pv %s%s ok=%lu err=%lu | %s %s\n",
                  (unsigned long)up, reset_name(esp_reset_reason()), rssi, (unsigned long)wifi_drops.load(),
                  clock_synced() ? "ok" : "no", last > 0 ? (long)(up - last) : -1L, svc,
-                 !pv.enabled ? "off" : pv.connected ? "connected" : pv.listening ? "listening" : "down",
-                 pv.have ? (pv.stale ? " stale" : " live") : "", (unsigned long)pv.records, (unsigned long)pv.rejected,
+                 !pv.enabled ? "off" : (pv.have && !pv.stale) ? "live" : pv.asleep ? "asleep" : pv.down ? "down" : "connecting",
+                 pv.have && pv.stale ? " stale" : "", (unsigned long)pv.ok, (unsigned long)pv.errors,
                  esp_app_get_description()->version, run != nullptr ? run->label : "?");
 }
 
@@ -101,6 +101,16 @@ void energy_dump() {
     }
     console_printf("DIAG energy day%d %ld in=%.3f out=%.3f water=%.0fL cost=%.2f credit=%.2f flags=%u\n", i, (long)d.ymd,
                    d.in_kwh, d.out_kwh, d.water_l, d.cost_chf, d.credit_chf, d.flags);
+  }
+  // PV production per day (separate "pv_hist"; inverter Eac today).
+  static PvView pv;
+  pv_get(&pv);
+  console_printf("DIAG energy pv today=%ld %.1f kWh%s\n", (long)pv.hist.ymd, pv.hist.today < 0 ? 0.0f : pv.hist.today,
+                 pv.hist.today < 0 ? " (no reading yet)" : "");
+  for (int i = 0; i < kPvDays; ++i) {
+    const PvDay& d = pv.hist.days[i];
+    if (d.ymd == 0) console_printf("DIAG energy pv day%d -\n", i);
+    else console_printf("DIAG energy pv day%d %ld pv=%.1f\n", i, (long)d.ymd, d.kwh);
   }
 }
 

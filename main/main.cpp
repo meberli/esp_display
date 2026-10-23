@@ -970,5 +970,5 @@ void app_start() {
   xTaskCreatePinnedToCoreWithCaps(lox_task, "lox", 8 * 1024, nullptr, 5, nullptr, 0, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   xTaskCreatePinnedToCore(ui_task, "ui", 16 * 1024, nullptr, 5, &ui_handle, 1);
   energy_start();  // whatwatt Go polling (core 0, below net and Loxone)
-  pv_start();      // Growatt ShineLan listener (core 0, lowest)
+  pv_start();      // Growatt via Modbus TCP gateway, read only (core 0, lowest)
 }

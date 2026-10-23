@@ -1,8 +1,8 @@
 #include "pv_task.h"
 
 #include <errno.h>
-#include <stdlib.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -20,7 +20,8 @@ namespace {
 SemaphoreHandle_t g_mu = nullptr;
 PvView* g_view = nullptr;  // PSRAM, guarded by g_mu
 volatile bool g_reload = false;
-constexpr size_t kBuf = 2048;
+constexpr int kTimeoutMs = 3500;
+constexpr int kGapMs = 200;
 
 template <typename F>
 void update(F f) {
@@ -29,162 +30,221 @@ void update(F f) {
   xSemaphoreGive(g_mu);
 }
 
-void log_hex(const char* what, const uint8_t* d, size_t n) {
-  char hex[2 * 48 + 1];
-  size_t m = n < 48 ? n : 48;
-  for (size_t i = 0; i < m; ++i) snprintf(hex + 2 * i, 3, "%02x", d[i]);
-  console_printf("PV: %s (%u bytes) %s%s\n", what, static_cast<unsigned>(n), hex, n > m ? "..." : "");
+int32_t local_ymd(int64_t now) {
+  if (now < 1700000000) return 0;  // clock not set yet
+  time_t t = static_cast<time_t>(now);
+  struct tm lt;
+  localtime_r(&t, &lt);
+  return (lt.tm_year + 1900) * 10000 + (lt.tm_mon + 1) * 100 + lt.tm_mday;
 }
 
-void serve(int c, uint8_t* buf) {
+int connect_gw(const char* host, int port) {
+  int s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+  if (s < 0) return -1;
+  sockaddr_in a = {};
+  a.sin_family = AF_INET;
+  a.sin_port = htons(port);
+  a.sin_addr.s_addr = inet_addr(host);
+  // Non-blocking connect with the request timeout.
+  int fl = fcntl(s, F_GETFL, 0);
+  fcntl(s, F_SETFL, fl | O_NONBLOCK);
+  int r = connect(s, reinterpret_cast<sockaddr*>(&a), sizeof(a));
+  if (r != 0 && errno == EINPROGRESS) {
+    fd_set ws;
+    FD_ZERO(&ws);
+    FD_SET(s, &ws);
+    timeval tv = {kTimeoutMs / 1000, (kTimeoutMs % 1000) * 1000};
+    int err = 0;
+    socklen_t el = sizeof(err);
+    if (select(s + 1, nullptr, &ws, nullptr, &tv) == 1 && getsockopt(s, SOL_SOCKET, SO_ERROR, &err, &el) == 0 && err == 0)
+      r = 0;
+  }
+  if (r != 0) {
+    close(s);
+    return -1;
+  }
+  fcntl(s, F_SETFL, fl);
+  timeval rt = {0, 250 * 1000};  // short slices: the deadline is enforced below
+  setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &rt, sizeof(rt));
+  timeval st = {kTimeoutMs / 1000, 0};
+  setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, &st, sizeof(st));
+  int one = 1;
+  setsockopt(s, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+  return s;
+}
+
+// One read transaction. 0 = ok, -1 = timeout, -2 = exception (*exc), -3 = socket error/garbage (reconnect).
+int transact(int s, uint16_t tid, uint8_t unit, uint8_t fc, uint16_t start, uint16_t count, uint16_t* regs, uint8_t* exc) {
+  uint8_t q[12];
+  size_t ql = pv_mb_request(q, sizeof(q), tid, unit, fc, start, count);
+  if (ql == 0) return -3;
+  // Drop anything left over (a late answer to a timed-out request).
+  uint8_t junk[64];
+  while (recv(s, junk, sizeof(junk), MSG_DONTWAIT) > 0) {
+  }
+  if (send(s, q, ql, 0) != static_cast<int>(ql)) return -3;
+  uint8_t buf[260];
   size_t have = 0;
-  bool timed = false;
-  uint8_t out[128];
-  int idle = 0;
-  for (;;) {
-    if (g_reload) return;
-    int r = recv(c, buf + have, kBuf - have, 0);
-    if (r < 0 && (errno == EAGAIN || errno == EWOULDBLOCK) && ++idle > 450) {
-      console_printf("PV: no data for 15 min, closing\n");  // the stick reconnects on a new socket
-      return;
-    }
-    if (r > 0) idle = 0;
-    if (r == 0) {
-      console_printf("PV: stick closed the connection\n");
-      return;
-    }
+  const uint32_t t0 = now_ms();
+  while (now_ms() - t0 < static_cast<uint32_t>(kTimeoutMs)) {
+    int r = recv(s, buf + have, sizeof(buf) - have, 0);
+    if (r == 0) return -3;
     if (r < 0) {
-      if (errno == EAGAIN || errno == EWOULDBLOCK) continue;  // 2 s receive timeout: check reload
-      console_printf("PV: recv error %d\n", errno);
-      return;
+      if (errno == EAGAIN || errno == EWOULDBLOCK) continue;
+      return -3;
     }
     have += r;
-    for (;;) {
-      int len = pv_frame_length(buf, have);
-      if (len == 0) {
-        if (have == kBuf) have = 0;  // cannot complete: drop
-        break;
-      }
-      if (len < 0) {
-        log_hex("unexpected data, dropped", buf, have);
-        have = 0;
-        break;
-      }
-      PvFrame f;
-      PvReading pr;
-      int k = pv_handle(buf, len, &f, &pr, out, sizeof(out));
-      const int64_t now = time(nullptr);
-      if (k < 0) {
-        log_hex("bad CRC, ignored", buf, len);
-      } else {
-        if (k > 0) send(c, out, k, 0);
-        if (f.type == kPvData && pr.valid) {
-          update([&](PvView& v) {
-            if (v.fetched > 0 && now - v.fetched > 20) v.interval_s = static_cast<int32_t>(now - v.fetched);
-            v.r = pr;
-            v.have = true;
-            v.fetched = now;
-            v.proto = f.proto;
-            v.records++;
-            v.error[0] = '\0';
-          });
-          console_printf("PV: live record proto %u: %.0f W DC, %.0f W AC, today %.1f kWh, total %.1f kWh, %.1f C\n",
-                         f.proto, pr.pv_w, pr.ac_w, pr.today_kwh, pr.total_kwh, pr.temp_c);
-        } else if (f.type == kPvData) {
-          log_hex("data record with unknown layout", buf, len);
-          update([&](PvView& v) { snprintf(v.error, sizeof(v.error), "unbekanntes Datenformat"); });
-        } else if (f.type == kPvAnnounce && !timed) {
-          // Logger serial: plain bytes 8..17 (pv_handle descrambled the record).
-          char logger[11];
-          for (int i = 0; i < 10; ++i) logger[i] = static_cast<char>(buf[8 + i]);
-          logger[10] = '\0';
-          time_t tt = time(nullptr);
-          struct tm lt;
-          localtime_r(&tt, &lt);
-          char when[24];
-          strftime(when, sizeof(when), "%Y-%m-%d %H:%M:%S", &lt);
-          size_t tl = pv_time_command(f.proto, logger, when, out, sizeof(out));
-          vTaskDelay(pdMS_TO_TICKS(500));
-          if (tl > 0) send(c, out, tl, 0);
-          timed = true;
-          console_printf("PV: announce (proto %u), time set to %s\n", f.proto, when);
-        } else if (f.type != kPvPing && f.type != kPvBuffered && f.type != kPvAnnounce) {
-          log_hex("other record", buf, len);
-        }
-      }
-      memmove(buf, buf + len, have - len);
-      have -= len;
-    }
+    int k = pv_mb_response(buf, have, tid, unit, fc, count, regs, exc);
+    if (k > 0) return 0;
+    if (k == -2) return -2;
+    if (k == -1) return -3;
+    if (have == sizeof(buf)) return -3;
   }
+  return -1;
 }
 
 void task(void*) {
-  uint8_t* buf = static_cast<uint8_t*>(heap_caps_malloc(kBuf, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-  if (buf == nullptr) vTaskDelete(nullptr);
+  PvHist* hist = static_cast<PvHist*>(heap_caps_calloc(1, sizeof(PvHist), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  if (hist == nullptr) {
+    vTaskDelete(nullptr);
+    return;
+  }
+  bool loaded = settings_load_pv_hist(hist);
+  console_printf("PV: history %s (%u bytes)\n", loaded ? "loaded" : "new", static_cast<unsigned>(sizeof(PvHist)));
+  update([&](PvView& v) { v.hist = *hist; });
+  int s = -1;
+  uint16_t tid = 0;
+  bool rated_done = false;
+  uint32_t last_save = 0;
+  int timeouts = 0;
+  struct { uint32_t polls, ok, timeouts, errors; } hr = {};
+  uint32_t hr_t0 = now_ms();
   for (;;) {
     g_reload = false;
-    char ip[16], port_s[8];
+    char host[16], port_s[8], unit_s[8];
     bool on = settings_load_pv_on();
-    settings_load_text(kTextPvIp, ip, sizeof(ip), nullptr);
-    settings_load_text(kTextPvPort, port_s, sizeof(port_s), nullptr);
+    settings_load_text(kTextPvGw, host, sizeof(host), nullptr);
+    settings_load_text(kTextPvGwPort, port_s, sizeof(port_s), nullptr);
+    settings_load_text(kTextPvUnit, unit_s, sizeof(unit_s), nullptr);
     int port = atoi(port_s);
-    if (port <= 0 || port > 65535) port = 5279;
+    if (port <= 0 || port > 65535) port = 502;
+    int unit = atoi(unit_s);
+    if (unit < 0 || unit > 247) unit = 1;
     update([&](PvView& v) {
-      v.enabled = on && ip[0] != '\0';
-      v.listening = false;
-      v.connected = false;
-      snprintf(v.peer, sizeof(v.peer), "%s", ip);
+      v.enabled = on && host[0] != '\0';
+      snprintf(v.host, sizeof(v.host), "%s", host);
+      v.port = static_cast<uint16_t>(port);
+      v.unit = static_cast<uint8_t>(unit);
     });
-    if (!on || ip[0] == '\0' || !wifi_connected()) {
-      vTaskDelay(pdMS_TO_TICKS(3000));
-      continue;
-    }
-    int ls = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    int one = 1;
-    setsockopt(ls, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
-    sockaddr_in a = {};
-    a.sin_family = AF_INET;
-    a.sin_port = htons(port);
-    a.sin_addr.s_addr = htonl(INADDR_ANY);
-    if (ls < 0 || bind(ls, reinterpret_cast<sockaddr*>(&a), sizeof(a)) != 0 || listen(ls, 1) != 0) {
-      console_printf("PV: cannot listen on %d (errno %d)\n", port, errno);
-      if (ls >= 0) close(ls);
-      update([&](PvView& v) { snprintf(v.error, sizeof(v.error), "Port %d belegt", port); });
-      vTaskDelay(pdMS_TO_TICKS(10000));
-      continue;
-    }
-    console_printf("PV: listening on %d, accepting only %s\n", port, ip);
-    update([&](PvView& v) { v.listening = true; });
-    in_addr_t allowed = inet_addr(ip);
+    console_printf("PV: Modbus TCP %s:%d unit %d (%s, read only FC04)\n", host, port, unit, on ? "on" : "off");
     while (!g_reload) {
-      fd_set rs;
-      FD_ZERO(&rs);
-      FD_SET(ls, &rs);
-      timeval tv = {2, 0};
-      if (select(ls + 1, &rs, nullptr, nullptr, &tv) <= 0) continue;
-      sockaddr_in peer = {};
-      socklen_t pl = sizeof(peer);
-      int c = accept(ls, reinterpret_cast<sockaddr*>(&peer), &pl);
-      if (c < 0) continue;
-      char pip[16];
-      inet_ntoa_r(peer.sin_addr, pip, sizeof(pip));
-      if (peer.sin_addr.s_addr != allowed) {
-        console_printf("PV: refused connection from %s\n", pip);
-        update([&](PvView& v) { v.rejected++; });
-        close(c);
+      const uint32_t cycle_t0 = now_ms();
+      if (now_ms() - hr_t0 >= 3600u * 1000u) {
+        hr_t0 = now_ms();
+        if (hr.polls > 0)
+          console_printf("PV: last hour polls=%lu ok=%lu timeouts=%lu errors=%lu\n", (unsigned long)hr.polls,
+                         (unsigned long)hr.ok, (unsigned long)hr.timeouts, (unsigned long)hr.errors);
+        hr = {};
+      }
+      if (!on || host[0] == '\0' || !wifi_connected()) {
+        if (s >= 0) close(s), s = -1;
+        update([&](PvView& v) { v.connected = false; });
+        vTaskDelay(pdMS_TO_TICKS(3000));
+        if (!on) break;  // re-read settings
         continue;
       }
-      console_printf("PV: stick %s connected\n", pip);
-      timeval rt = {2, 0};
-      setsockopt(c, SOL_SOCKET, SO_RCVTIMEO, &rt, sizeof(rt));
-      timeval st = {5, 0};
-      setsockopt(c, SOL_SOCKET, SO_SNDTIMEO, &st, sizeof(st));
-      update([&](PvView& v) { v.connected = true; });
-      serve(c, buf);
-      close(c);
-      update([&](PvView& v) { v.connected = false; });
+      if (s < 0) {
+        s = connect_gw(host, port);
+        if (s < 0) {
+          ++hr.errors;
+          update([&](PvView& v) {
+            v.connected = false;
+            v.down = true;
+            v.asleep = false;
+            v.errors++;
+            snprintf(v.error, sizeof(v.error), "Gateway nicht erreichbar");
+          });
+        } else {
+          console_printf("PV: connected to gateway\n");
+          update([&](PvView& v) { v.connected = true; v.down = false; });
+          vTaskDelay(pdMS_TO_TICKS(kGapMs));
+        }
+      }
+      if (s >= 0 && !rated_done) {
+        uint16_t hregs[10];
+        uint8_t exc = 0;
+        int r = transact(s, ++tid, unit, kPvFcHolding, 0, 10, hregs, &exc);
+        if (r == 0) {
+          rated_done = true;
+          update([&](PvView& v) { v.rated_w = hregs[8]; });
+          console_printf("PV: rated power %u W\n", hregs[8]);
+        } else if (r == -2) {
+          rated_done = true;  // not offered: never ask again
+        } else if (r == -3) {
+          close(s), s = -1;
+        }
+        vTaskDelay(pdMS_TO_TICKS(kGapMs));
+      }
+      if (s >= 0) {
+        uint16_t regs[kPvRegCount];
+        uint8_t exc = 0;
+        ++hr.polls;
+        int r = transact(s, ++tid, unit, kPvFcInput, kPvRegStart, kPvRegCount, regs, &exc);
+        const int64_t now = time(nullptr);
+        PvReading pr;
+        if (r == 0 && pv_decode_input(regs, kPvRegCount, &pr)) {
+          ++hr.ok;
+          if (timeouts > 0) console_printf("PV: inverter answers again (after %d timeouts)\n", timeouts);
+          timeouts = 0;
+          const int32_t ymd = local_ymd(now);
+          int hres = ymd != 0 ? pv_hist_update(hist, ymd, pr.today_kwh) : 0;
+          // Persist on a new day, the first reading of the boot, otherwise at most hourly.
+          if (hres != 0 && ((hres & 2) || last_save == 0 || now_ms() - last_save > 3600u * 1000u)) {
+            bool ok = settings_save_pv_hist(*hist);
+            last_save = now_ms() | 1;
+            console_printf("PV: history saved=%d%s\n", ok ? 1 : 0, (hres & 2) ? " (new day)" : "");
+          }
+          static bool first = true;
+          if (first) {
+            first = false;
+            console_printf("PV: first reading status %d, %.0f W DC, %.0f W AC, today %.1f kWh, total %.1f kWh, %.1f C\n",
+                           pr.status, pr.pv_w, pr.ac_w, pr.today_kwh, pr.total_kwh, pr.temp_c);
+          }
+          update([&](PvView& v) {
+            v.r = pr;
+            v.have = true;
+            v.fetched = now;
+            v.asleep = false;
+            v.down = false;
+            v.polls++;
+            v.ok++;
+            v.error[0] = '\0';
+            v.hist = *hist;
+          });
+        } else {
+          const bool sleepish = r == -1 || r == -2;  // no RS485 answer (timeout / gateway exception 0x0B)
+          if (r == -1) ++hr.timeouts, ++timeouts;
+          else ++hr.errors;
+          if (timeouts == 3) console_printf("PV: inverter not answering (asleep?)\n");
+          if (r == -3) close(s), s = -1;
+          update([&](PvView& v) {
+            v.polls++;
+            v.errors++;
+            if (sleepish) v.asleep = true;
+            if (r == -3) v.connected = false;
+            if (r == -1) snprintf(v.error, sizeof(v.error), "Wechselrichter antwortet nicht");
+            else if (r == -2) snprintf(v.error, sizeof(v.error), "Modbus-Fehler %u", exc);
+            else snprintf(v.error, sizeof(v.error), "Verbindung unterbrochen");
+          });
+          // Many timeouts on one socket: start a fresh connection (still one at a time).
+          if (r == -1 && timeouts % 6 == 0 && s >= 0) close(s), s = -1;
+        }
+      }
+      // Poll every 10 s (from the start of this cycle).
+      while (!g_reload && now_ms() - cycle_t0 < kPvPollS * 1000u) vTaskDelay(pdMS_TO_TICKS(250));
     }
-    close(ls);
+    if (s >= 0) close(s), s = -1;
+    update([&](PvView& v) { v.connected = false; });
   }
 }
 
@@ -194,6 +254,7 @@ void pv_start() {
   g_mu = xSemaphoreCreateMutex();
   g_view = static_cast<PvView*>(heap_caps_calloc(1, sizeof(PvView), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
   if (g_mu == nullptr || g_view == nullptr) return;
+  pv_hist_clear(&g_view->hist);
   // Core 0, priority 2 (< whatwatt 3 < net 4 < Loxone 5); stack in PSRAM.
   xTaskCreatePinnedToCoreWithCaps(task, "pv", 6 * 1024, nullptr, 2, nullptr, 0, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 }
@@ -201,12 +262,13 @@ void pv_start() {
 void pv_get(PvView* out) {
   if (g_mu == nullptr || g_view == nullptr) {
     memset(out, 0, sizeof(*out));
+    pv_hist_clear(&out->hist);
     return;
   }
   xSemaphoreTake(g_mu, portMAX_DELAY);
   *out = *g_view;
   xSemaphoreGive(g_mu);
-  out->stale = pv_stale(time(nullptr), out->fetched, out->interval_s);
+  out->stale = pv_stale(time(nullptr), out->fetched);
 }
 
 void pv_kick() { g_reload = true; }

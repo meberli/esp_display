@@ -356,7 +356,8 @@ namespace {
 const char* const kTextKey[kTextSettingN] = {"ical_url", "waste_api", "ota_url",  "meteo_plz", "waste_bfs",
                                              "waste_zone", "en_host",  "en_flat",  "en_ht",     "en_nt",
                                              "en_feed",    "wa_price", "en_htwin", "en_switch",
-                                             "pv_ip",      "pv_port"};
+                                             "pv_gw",      "pv_gwport", "pv_unit"};
+// Legacy (Grott stick, cfg_ver 5): "pv_ip" / "pv_port" stay in NVS and the backup schema, unused.
 }  // namespace
 
 const char* settings_text_default(TextSetting which) {
@@ -373,8 +374,9 @@ const char* settings_text_default(TextSetting which) {
     case kTextWaPrice: return "2.44";
     case kTextEnHtWin: return "06:00-10:00,17:00-21:00";
     case kTextEnSwitch: return "2027-01-01";
-    case kTextPvIp: return "192.168.1.39";
-    case kTextPvPort: return "5279";
+    case kTextPvGw: return "192.168.1.244";
+    case kTextPvGwPort: return "502";
+    case kTextPvUnit: return "1";
     default: return "";
   }
 }
@@ -627,6 +629,8 @@ void settings_migrate() {
     }
     // 3 -> 4: Energie settings (en_*, wa_*) are new; defaults apply, nothing to convert.
     // 4 -> 5: PV (pv_on, pv_ip, pv_port) are new; defaults apply, nothing to convert.
+    // 5 -> 6: PV via Modbus TCP gateway (pv_gw, pv_gwport, pv_unit) replaces the Grott stick
+    //         server; defaults apply, pv_on is kept, the old pv_ip/pv_port stay (unused).
     nvs_set_u8(h, "cfg_ver", kCfgVersion);
     nvs_commit(h);
     console_printf("Settings: config version %u -> %u\n", v, kCfgVersion);
@@ -713,6 +717,23 @@ bool settings_load_energy_hist(EnergyHist* hist) {
 bool settings_save_energy_hist(const EnergyHist& hist) {
   Tx tx;
   tx.blob("en_hist", &hist, sizeof(hist));
+  return tx.commit();
+}
+
+bool settings_load_pv_hist(PvHist* hist) {
+  pv_hist_clear(hist);
+  nvs_handle_t h;
+  if (nvs_open(kNs, NVS_READONLY, &h) != ESP_OK) return false;
+  size_t sz = sizeof(*hist);
+  bool ok = nvs_get_blob(h, "pv_hist", hist, &sz) == ESP_OK && sz == sizeof(*hist) && hist->magic == kPvHistMagic;
+  nvs_close(h);
+  if (!ok) pv_hist_clear(hist);
+  return ok;
+}
+
+bool settings_save_pv_hist(const PvHist& hist) {
+  Tx tx;
+  tx.blob("pv_hist", &hist, sizeof(hist));
   return tx.commit();
 }
 

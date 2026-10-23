@@ -72,7 +72,11 @@ const KeySpec kSchema[] = {
     {"en_switch", KeyType::Str, 10, 10, 0, 0},
     {"pv_on", KeyType::U8, 0, 1, 0, 0},
     {"pv_ip", KeyType::Str, 7, 15, kKeyHost, 0},
-    {"pv_port", KeyType::Str, 1, 5, kKeyDigits, 0},
+    {"pv_port", KeyType::Str, 1, 5, kKeyDigits, 0},  // legacy (Grott stick), unused since cfg_ver 6
+    {"pv_gw", KeyType::Str, 7, 15, kKeyHost, 0},
+    {"pv_gwport", KeyType::Str, 1, 5, kKeyDigits, 0},
+    {"pv_unit", KeyType::Str, 1, 3, kKeyDigits, 0},
+    {"pv_hist", KeyType::Blob, sizeof(PvHist), sizeof(PvHist), kKeyInternal, 0},  // PV day history: never exported
     {"en_hist", KeyType::Blob, sizeof(EnergyHist), sizeof(EnergyHist), kKeyInternal, 0},  // history: never exported
 };
 

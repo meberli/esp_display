@@ -4,6 +4,15 @@
 EnergyView* en_v = nullptr;  // PSRAM copy, UI task only
 PvView* pv_v = nullptr;      // PSRAM copy, UI task only
 
+// Today's PV production (inverter "Eac today", via the day history; 0 before the first reading of the day).
+float pv_today_kwh(const PvView& p, int64_t now) {
+  time_t t = static_cast<time_t>(now);
+  struct tm lt;
+  localtime_r(&t, &lt);
+  const int32_t ymd = (lt.tm_year + 1900) * 10000 + (lt.tm_mon + 1) * 100 + lt.tm_mday;
+  return p.hist.ymd == ymd && p.hist.today >= 0 ? p.hist.today : 0.0f;
+}
+
 // Strom
 lv_obj_t* es_status = nullptr;
 lv_obj_t* es_now_lbl = nullptr;
@@ -33,7 +42,7 @@ lv_obj_t* ew_d[7] = {};
 lv_obj_t* ew_dval[7] = {};
 lv_obj_t* ew_dlbl[7] = {};
 // Settings
-constexpr int kEnRows = 17;
+constexpr int kEnRows = 18;
 lv_obj_t* enset_val[kEnRows] = {};
 
 constexpr int kEsBase = 150;    // Strom hourly bars: baseline inside card 1
@@ -254,18 +263,23 @@ void energy_refresh_strom() {
   lv_obj_set_x(es_pill, exporting ? 150 : 106);
   pv_get(pv_v);
   if (pv_v->enabled) {
+    const float pv_today = pv_today_kwh(*pv_v, now);
     // PV replaces the phase currents: production, today and the house load (grid net + PV AC).
     const PvView& p = *pv_v;
     lv_obj_set_style_text_color(es_amps, lv_color_hex(p.have && !p.stale ? kGreen : kTextDim), 0);
     if (p.have && !p.stale && live)
-      snprintf(b, sizeof(b), "PV %.0f W \xC2\xB7 %.1f kWh \xC2\xB7 Haus %.0f W", p.r.ac_w, p.r.today_kwh,
+      snprintf(b, sizeof(b), "PV %.0f W \xC2\xB7 %.1f kWh \xC2\xB7 Haus %.0f W", p.r.ac_w, pv_today,
                net_w + p.r.ac_w < 0 ? 0.0f : net_w + p.r.ac_w);
     else if (p.have && !p.stale)
-      snprintf(b, sizeof(b), "PV %.0f W \xC2\xB7 heute %.1f kWh", p.r.ac_w, p.r.today_kwh);
+      snprintf(b, sizeof(b), "PV %.0f W \xC2\xB7 heute %.1f kWh", p.r.ac_w, pv_today);
+    else if (p.asleep && live)  // inverter off (night): it produces nothing, house = grid
+      snprintf(b, sizeof(b), "PV schl\xC3\xA4" "ft \xC2\xB7 %.1f kWh \xC2\xB7 Haus %.0f W", pv_today, net_w < 0 ? 0.0f : net_w);
+    else if (p.asleep)
+      snprintf(b, sizeof(b), "PV schl\xC3\xA4" "ft \xC2\xB7 heute %.1f kWh", pv_today);
     else if (p.have)
-      snprintf(b, sizeof(b), "PV veraltet \xC2\xB7 %.1f kWh", p.r.today_kwh);
+      snprintf(b, sizeof(b), "PV veraltet \xC2\xB7 %.1f kWh", pv_today);
     else
-      snprintf(b, sizeof(b), "PV: %s", p.connected ? "warte auf Daten" : p.listening ? "warte auf Stick" : "aus");
+      snprintf(b, sizeof(b), "PV: %s", p.down ? "Gateway nicht erreichbar" : p.connected ? "warte auf Daten" : "verbinde");
     lv_label_set_text(es_amps, b);
   } else if (live && v.r.i_a[0] >= 0) {
     lv_obj_set_style_text_color(es_amps, lv_color_hex(kTextDim), 0);
@@ -467,7 +481,7 @@ const char* const kEnModel[3] = {"Automatisch", "Einheitstarif", "HT/NT"};
 const uint16_t kEnPoll[4] = {5, 10, 30, 60};
 // Row -> text setting (or -1: stepped/toggled in place)
 const int8_t kEnRowText[kEnRows] = {-1, kTextEnHost, -1, -1, kTextEnFlat, kTextEnHt, kTextEnNt, kTextEnHtWin,
-                                    kTextEnSwitch, kTextEnFeed, -1, -1, -1, kTextWaPrice, -1, kTextPvIp, kTextPvPort};
+                                    kTextEnSwitch, kTextEnFeed, -1, -1, -1, kTextWaPrice, -1, kTextPvGw, kTextPvGwPort, kTextPvUnit};
 
 void enset_refresh() {
   if (enset_root == nullptr) return;
@@ -489,7 +503,7 @@ void enset_refresh() {
     bool own = false;
     settings_load_text(static_cast<TextSetting>(kEnRowText[i]), t, sizeof(t), &own);
     const char* unit = i == 13 ? " CHF/m\xC2\xB3" : (i >= 4 && i <= 6) || i == 9 ? " Rp./kWh" : "";
-    if (i >= 15) unit = i == 15 ? " (nur dieser Stick)" : " (TCP)";
+    if (i >= 15) unit = i == 15 ? " (Modbus TCP, nur lesen)" : "";
     snprintf(b, sizeof(b), "%s%s%s", t, unit, own ? "" : " (Standard)");
     lv_label_set_text(enset_val[i], b);
   }
@@ -498,8 +512,9 @@ void enset_refresh() {
   lv_label_set_text_fmt(enset_val[12], "M-Bus %u", s.water_bus);
   pv_get(pv_v);
   if (!settings_load_pv_on()) snprintf(b, sizeof(b), "Aus");
-  else if (pv_v->have && !pv_v->stale) snprintf(b, sizeof(b), "Ein \xC2\xB7 %.0f W \xC2\xB7 %u Datens\xC3\xA4tze", pv_v->r.ac_w, (unsigned)pv_v->records);
-  else snprintf(b, sizeof(b), "Ein \xC2\xB7 %s", pv_v->connected ? "Stick verbunden" : pv_v->listening ? "wartet auf den Stick" : pv_v->error[0] ? pv_v->error : "startet");
+  else if (pv_v->have && !pv_v->stale) snprintf(b, sizeof(b), "Ein \xC2\xB7 %.0f W \xC2\xB7 %u Abfragen ok", pv_v->r.ac_w, (unsigned)pv_v->ok);
+  else if (pv_v->asleep) snprintf(b, sizeof(b), "Ein \xC2\xB7 Wechselrichter schl\xC3\xA4" "ft");
+  else snprintf(b, sizeof(b), "Ein \xC2\xB7 %s", pv_v->error[0] ? pv_v->error : pv_v->connected ? "Gateway verbunden" : "verbinde");
   lv_label_set_text(enset_val[14], b);
 }
 
@@ -570,9 +585,10 @@ void build_enset_screen(lv_obj_t* screen) {
       {"Wasser anzeigen", ICON_DROP, kAccent, "wa:on"},
       {"Wasserz\xC3\xA4hler", ICON_DROP, kAccent, "wa:bus"},
       {"Wasserpreis inkl. Abwasser", ICON_DROP, kAccent, "wa:price"},
-      {"PV (Growatt) empfangen", ICON_BOLT, kGreen, "pv:on"},
-      {"PV: Growatt-Stick (IP)", ICON_ROUTER, kGreen, "pv:ip"},
-      {"PV: Port", ICON_ROUTER, kGreen, "pv:port"},
+      {"PV (Growatt) lesen", ICON_BOLT, kGreen, "pv:on"},
+      {"PV: Modbus-Gateway (IP)", ICON_ROUTER, kGreen, "pv:ip"},
+      {"PV: Gateway-Port", ICON_ROUTER, kGreen, "pv:port"},
+      {"PV: Unit-ID", ICON_ROUTER, kGreen, "pv:unit"},
   };
   for (int i = 0; i < kEnRows; ++i)
     make_value_row(list, 0, rows[i].name, rows[i].icon, rows[i].color, on_enset_row, i, rows[i].key, &enset_val[i]);

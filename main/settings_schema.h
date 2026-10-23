@@ -7,7 +7,7 @@
 #include <stdint.h>
 
 // Bumped when a key changes meaning, type or range; settings_migrate() converts.
-constexpr uint8_t kCfgVersion = 5;  // 2: wst_from replaces rem_lwst; 3: cal_lead/cal_from replace rem_lcal; 4: Energie; 5: PV
+constexpr uint8_t kCfgVersion = 6;  // 2: wst_from replaces rem_lwst; 3: cal_lead/cal_from replace rem_lcal; 4: Energie; 5: PV; 6: PV via Modbus TCP gateway
 
 enum class KeyType : uint8_t { U8, U16, Str, Blob };
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "energy.h"
+#include "pv.h"
 // User settings kept in NVS (namespace "panel"): Wi-Fi credentials and the
 // weather location. Types shared between the UI and the network task.
 
@@ -121,9 +122,10 @@ enum TextSetting : uint8_t {
   kTextWaPrice = 11,   // Wasser CHF/m3 (incl. Abwasser)
   kTextEnHtWin = 12,   // HT-Zeiten Mo-Fr "06:00-10:00,17:00-21:00"
   kTextEnSwitch = 13,  // Wechsel auf HT/NT ab "2027-01-01"
-  kTextPvIp = 14,      // PV: IPv4 of the Growatt ShineLan stick (only this peer is accepted)
-  kTextPvPort = 15,    // PV: TCP port the panel listens on (5279)
-  kTextSettingN = 16
+  kTextPvGw = 14,      // PV: IPv4 of the Modbus TCP gateway (RS485 -> Growatt), "pv_gw"
+  kTextPvGwPort = 15,  // PV: Modbus TCP port (502), "pv_gwport"
+  kTextPvUnit = 16,    // PV: Modbus unit id of the inverter (1), "pv_unit"
+  kTextSettingN = 17
 };
 // own = true when the value came from NVS. Returns false if empty.
 bool settings_load_text(TextSetting which, char* out, size_t n, bool* own);
@@ -143,11 +145,13 @@ struct EnergySettings {
 };
 EnergySettings settings_load_energy();
 bool settings_save_energy_flags(const EnergySettings& e);  // on, poll, model, exp, water on/bus
-// PV (Growatt ShineLan, on-panel Grott server): "pv_on" (default on).
+// PV (Growatt via Modbus TCP gateway, read only): "pv_on" (default on).
 bool settings_load_pv_on();
 bool settings_save_pv_on(bool on);
 // History (internal, excluded from backups): one blob, written at most hourly.
 bool settings_load_energy_hist(EnergyHist* h);
+bool settings_load_pv_hist(PvHist* h);       // "pv_hist" blob (daily PV kWh)
+bool settings_save_pv_hist(const PvHist& h);
 bool settings_save_energy_hist(const EnergyHist& h);
 
 // --- Termin-Erinnerungen ---
