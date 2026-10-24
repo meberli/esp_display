@@ -36,6 +36,10 @@ namespace {
 // bounce buffers. Here PSRAM runs at 80 MHz octal and Wi-Fi/LVGL share it, so 16 MHz
 // (~56 Hz refresh) leaves headroom for the bounce-buffer refills (36 -> 32 MB/s scan-out).
 constexpr uint32_t kPclkHz = 16 * 1000 * 1000;
+// 10 lines (~0.3 ms) were too little slack: every ~12 s a late bounce EOF ISR
+// (Wi-Fi/flash critical sections) made the driver restart DMA mid-frame, which
+// shows one torn/shifted frame ("flicker"). vsync - fb_complete counts those.
+constexpr int kBounceLines = 20;
 
 // ---------------------------------------------------------------------------
 // Shared I2C bus (expander + touch).
@@ -303,7 +307,7 @@ bool rgb_begin() {
   // tearing/flicker). Bounce buffers stay: DMA reads internal RAM, the CPU refills
   // them from PSRAM, so PSRAM/flash stalls do not starve the panel directly.
   c.num_fbs = 2;
-  c.bounce_buffer_size_px = kPanelWidth * 10;  // 2 x 10 lines in internal DRAM
+  c.bounce_buffer_size_px = kPanelWidth * kBounceLines;  // 2 x N lines in internal DRAM
   c.dma_burst_size = 64;
   c.hsync_gpio_num = static_cast<gpio_num_t>(kPinHsync);
   c.vsync_gpio_num = static_cast<gpio_num_t>(kPinVsync);
@@ -433,6 +437,11 @@ void sync_dirty(lv_disp_drv_t* drv, const uint16_t* from, uint16_t* to, bool wri
   (void)drv;
 }
 
+// Ring of the last flips for DIAGHW (time, area count, dirty rows, which FB).
+struct FlipLog { uint32_t t_ms; uint8_t n; uint8_t idx; int16_t y1, y2; };
+FlipLog flip_log[8];
+uint32_t flip_log_pos = 0;
+
 void panel_flush(lv_disp_drv_t* drv, const lv_area_t*, lv_color_t* color) {
   if (!lv_disp_flush_is_last(drv)) {
     lv_disp_flush_ready(drv);
@@ -452,6 +461,19 @@ void panel_flush(lv_disp_drv_t* drv, const lv_area_t*, lv_color_t* color) {
   sync_dirty(drv, shown, other, false);
   const int64_t t2 = esp_timer_get_time();
   ++st_flips;
+  {
+    lv_disp_t* d = _lv_refr_get_disp_refreshing();
+    FlipLog& L = flip_log[flip_log_pos++ % 8];
+    L.t_ms = static_cast<uint32_t>(t0 / 1000);
+    L.n = static_cast<uint8_t>(d->inv_p);
+    L.idx = shown == fbs[0] ? 0 : 1;
+    L.y1 = 480; L.y2 = -1;
+    for (int i = 0; i < d->inv_p; ++i) {
+      if (d->inv_area_joined[i]) continue;
+      if (d->inv_areas[i].y1 < L.y1) L.y1 = d->inv_areas[i].y1;
+      if (d->inv_areas[i].y2 > L.y2) L.y2 = d->inv_areas[i].y2;
+    }
+  }
   if (t1 - t0 > st_flip_max_us) st_flip_max_us = static_cast<uint32_t>(t1 - t0);
   if (t2 - t1 > st_copy_max_us) st_copy_max_us = static_cast<uint32_t>(t2 - t1);
   lv_disp_flush_ready(drv);
@@ -645,13 +667,35 @@ void panel_hw_dump() {
   const int64_t age = esp_timer_get_time() - st_vsync_last;
   console_printf("DIAG RGB pclk=%lu fbs=2 bounce=%d vsync=%lu fb_complete=%lu vsync_max_us=%lu last_vsync_age_us=%lld "
                  "flips=%lu flip_max_us=%lu copy_max_us=%lu flip_timeouts=%lu early_vsync=%lu\n",
-                 (unsigned long)kPclkHz, kPanelWidth * 10, (unsigned long)st_vsync, (unsigned long)st_bounce,
+                 (unsigned long)kPclkHz, kPanelWidth * kBounceLines, (unsigned long)st_vsync, (unsigned long)st_bounce,
                  (unsigned long)st_vsync_max_us, (long long)age, (unsigned long)st_flips, (unsigned long)st_flip_max_us,
                  (unsigned long)st_copy_max_us, (unsigned long)st_flip_timeouts,
                  (unsigned long)st_early_vsync);
   st_vsync_max_us = 0;  // maxima since the last DIAGHW
   st_flip_max_us = 0;
   st_copy_max_us = 0;
+  {
+    // Rows where the two FBs differ (CPU view). Outside a refresh they must be
+    // identical, otherwise the next swap shows stale content for a frame.
+    int diff = 0, first = -1, last = -1;
+    for (int y = 0; y < kPanelHeight; ++y) {
+      if (memcmp(fbs[0] + y * kPanelWidth, fbs[1] + y * kPanelWidth, kPanelWidth * 2) != 0) {
+        ++diff;
+        if (first < 0) first = y;
+        last = y;
+      }
+    }
+    console_printf("DIAG RGBFB shown=%d diff_rows=%d (%d..%d)\n", fb == fbs[0] ? 0 : 1, diff, first, last);
+    char lb[220];
+    int k = 0;
+    for (int i = 0; i < 8; ++i) {
+      const FlipLog& L = flip_log[(flip_log_pos + i) % 8];
+      if (L.t_ms == 0) continue;
+      k += snprintf(lb + k, sizeof(lb) - k, " %lu:fb%u n=%u y%d-%d", (unsigned long)L.t_ms, L.idx, L.n, L.y1, L.y2);
+      if (k >= (int)sizeof(lb) - 1) break;
+    }
+    console_printf("DIAG RGBFLIPS%s\n", lb);
+  }
   console_printf("DIAG RGBPINS order_ok=%d (gpio:data_bit) %s pclk_sel=%u de_sel=%u\n", order, buf,
                  (unsigned)(GPIO.func_out_sel_cfg[kPinPclk].val & 0x1FF), (unsigned)(GPIO.func_out_sel_cfg[kPinDe].val & 0x1FF));
 }
