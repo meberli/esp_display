@@ -16,6 +16,8 @@
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_panel_rgb.h"
 #include "esp_rom_sys.h"
+#include "soc/gpio_sig_map.h"
+#include "soc/gpio_struct.h"
 #include "fonts.h"
 #include "lvgl.h"
 #include "panel_ui.h"
@@ -167,6 +169,7 @@ const uint8_t kInit[] = {
     0xB8, 1, 0x21,
     0xC1, 1, 0x78,
     0xC2, 1, 0x78,
+    0x00, 0xFF, 20,  // Seeed: Delay(20) after bank-1 power settings
     0xE0, 3, 0x00, 0x1B, 0x02,
     0xE1, 11, 0x08, 0xA0, 0x00, 0x00, 0x07, 0xA0, 0x00, 0x00, 0x00, 0x44, 0x44,
     0xE2, 12, 0x11, 0x11, 0x44, 0x44, 0xED, 0xA0, 0x00, 0x00, 0xEC, 0xA0, 0x00, 0x00,
@@ -282,6 +285,7 @@ bool touch_ok = false;
 bool last_pressed = false;
 int last_x = 0;
 int last_y = 0;
+int raw_min_x = 9999, raw_max_x = -1, raw_min_y = 9999, raw_max_y = -1;
 
 bool ft_read(uint8_t reg, uint8_t* out, size_t n) {
   return i2c_master_transmit_receive(ft, &reg, 1, out, n, 50) == ESP_OK;
@@ -317,6 +321,10 @@ void ft_poll() {
   if (n > 0 && n <= 2) {
     int raw_x = ((p[1] & 0x0F) << 8) | p[2];
     int raw_y = ((p[3] & 0x0F) << 8) | p[4];
+    if (raw_x < raw_min_x) raw_min_x = raw_x;
+    if (raw_x > raw_max_x) raw_max_x = raw_x;
+    if (raw_y < raw_min_y) raw_min_y = raw_y;
+    if (raw_y > raw_max_y) raw_max_y = raw_y;
     ft_map(raw_x, raw_y);
   } else {
     last_pressed = false;
@@ -418,6 +426,10 @@ uint8_t panel_touch_begin() {
   }
   ft = add_dev(ft_addr, 400000);
   if (ft == nullptr) return 0;
+  // Same register setup as Seeed's ft5x06_init (thresholds and timing).
+  const uint8_t setup[][2] = {{0x80, 70}, {0x81, 60}, {0x82, 16}, {0x83, 60}, {0x84, 10},
+                              {0x85, 20}, {0x87, 2},  {0x88, 12}, {0x89, 40}};
+  for (const auto& r : setup) i2c_master_transmit(ft, r, 2, 50);
   touch_ok = true;
   console_printf("FT6336 at 0x%02X\n", ft_addr);
   return ft_addr;
@@ -501,3 +513,36 @@ bool panel_lvgl_start() {
 void panel_relay_begin() {}
 bool panel_relay_is_on() { return false; }
 void panel_relay_set(bool) {}
+
+// DIAGHW (D1): read-only hardware readback for verification without a camera.
+void panel_hw_dump() {
+  uint8_t id[4] = {}, th[10] = {}, mode = 0xFF;
+  bool a = touch_ok && ft_read(0xA3, id, 1) && ft_read(0xA6, id + 1, 1) && ft_read(0xA8, id + 2, 1) &&
+           ft_read(0xA1, id + 3, 1);
+  bool b = touch_ok && ft_read(0x80, th, sizeof(th));
+  bool c = touch_ok && ft_read(0xA4, &mode, 1);
+  console_printf("DIAG FT addr=0x%02X ok=%d%d%d chip=0x%02X fw=0x%02X vendor=0x%02X lib=0x%02X g_mode=0x%02X "
+                 "th=%u/%u/%u/%u/%u/%u act=%u mon=%u raw_x=%d..%d raw_y=%d..%d\n",
+                 ft_addr, a, b, c, id[0], id[1], id[2], id[3], mode, th[0], th[1], th[2], th[3], th[4], th[5], th[8],
+                 th[9], raw_min_x, raw_max_x, raw_min_y, raw_max_y);
+  uint16_t out = 0, cfg = 0;
+  bool e = exp_dev && exp_read16(2, &out) && exp_read16(6, &cfg);
+  console_printf("DIAG EXP addr=0x%02X ok=%d out=%04X cfg=%04X lcd_cs=%d lcd_rst=%d tp_rst=%d\n", exp_addr, e, out, cfg,
+                 (out >> kExpLcdCs) & 1, (out >> kExpLcdRst) & 1, (out >> kExpTpRst) & 1);
+  console_printf("DIAG BLPIN gpio%d out_sel=%u (ledc_ls0=%u) inv=%u duty=%lu\n", kPinBacklight,
+                 (unsigned)(GPIO.func_out_sel_cfg[kPinBacklight].val & 0x1FF), (unsigned)LEDC_LS_SIG_OUT0_IDX,
+                 (unsigned)((GPIO.func_out_sel_cfg[kPinBacklight].val >> 9) & 1),
+                 (unsigned long)ledc_get_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0));
+  const int pins[16] = {kPinB0, kPinB1, kPinB2, kPinB3, kPinB4, kPinG0, kPinG1, kPinG2,
+                        kPinG3, kPinG4, kPinG5, kPinR0, kPinR1, kPinR2, kPinR3, kPinR4};
+  char buf[200];
+  int k = 0;
+  bool order = true;
+  for (int i = 0; i < 16; ++i) {
+    unsigned sel = (GPIO.func_out_sel_cfg[pins[i]].val & 0x1FF);
+    if (sel != (unsigned)(LCD_DATA_OUT0_IDX + i)) order = false;
+    k += snprintf(buf + k, sizeof(buf) - k, "%d:%u ", pins[i], sel - LCD_DATA_OUT0_IDX);
+  }
+  console_printf("DIAG RGBPINS order_ok=%d (gpio:data_bit) %s pclk_sel=%u de_sel=%u\n", order, buf,
+                 (unsigned)(GPIO.func_out_sel_cfg[kPinPclk].val & 0x1FF), (unsigned)(GPIO.func_out_sel_cfg[kPinDe].val & 0x1FF));
+}

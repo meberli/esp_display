@@ -434,3 +434,5 @@ bool panel_relay_is_on() { return gpio_get_level(static_cast<gpio_num_t>(kPinRel
 void panel_relay_set(bool on) {
   gpio_set_level(static_cast<gpio_num_t>(kPinRelay1), on ? kRelayOnLevel : kRelayOffLevel);
 }
+
+void panel_hw_dump() {}

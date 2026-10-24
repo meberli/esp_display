@@ -203,7 +203,7 @@ void stacks(bool warn_only) {
 }
 
 bool read_only(const char* line) {
-  return strcmp(line, "DIAGGT") == 0 || strcmp(line, "DIAGFB") == 0 || strcmp(line, "DIAGSTATS") == 0 ||
+  return strcmp(line, "DIAGGT") == 0 || strcmp(line, "DIAGHW") == 0 || strcmp(line, "DIAGFB") == 0 || strcmp(line, "DIAGSTATS") == 0 ||
          strcmp(line, "DIAGSTACK") == 0 || strcmp(line, "DIAGENERGY") == 0 || strcmp(line, "DIAGHEALTH") == 0;
 }
 
@@ -268,6 +268,8 @@ void handle(const char* line) {
   } else if (sscanf(line, "DIAGBL %d", &a) == 1 && a >= 0 && a <= 100) {
     panel_backlight(static_cast<uint8_t>(a), 0);  // live brightness test (next screen on/off resets it)
     console_puts("DIAG OK");
+  } else if (strcmp(line, "DIAGHW") == 0) {
+    panel_hw_dump();
   } else if (strcmp(line, "DIAGSTATS") == 0) {
     stats();
   } else if (strcmp(line, "DIAGSTACK") == 0) {
