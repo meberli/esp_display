@@ -11,6 +11,7 @@
 #include "esp_heap_caps.h"
 #include "esp_http_server.h"
 #include "esp_https_ota.h"
+#include "ota_board.h"
 #include "net.h"
 #include "esp_netif.h"
 #include "esp_ota_ops.h"
@@ -257,6 +258,10 @@ esp_err_t on_update(httpd_req_t* req) {
   }
   size_t left = req->content_len;
   esp_err_t err = ESP_OK;
+  uint8_t hdr[kOtaBoardHeaderBytes];
+  size_t hdr_n = 0;
+  bool wrong_board = false;
+  char board[33] = "";
   g_ota_pct = 0;
   int timeouts = 0;
   while (left > 0 && err == ESP_OK) {
@@ -267,6 +272,17 @@ esp_err_t on_update(httpd_req_t* req) {
     if (r <= 0) {
       err = ESP_FAIL;
       break;
+    }
+    if (hdr_n < sizeof(hdr)) {  // board check on the header, before anything can boot
+      size_t k = sizeof(hdr) - hdr_n < static_cast<size_t>(r) ? sizeof(hdr) - hdr_n : static_cast<size_t>(r);
+      memcpy(hdr + hdr_n, buf, k);
+      hdr_n += k;
+      if (hdr_n == sizeof(hdr) &&
+          ota_board_check_image(hdr, hdr_n, esp_app_get_description()->project_name, board) == kOtaBoardMismatch) {
+        wrong_board = true;
+        err = ESP_ERR_INVALID_VERSION;
+        break;
+      }
     }
     err = esp_ota_write(ota, buf, r);
     left -= static_cast<size_t>(r);
@@ -281,6 +297,13 @@ esp_err_t on_update(httpd_req_t* req) {
     ESP_LOGW(TAG, "Web: firmware upload failed: %s", esp_err_to_name(err));
     httpd_resp_set_status(req, "500 Internal Server Error");
     char msg[120];
+    if (wrong_board) {
+      console_printf("Web: firmware for board '%s' refused (running '%s')\n", board,
+                     esp_app_get_description()->project_name);
+      httpd_resp_set_status(req, "400 Bad Request");
+      snprintf(msg, sizeof(msg), "Update abgelehnt: Firmware fuer anderes Board (%.40s)", board);
+      return httpd_resp_sendstr(req, msg);
+    }
     snprintf(msg, sizeof(msg), "Update fehlgeschlagen: %s", err == ESP_ERR_OTA_VALIDATE_FAILED
                                                               ? "Signatur ungueltig oder fehlt (nur signierte Releases)"
                                                               : esp_err_to_name(err));
@@ -397,6 +420,21 @@ bool maint_ota_from_url(const char* url, char* err, size_t n) {
   esp_err_t e = esp_https_ota_begin(&cfg, &h);
   if (e != ESP_OK) {
     snprintf(err, n, "Download: %s", esp_err_to_name(e));
+    g_ota_pct = -1;
+    return false;
+  }
+  // Board check before any data is written (esp_https_ota_finish would set
+  // the boot partition).
+  esp_app_desc_t desc = {};
+  e = esp_https_ota_get_img_desc(h, &desc);
+  if (e != ESP_OK || !ota_board_same(desc.project_name, esp_app_get_description()->project_name)) {
+    char board[33];
+    memcpy(board, desc.project_name, 32);
+    board[32] = '\0';
+    esp_https_ota_abort(h);
+    console_printf("OTA: image for board '%s' refused (running '%s')\n", e == ESP_OK ? board : "?",
+                   esp_app_get_description()->project_name);
+    snprintf(err, n, e == ESP_OK ? "Firmware fuer anderes Board - abgelehnt" : "Update: %s", esp_err_to_name(e));
     g_ota_pct = -1;
     return false;
   }

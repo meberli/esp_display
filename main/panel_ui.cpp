@@ -25,6 +25,7 @@
 #include "energy_task.h"
 #include "pv_task.h"
 #include "panel_hw.h"
+#include "board_pins.h"
 #include "weather_derive.h"
 #include <esp_heap_caps.h>
 #include <esp_random.h>

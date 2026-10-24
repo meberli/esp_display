@@ -21,6 +21,7 @@ jobs:
           set -e
           g++ -std=c++17 -Wall -I main tools/test_ical.cpp main/ical.cpp -o /tmp/ti && TZ=Europe/Zurich /tmp/ti
           g++ -std=c++17 -Wall -I main -DOTA_VER_HOST tools/test_ota_ver.cpp -o /tmp/to && /tmp/to
+          g++ -std=c++17 -Wall -I main tools/test_ota_board.cpp main/ota_board.cpp -o /tmp/tob && /tmp/tob
           g++ -std=c++17 -Wall -Itools/host_stub -Imain tools/test_settings_schema.cpp main/settings_schema.cpp -o /tmp/ts && /tmp/ts
           g++ -std=c++17 -Wall -I main -I components/ArduinoJson/src tools/test_waste_api.cpp main/waste_api.cpp main/ical.cpp -o /tmp/twa && TZ=Europe/Zurich /tmp/twa
           g++ -std=c++17 -Wall -I main -I components/ArduinoJson/src tools/test_energy.cpp main/energy.cpp -o /tmp/te && TZ=Europe/Zurich /tmp/te
@@ -42,6 +43,9 @@ jobs:
           espsecure generate-signing-key --version 2 --scheme rsa3072 secure/signing_key.pem
           idf.py set-target esp32s3
           idf.py build
+          idf.py -B build-d1 -DSDKCONFIG=build-d1/sdkconfig -DPANEL_BOARD=sensecap_d1 set-target esp32s3
+          idf.py -B build-d1 -DSDKCONFIG=build-d1/sdkconfig -DPANEL_BOARD=sensecap_d1 build
           rm -f secure/signing_key.pem
           python tools/check_secrets.py --generic build/loxone_panel.bin
+          python tools/check_secrets.py --generic build-d1/loxone_panel_sensecap_d1.bin
           idf.py size | tail -n 15

@@ -219,12 +219,17 @@ void pack_other(int* idxs, int n) {
   if (page_n >= kMaxPages) {
     return;
   }
+  // Boards without a relay (SenseCAP D1): no "Sonstiges" page unless there
+  // are other controls, and no relay tile.
+  if (!kBoardHasRelay && n == 0) {
+    return;
+  }
   PagePlan* current = &pages[page_n++];
   current->section = kSecOther;
   current->nrows = 1;
-  current->rows[0] = RowPlan{false, kLocalRelay, -1};
+  current->rows[0] = RowPlan{false, kBoardHasRelay ? kLocalRelay : idxs[0], -1};
   current->rows[1] = RowPlan{false, -1, -1};
-  int i = 0;
+  int i = kBoardHasRelay ? 0 : 1;
   if (i < n) {
     current->rows[0].b = idxs[i++];
   }

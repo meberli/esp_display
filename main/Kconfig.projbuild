@@ -1,5 +1,20 @@
 menu "Loxone panel"
 
+choice PANEL_BOARD
+    prompt "Board"
+    default PANEL_BOARD_GUITION
+    help
+        Selected by sdkconfig.defaults.sensecap (idf.py -DPANEL_BOARD=sensecap_d1).
+        The CMake project name must match (checked in main/CMakeLists.txt).
+
+config PANEL_BOARD_GUITION
+    bool "Guition ESP32-4848S040C"
+
+config PANEL_BOARD_SENSECAP_D1
+    bool "Seeed SenseCAP Indicator D1"
+
+endchoice
+
 config PANEL_TEST_HARNESS
     bool "Serial test harness (SHOT, TAP, SWIPE, STATE ...)"
     default n

@@ -867,12 +867,18 @@ void ui_task(void*) {
   console_begin(SERIAL_BAUD, 1024, 4096);
 #endif
   vTaskDelay(pdMS_TO_TICKS(200));
+#if CONFIG_PANEL_BOARD_SENSECAP_D1
+  console_printf("%s Loxone panel (ESP-IDF)\n", kBoardName);
+#else
   console_puts("ESP32-4848S040C_I_Y_1 Loxone panel (ESP-IDF)");
+#endif
   console_printf("Flash %u bytes, PSRAM %u bytes\n", static_cast<unsigned>(sys_flash_size()),
                  static_cast<unsigned>(sys_psram_size()));
   panel_relay_begin();
-  console_printf("Relay 1 GPIO%d off (level %d). GPIO%d and GPIO%d left unconfigured\n", kPinRelay1,
-                 kRelayOffLevel, kPinRelay2, kPinRelay3);
+  if (kBoardHasRelay) {
+    console_printf("Relay 1 GPIO%d off (level %d). GPIO%d and GPIO%d left unconfigured\n", kPinRelay1,
+                   kRelayOffLevel, kPinRelay2, kPinRelay3);
+  }
   if (!panel_display_begin()) halt("Display init failed");
   panel_touch_begin();
   if (!panel_lvgl_start()) halt("LVGL init failed");

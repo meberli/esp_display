@@ -1,5 +1,6 @@
 #include "diag.h"
 #include "ota_check.h"
+#include "ota_board.h"
 
 #include <ArduinoJson.h>
 #include <ctype.h>
@@ -119,12 +120,15 @@ bool check_github(const char* api, OtaCheck* out) {
     return false;
   }
   snprintf(out->version, sizeof(out->version), "%s", (tag[0] == 'v' || tag[0] == 'V') ? tag + 1 : tag);
+  // Asset of this board: "<project_name>.bin" (loxone_panel.bin on the Guition).
+  char asset[48];
+  ota_board_asset(esp_app_get_description()->project_name, asset, sizeof(asset));
   for (JsonObject a : doc["assets"].as<JsonArray>()) {
     const char* name = a["name"] | "";
-    if (strcmp(name, "loxone_panel.bin") == 0) snprintf(out->url, sizeof(out->url), "%s", a["browser_download_url"] | "");
+    if (strcmp(name, asset) == 0) snprintf(out->url, sizeof(out->url), "%s", a["browser_download_url"] | "");
   }
   if (out->url[0] == '\0') {
-    snprintf(out->err, sizeof(out->err), "Release v%s ohne loxone_panel.bin", out->version);
+    snprintf(out->err, sizeof(out->err), "Release v%s ohne %s", out->version, asset);
     return false;
   }
   ascii_line(doc["body"] | "", out->notes, sizeof(out->notes));
@@ -181,6 +185,14 @@ bool check_image(const char* url, OtaCheck* out) {
   uint32_t magic = got >= 36 ? (buf[32] | buf[33] << 8 | buf[34] << 16 | static_cast<uint32_t>(buf[35]) << 24) : 0;
   if (got < 80 || buf[0] != 0xE9 || magic != 0xABCD5432) {
     snprintf(out->err, sizeof(out->err), "Keine Firmware unter der Update-URL");
+    return false;
+  }
+  char board[33];
+  if (ota_board_check_image(buf, static_cast<size_t>(got), esp_app_get_description()->project_name, board) !=
+      kOtaBoardOk) {
+    console_printf("OTA check: image is for board '%s', running '%s'\n", board,
+                   esp_app_get_description()->project_name);
+    snprintf(out->err, sizeof(out->err), "Firmware fuer anderes Board (%.40s)", board);
     return false;
   }
   char v[33];

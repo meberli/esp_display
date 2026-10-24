@@ -1,6 +1,7 @@
 # Release build for OTA: on a tag "v*", build the app in a clean checkout
 # (no sdkconfig.defaults.local, no panel_config.h: no Wi-Fi, Loxone, Windy or
-# iCal secrets in the image) and attach loxone_panel.bin to the release.
+# iCal secrets in the image) and attach loxone_panel.bin (Guition) and
+# loxone_panel_sensecap_d1.bin (SenseCAP Indicator D1) to the release.
 # The panel keeps its secrets in NVS (settings_seed_from_build on the first
 # boot of a locally built firmware).
 name: Release
@@ -44,12 +45,27 @@ jobs:
           idf.py set-target esp32s3
           idf.py build
           espsecure verify-signature --version 2 --keyfile tools/esp_display_signing_pub.pem build/loxone_panel.bin
-          rm -f secure/signing_key.pem
           python tools/check_secrets.py --generic build/loxone_panel.bin
           cp build/loxone_panel.bin loxone_panel.bin
           sha256sum loxone_panel.bin > loxone_panel.bin.sha256
           grep -q "^CONFIG_PANEL_WINDY_API_KEY=\"\"$" sdkconfig
           grep -q "^CONFIG_PANEL_ICAL_URL=\"\"$" sdkconfig
+      - name: Build SenseCAP Indicator D1
+        shell: bash
+        run: |
+          git config --global --add safe.directory '*'
+          . "$IDF_PATH/export.sh"
+          D1="-B build-d1 -DSDKCONFIG=build-d1/sdkconfig -DPANEL_BOARD=sensecap_d1"
+          idf.py $D1 set-target esp32s3
+          idf.py $D1 build
+          espsecure verify-signature --version 2 --keyfile tools/esp_display_signing_pub.pem build-d1/loxone_panel_sensecap_d1.bin
+          rm -f secure/signing_key.pem
+          python tools/check_secrets.py --generic build-d1/loxone_panel_sensecap_d1.bin
+          cp build-d1/loxone_panel_sensecap_d1.bin loxone_panel_sensecap_d1.bin
+          sha256sum loxone_panel_sensecap_d1.bin > loxone_panel_sensecap_d1.bin.sha256
+          grep -q "^CONFIG_PANEL_BOARD_SENSECAP_D1=y$" build-d1/sdkconfig
+          grep -q "^CONFIG_PANEL_WINDY_API_KEY=\"\"$" build-d1/sdkconfig
+          grep -q "^CONFIG_PANEL_ICAL_URL=\"\"$" build-d1/sdkconfig
       - name: Remove signing key
         if: always()
         shell: bash
@@ -60,4 +76,6 @@ jobs:
           files: |
             loxone_panel.bin
             loxone_panel.bin.sha256
+            loxone_panel_sensecap_d1.bin
+            loxone_panel_sensecap_d1.bin.sha256
           generate_release_notes: true

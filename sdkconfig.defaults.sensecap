@@ -1,0 +1,7 @@
+# SenseCAP Indicator D1, merged after sdkconfig.defaults when building with
+#   idf.py -B build-d1 -DSDKCONFIG=build-d1/sdkconfig -DPANEL_BOARD=sensecap_d1 build
+CONFIG_PANEL_BOARD_SENSECAP_D1=y
+# 8 MB Winbond flash. DIO: QIO is not verified on this board yet.
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_sensecap.csv"
