@@ -29,3 +29,9 @@ secure/
 *.pem
 !tools/esp_display_signing_pub.pem
 v*shots/
+
+# SenseCAP D1 flash backups (contain NVS incl. Wi-Fi data)
+sensecap_backup/
+*_backup*.bin
+*.backup.bin
+
