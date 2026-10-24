@@ -247,6 +247,12 @@ volatile int64_t st_vsync_last = 0;
 volatile uint32_t st_vsync_max_us = 0;
 uint32_t st_flips = 0, st_flip_max_us = 0, st_copy_max_us = 0, st_flip_timeouts = 0;
 volatile bool want_vsync = false;
+// The bounce-buffer ISR latches the next scan-out FB (bb_fb_index = cur_fb_index) when it has
+// fetched the last line of a frame, which is BEFORE that frame's VSYNC (prefetch). A swap
+// requested between that latch and VSYNC is only picked up one frame later, so waiting for
+// VSYNC alone let sync_dirty() write into the FB that was still being scanned -> one-frame
+// flash at the end of scroll/swipe. We now wait for on_frame_buf_complete (= latch point).
+volatile uint32_t st_early_vsync = 0;  // VSYNCs seen while a swap was pending but not latched
 
 bool IRAM_ATTR on_vsync(esp_lcd_panel_handle_t, const esp_lcd_rgb_panel_event_data_t*, void*) {
   const int64_t t = esp_timer_get_time();
@@ -257,16 +263,18 @@ bool IRAM_ATTR on_vsync(esp_lcd_panel_handle_t, const esp_lcd_rgb_panel_event_da
   st_vsync_last = t;
   st_vsync = st_vsync + 1;
   BaseType_t woken = pdFALSE;
-  if (want_vsync) {
-    want_vsync = false;
-    xSemaphoreGiveFromISR(vsync_sem, &woken);
-  }
+  if (want_vsync) st_early_vsync = st_early_vsync + 1;
   return woken == pdTRUE;
 }
 
 bool IRAM_ATTR on_frame_buf_complete(esp_lcd_panel_handle_t, const esp_lcd_rgb_panel_event_data_t*, void*) {
   st_bounce = st_bounce + 1;
-  return false;
+  BaseType_t woken = pdFALSE;
+  if (want_vsync) {  // the driver has just latched cur_fb for the next frame
+    want_vsync = false;
+    xSemaphoreGiveFromISR(vsync_sem, &woken);
+  }
+  return woken == pdTRUE;
 }
 
 bool rgb_begin() {
@@ -436,7 +444,7 @@ void panel_flush(lv_disp_drv_t* drv, const lv_area_t*, lv_color_t* color) {
   const int64_t t0 = esp_timer_get_time();
   xSemaphoreTake(vsync_sem, 0);
   want_vsync = true;
-  esp_lcd_panel_draw_bitmap(rgb, 0, 0, kPanelWidth, kPanelHeight, shown);  // switch at next vsync
+  esp_lcd_panel_draw_bitmap(rgb, 0, 0, kPanelWidth, kPanelHeight, shown);  // latched at next frame end
   if (xSemaphoreTake(vsync_sem, pdMS_TO_TICKS(60)) != pdTRUE) ++st_flip_timeouts;
   want_vsync = false;
   const int64_t t1 = esp_timer_get_time();
@@ -636,10 +644,11 @@ void panel_hw_dump() {
   }
   const int64_t age = esp_timer_get_time() - st_vsync_last;
   console_printf("DIAG RGB pclk=%lu fbs=2 bounce=%d vsync=%lu fb_complete=%lu vsync_max_us=%lu last_vsync_age_us=%lld "
-                 "flips=%lu flip_max_us=%lu copy_max_us=%lu flip_timeouts=%lu\n",
+                 "flips=%lu flip_max_us=%lu copy_max_us=%lu flip_timeouts=%lu early_vsync=%lu\n",
                  (unsigned long)kPclkHz, kPanelWidth * 10, (unsigned long)st_vsync, (unsigned long)st_bounce,
                  (unsigned long)st_vsync_max_us, (long long)age, (unsigned long)st_flips, (unsigned long)st_flip_max_us,
-                 (unsigned long)st_copy_max_us, (unsigned long)st_flip_timeouts);
+                 (unsigned long)st_copy_max_us, (unsigned long)st_flip_timeouts,
+                 (unsigned long)st_early_vsync);
   st_vsync_max_us = 0;  // maxima since the last DIAGHW
   st_flip_max_us = 0;
   st_copy_max_us = 0;
