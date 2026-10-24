@@ -1,0 +1,4 @@
+# Extra settings for the test firmware:
+#   idf.py -B build-test -DSDKCONFIG=build-test/sdkconfig -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.test" build
+CONFIG_PANEL_TEST_HARNESS=y
+CONFIG_PANEL_SERIAL_BAUD=460800

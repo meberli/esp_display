@@ -1,0 +1,86 @@
+menu "Loxone panel"
+
+choice PANEL_BOARD
+    prompt "Board"
+    default PANEL_BOARD_GUITION
+    help
+        Selected by sdkconfig.defaults.sensecap (idf.py -DPANEL_BOARD=sensecap_d1).
+        The CMake project name must match (checked in main/CMakeLists.txt).
+
+config PANEL_BOARD_GUITION
+    bool "Guition ESP32-4848S040C"
+
+config PANEL_BOARD_SENSECAP_D1
+    bool "Seeed SenseCAP Indicator D1"
+
+endchoice
+
+config PANEL_TEST_HARNESS
+    bool "Serial test harness (SHOT, TAP, SWIPE, STATE ...)"
+    default n
+    help
+        Line commands on the console UART for remote testing with
+        tools/panel_test.py, tools/swipe_test.py and friends.
+
+config PANEL_DIAG_INJECT
+    bool "Release console: allow DIAG touch injection and runtime overrides"
+    default n
+    help
+        Without this the release image only answers read-only DIAG commands
+        (DIAGGT, DIAGFB, DIAGSTATS, DIAGSTACK). DIAGTAP/DIAGSWIPE/DIAGRAW,
+        DIAGVER, DIAGSCRTO, DIAGSAVER and DIAGBL need it (or the test harness).
+
+config PANEL_SERIAL_BAUD
+    int "Console/harness baud rate after boot"
+    default 460800 if PANEL_TEST_HARNESS
+    default 115200
+    help
+        The ROM and bootloader always print at 115200. The app switches the
+        console UART to this rate. 921600 drops bytes on the board's CH340.
+
+config PANEL_WINDY_API_KEY
+    string "Windy Webcams API key (build default)"
+    default ""
+    help
+        Used for the Kameras category when no own key is saved in
+        Einstellungen > Kameras. Never commit a key: put
+        CONFIG_PANEL_WINDY_API_KEY="..." into the gitignored
+        sdkconfig.defaults.local (merged by CMakeLists.txt).
+        Get a free key at https://api.windy.com/keys (Webcams API).
+
+config PANEL_ICAL_URL
+    string "Family calendar iCal URL (build default, private)"
+    default ""
+    help
+        Secret address of the calendar (Google: "Secret address in iCal
+        format"). Never commit it: put CONFIG_PANEL_ICAL_URL="..." into the
+        gitignored sdkconfig.defaults.local. Can be changed in
+        Einstellungen > Kalender.
+
+config PANEL_WASTE_API
+    string "Abfallkalender API base URL (https)"
+    default "https://abfall-sg.hispeed.workers.dev"
+    help
+        Base of the Abfallkalender-API (GET <base>/api/abfallkalender?gemeinde=<BFS>).
+        Can be changed in Einstellungen > Kalender.
+
+config PANEL_WASTE_BFS
+    string "Gemeinde (BFS number) for the waste calendar"
+    default "3271"
+    help
+        BFS number of the Gemeinde (3271 = Buchs SG). <base>/api/gemeinden lists them.
+
+config PANEL_OTA_URL
+    string "Firmware update URL (build default)"
+    default "https://github.com/meberli/esp_display/releases/latest/download/loxone_panel.bin"
+    help
+        Image for Einstellungen > Wartung > Update aus dem Internet
+        (HTTPS with the certificate bundle, or HTTP on the LAN).
+
+config PANEL_METEO_PLZ
+    string "MeteoSchweiz location (PLZ + 2 digits)"
+    default "947000"
+    help
+        Postcode for warnings and the precipitation nowcast: 947000 = 9470 Buchs SG.
+
+endmenu

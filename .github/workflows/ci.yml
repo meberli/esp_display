@@ -1,0 +1,52 @@
+# CI on every push / PR: host unit tests and a firmware build with a
+# throwaway signing key (the real key is only used by release.yml), then a
+# generic secret scan of the image. No secrets are needed or used here.
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  host-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Host tests
+        run: |
+          set -e
+          g++ -std=c++17 -Wall -I main tools/test_ical.cpp main/ical.cpp -o /tmp/ti && TZ=Europe/Zurich /tmp/ti
+          g++ -std=c++17 -Wall -I main -DOTA_VER_HOST tools/test_ota_ver.cpp -o /tmp/to && /tmp/to
+          g++ -std=c++17 -Wall -I main tools/test_ota_board.cpp main/ota_board.cpp -o /tmp/tob && /tmp/tob
+          g++ -std=c++17 -Wall -Itools/host_stub -Imain tools/test_settings_schema.cpp main/settings_schema.cpp -o /tmp/ts && /tmp/ts
+          g++ -std=c++17 -Wall -I main -I components/ArduinoJson/src tools/test_waste_api.cpp main/waste_api.cpp main/ical.cpp -o /tmp/twa && TZ=Europe/Zurich /tmp/twa
+          g++ -std=c++17 -Wall -I main -I components/ArduinoJson/src tools/test_energy.cpp main/energy.cpp -o /tmp/te && TZ=Europe/Zurich /tmp/te
+          g++ -std=c++17 -Wall -I main tools/test_energy_mix.cpp main/energy_mix.cpp -o /tmp/tmix && /tmp/tmix
+          g++ -std=c++17 -Wall -I main tools/test_pv.cpp main/pv.cpp -o /tmp/tp && /tmp/tp
+          g++ -std=c++17 -Wall -I main tools/test_waste_window.cpp main/waste_window.cpp -o /tmp/tww && TZ=Europe/Zurich /tmp/tww
+          g++ -std=c++17 -Wall -I main tools/test_weather_derive.cpp main/weather_derive.cpp -o /tmp/tw && /tmp/tw
+
+  build:
+    runs-on: ubuntu-latest
+    container: espressif/idf:v6.1
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build (throwaway signing key)
+        shell: bash
+        run: |
+          git config --global --add safe.directory '*'
+          . "$IDF_PATH/export.sh"
+          mkdir -p secure
+          espsecure generate-signing-key --version 2 --scheme rsa3072 secure/signing_key.pem
+          idf.py set-target esp32s3
+          idf.py build
+          idf.py -B build-d1 -DSDKCONFIG=build-d1/sdkconfig -DPANEL_BOARD=sensecap_d1 set-target esp32s3
+          idf.py -B build-d1 -DSDKCONFIG=build-d1/sdkconfig -DPANEL_BOARD=sensecap_d1 build
+          rm -f secure/signing_key.pem
+          python tools/check_secrets.py --generic build/loxone_panel.bin
+          python tools/check_secrets.py --generic build-d1/loxone_panel_sensecap_d1.bin
+          idf.py size | tail -n 15

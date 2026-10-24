@@ -15,7 +15,7 @@ import random
 
 TILE = (20, 88, 234, 244)       # slot 0 tile box (x0, y0, x1, y1)
 TILE_R = (246, 88, 460, 244)    # slot 1
-CARD_LICHT = (246, 214, 460, 326)
+
 
 
 def diff(a, b, box):
@@ -34,17 +34,21 @@ def main():
     t = Tester(p, random.Random(1))
     res = []
 
-    # Home card mid-swipe
+    # Home button mid-swipe (positions from the harness)
+    lx, ly = p.pos("cat:licht")
+    sx, sy = p.pos("cat:schalter")
+    card_licht = (lx - 68, ly - 56, lx + 68, ly + 56)  # 136x112 button
     p.shot(f("press_home_idle"))
-    p.cmd("PRESS 353 270"); p.cmd("MOVE 340 271"); time.sleep(0.1); p.cmd("MOVE 300 272"); time.sleep(0.3)
+    p.cmd(f"PRESS {lx} {ly}"); p.cmd(f"MOVE {lx - 13} {ly + 1}"); time.sleep(0.1); p.cmd(f"MOVE {lx - 53} {ly + 2}")
+    time.sleep(0.3)
     p.shot(f("press_home_midswipe"))
     p.cmd("RELEASE"); time.sleep(0.8)
-    n = diff(f("press_home_idle"), f("press_home_midswipe"), CARD_LICHT)
+    n = diff(f("press_home_idle"), f("press_home_midswipe"), card_licht)
     res.append(("home card mid-swipe identical", n == 0, n))
     st = t.state(); res.append(("still home after swipe", st["screen"] == "home", st))
 
     # Licht page 1 tiles mid-swipe (both directions, before and past slop)
-    t.tap(353, 270); time.sleep(1.5)
+    t.tap(lx, ly); time.sleep(1.5)
     p.shot(f("press_licht_idle"))
     for name, path, box in (("left", [(353, 166), (345, 167), (330, 168), (290, 170), (230, 172)], TILE_R),
                             ("right", [(127, 166), (135, 165), (160, 164), (210, 162), (260, 160)], TILE),
@@ -67,7 +71,7 @@ def main():
     t.go_home()
 
     # Tap feedback on Relais: idle -> flash (during the 120 ms window) -> on
-    t.tap(353, 396); time.sleep(1.5)
+    t.tap(sx, sy); time.sleep(1.5)
     p.shot(f("press_relais_idle"))
     p.s.write(b"TAP 127 166\n"); time.sleep(0.17); p.s.write(b"SHOT\n")
     # reuse the shot reader: it waits for SHOT_BEGIN, skipping the TAP's OK

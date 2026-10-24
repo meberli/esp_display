@@ -1,0 +1,39 @@
+---
+description: ESP32-S3 firmware rules (native ESP-IDF)
+alwaysApply: true
+---
+
+# ESP32-S3 / ESP-IDF project rules
+
+- Native ESP-IDF v6.x only (tested with v6.1), target ESP32-S3.
+- Language: C11 or C++17/20, written with embedded safety in mind (no unbounded
+  allocation in hot paths, check every esp_err_t, bounded buffers).
+- FORBIDDEN: any Arduino API (Serial.print, delay(), digitalWrite, setup()/loop(), ...).
+  Pure ESP-IDF; no arduino-esp32 component as a fallback.
+- FORBIDDEN: legacy IDF v4 APIs (deprecated drivers, old timer groups, legacy RMT,
+  old I2C/SPI drivers). Use the new drivers: i2c_master, gptimer, esp_lcd, rmt (new), ...
+- Build: CMake only, with idf_component_register. Dependencies through the Component
+  Registry (idf_component.yml).
+- Never edit the generated sdkconfig. All overrides go into sdkconfig.defaults /
+  sdkconfig.defaults.esp32s3. After Kconfig changes run `idf.py reconfigure` or delete build/.
+- Kconfig baseline:
+  - CONFIG_IDF_TARGET="esp32s3"
+  - CONFIG_SPIRAM=y
+  - CONFIG_SPIRAM_MODE_OCT=y
+  - CONFIG_SPIRAM_SPEED_80M=y
+  - CONFIG_FREERTOS_HZ=1000
+  - CONFIG_ESP_TASK_WDT_TIMEOUT_S=5
+
+# FreeRTOS & concurrency
+
+- Always create tasks with xTaskCreatePinnedToCore (never xTaskCreate).
+- Core 0: Wi-Fi, BLE, networking, protocol stacks (Miniserver HTTP, Open-Meteo fetch).
+- Core 1: user logic, sensor processing, UI (LVGL task + touch), heavy computation.
+  JSON parsing may run on core 0 or 1 as appropriate, and must yield.
+- Task pattern: init, then `for (;;) { work; vTaskDelay(...); }`. Never busy-wait.
+  End with vTaskDelete(NULL) as a safeguard.
+- Sync: prefer StreamBuffers/Queues for passing data, and direct-to-task notifications
+  (xTaskNotifyGive / ulTaskNotifyTake) instead of binary semaphores for signalling.
+- ISRs stay minimal and defer work via ...FromISR queues/notifications
+  (e.g. GT911 INT if used, timers).
+- LVGL is accessed only from the UI task; other tasks post to a queue.
