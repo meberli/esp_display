@@ -16,6 +16,9 @@
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_panel_rgb.h"
 #include "esp_rom_sys.h"
+#include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "soc/gpio_sig_map.h"
 #include "soc/gpio_struct.h"
 #include "fonts.h"
@@ -29,7 +32,10 @@ static const char* const TAG = "panel_d1";
 
 namespace {
 
-constexpr uint32_t kPclkHz = 18 * 1000 * 1000;  // Seeed default (GX screen)
+// Seeed runs the GX screen at 18 MHz, but with PSRAM at 120 MHz (experimental) and no
+// bounce buffers. Here PSRAM runs at 80 MHz octal and Wi-Fi/LVGL share it, so 16 MHz
+// (~56 Hz refresh) leaves headroom for the bounce-buffer refills (36 -> 32 MB/s scan-out).
+constexpr uint32_t kPclkHz = 16 * 1000 * 1000;
 
 // ---------------------------------------------------------------------------
 // Shared I2C bus (expander + touch).
@@ -231,7 +237,37 @@ bool st7701_init() {
 // RGB panel. Porches from Seeed (GX): hsync 8/50/10, vsync 8/20/10.
 
 esp_lcd_panel_handle_t rgb = nullptr;
-uint16_t* fb = nullptr;
+uint16_t* fb = nullptr;        // buffer currently scanned out (DIAGFB stats)
+uint16_t* fbs[2] = {};         // both framebuffers = LVGL direct-mode buffers
+SemaphoreHandle_t vsync_sem = nullptr;
+
+// Frame timing for DIAGHW (no camera): vsync count/interval and the flip wait.
+volatile uint32_t st_vsync = 0, st_bounce = 0;
+volatile int64_t st_vsync_last = 0;
+volatile uint32_t st_vsync_max_us = 0;
+uint32_t st_flips = 0, st_flip_max_us = 0, st_copy_max_us = 0, st_flip_timeouts = 0;
+volatile bool want_vsync = false;
+
+bool IRAM_ATTR on_vsync(esp_lcd_panel_handle_t, const esp_lcd_rgb_panel_event_data_t*, void*) {
+  const int64_t t = esp_timer_get_time();
+  if (st_vsync_last != 0) {
+    const uint32_t d = static_cast<uint32_t>(t - st_vsync_last);
+    if (d > st_vsync_max_us) st_vsync_max_us = d;
+  }
+  st_vsync_last = t;
+  st_vsync = st_vsync + 1;
+  BaseType_t woken = pdFALSE;
+  if (want_vsync) {
+    want_vsync = false;
+    xSemaphoreGiveFromISR(vsync_sem, &woken);
+  }
+  return woken == pdTRUE;
+}
+
+bool IRAM_ATTR on_frame_buf_complete(esp_lcd_panel_handle_t, const esp_lcd_rgb_panel_event_data_t*, void*) {
+  st_bounce = st_bounce + 1;
+  return false;
+}
 
 bool rgb_begin() {
   esp_lcd_rgb_panel_config_t c = {};
@@ -253,7 +289,12 @@ bool rgb_begin() {
   c.data_width = 16;
   c.in_color_format = LCD_COLOR_FMT_RGB565;
   c.out_color_format = LCD_COLOR_FMT_RGB565;
-  c.num_fbs = 1;
+  // Two PSRAM framebuffers: LVGL renders into the hidden one (direct mode) and the
+  // driver switches at vsync, so a scroll never shows a half-updated frame (with one
+  // buffer the 40-line flushes were copied into the buffer while it was scanned out:
+  // tearing/flicker). Bounce buffers stay: DMA reads internal RAM, the CPU refills
+  // them from PSRAM, so PSRAM/flash stalls do not starve the panel directly.
+  c.num_fbs = 2;
   c.bounce_buffer_size_px = kPanelWidth * 10;  // 2 x 10 lines in internal DRAM
   c.dma_burst_size = 64;
   c.hsync_gpio_num = static_cast<gpio_num_t>(kPinHsync);
@@ -266,12 +307,23 @@ bool rgb_begin() {
   for (int i = 0; i < 16; ++i) c.data_gpio_nums[i] = static_cast<gpio_num_t>(pins[i]);
   c.flags.fb_in_psram = 1;
   if (esp_lcd_new_rgb_panel(&c, &rgb) != ESP_OK) return false;
+  vsync_sem = xSemaphoreCreateBinary();
+  if (vsync_sem == nullptr) return false;
+  esp_lcd_rgb_panel_event_callbacks_t cbs = {};
+  cbs.on_vsync = on_vsync;
+  cbs.on_frame_buf_complete = on_frame_buf_complete;
+  if (esp_lcd_rgb_panel_register_event_callbacks(rgb, &cbs, nullptr) != ESP_OK) return false;
   if (esp_lcd_panel_reset(rgb) != ESP_OK || esp_lcd_panel_init(rgb) != ESP_OK) return false;
-  void* p = nullptr;
-  if (esp_lcd_rgb_panel_get_frame_buffer(rgb, 1, &p) != ESP_OK || p == nullptr) return false;
-  fb = static_cast<uint16_t*>(p);
-  memset(fb, 0, kPanelWidth * kPanelHeight * 2);
-  esp_cache_msync(fb, kPanelWidth * kPanelHeight * 2, ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+  void* p0 = nullptr;
+  void* p1 = nullptr;
+  if (esp_lcd_rgb_panel_get_frame_buffer(rgb, 2, &p0, &p1) != ESP_OK || p0 == nullptr || p1 == nullptr) return false;
+  fbs[0] = static_cast<uint16_t*>(p0);
+  fbs[1] = static_cast<uint16_t*>(p1);
+  fb = fbs[0];
+  for (uint16_t* b : fbs) {
+    memset(b, 0, kPanelWidth * kPanelHeight * 2);
+    esp_cache_msync(b, kPanelWidth * kPanelHeight * 2, ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+  }
   return true;
 }
 
@@ -291,11 +343,18 @@ bool ft_read(uint8_t reg, uint8_t* out, size_t n) {
   return i2c_master_transmit_receive(ft, &reg, 1, out, n, 50) == ESP_OK;
 }
 
-// Seeed ROTATION_0: no swap, no mirror.
+// The FT6336 reports in the opposite corner to the ST7701S scan origin: Seeed's
+// indicator_basis lv_port.c maps x = 480 - x, y = 480 - y for ROTATION_0 (seen on the
+// D1: a tap bottom-left hit the element top-right). Mirrored on both axes, no swap.
+int ft_mirror(int v, int size) {
+  int m = size - 1 - v;
+  return m < 0 ? 0 : (m >= size ? size - 1 : m);
+}
+
 void ft_map(int raw_x, int raw_y) {
   bool was = last_pressed;
-  last_x = raw_x;
-  last_y = raw_y;
+  last_x = ft_mirror(raw_x, kPanelWidth);
+  last_y = ft_mirror(raw_y, kPanelHeight);
   last_pressed = true;
   if (!was) console_printf("FT6336 press raw %d,%d -> %d,%d\n", raw_x, raw_y, last_x, last_y);
 }
@@ -339,17 +398,54 @@ lv_disp_draw_buf_t draw_buf;
 lv_disp_drv_t disp_drv;
 lv_indev_drv_t indev_drv;
 
-// Rotation 0: rows copy straight into the framebuffer.
-void panel_flush(lv_disp_drv_t* drv, const lv_area_t* area, lv_color_t* color) {
-  const int32_t w = area->x2 - area->x1 + 1;
-  const uint16_t* src = reinterpret_cast<const uint16_t*>(color);
-  for (int32_t y = area->y1; y <= area->y2; ++y) {
-    memcpy(fb + static_cast<size_t>(y) * kPanelWidth + area->x1, src + (y - area->y1) * w,
-           static_cast<size_t>(w) * 2);
+// LVGL direct mode into the two RGB framebuffers (as Seeed's LCD_AVOID_TEAR +
+// LCD_LVGL_DIRECT_MODE). LVGL has drawn the dirty areas straight into the hidden
+// buffer `color`. On the last area: write the cache back, ask the driver to show that
+// buffer (it switches at the next vsync), wait for the vsync, then copy the dirty areas
+// into the other buffer so both stay identical for the next frame.
+void sync_dirty(lv_disp_drv_t* drv, const uint16_t* from, uint16_t* to, bool writeback_from) {
+  lv_disp_t* d = _lv_refr_get_disp_refreshing();
+  for (int i = 0; i < d->inv_p; ++i) {
+    if (d->inv_area_joined[i]) continue;
+    const lv_area_t& a = d->inv_areas[i];
+    const size_t off = static_cast<size_t>(a.y1) * kPanelWidth;
+    const size_t bytes = static_cast<size_t>(a.y2 - a.y1 + 1) * kPanelWidth * 2;
+    if (writeback_from) {
+      esp_cache_msync(const_cast<uint16_t*>(from) + off, bytes,
+                      ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+      continue;
+    }
+    const int w = a.x2 - a.x1 + 1;
+    for (int y = a.y1; y <= a.y2; ++y) {
+      const size_t o = static_cast<size_t>(y) * kPanelWidth + a.x1;
+      memcpy(to + o, from + o, static_cast<size_t>(w) * 2);
+    }
+    esp_cache_msync(to + off, bytes, ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
   }
-  esp_cache_msync(fb + static_cast<size_t>(area->y1) * kPanelWidth,
-                  static_cast<size_t>(area->y2 - area->y1 + 1) * kPanelWidth * 2,
-                  ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+  (void)drv;
+}
+
+void panel_flush(lv_disp_drv_t* drv, const lv_area_t*, lv_color_t* color) {
+  if (!lv_disp_flush_is_last(drv)) {
+    lv_disp_flush_ready(drv);
+    return;
+  }
+  uint16_t* shown = reinterpret_cast<uint16_t*>(color);
+  uint16_t* other = shown == fbs[0] ? fbs[1] : fbs[0];
+  sync_dirty(drv, shown, nullptr, true);
+  const int64_t t0 = esp_timer_get_time();
+  xSemaphoreTake(vsync_sem, 0);
+  want_vsync = true;
+  esp_lcd_panel_draw_bitmap(rgb, 0, 0, kPanelWidth, kPanelHeight, shown);  // switch at next vsync
+  if (xSemaphoreTake(vsync_sem, pdMS_TO_TICKS(60)) != pdTRUE) ++st_flip_timeouts;
+  want_vsync = false;
+  const int64_t t1 = esp_timer_get_time();
+  fb = shown;
+  sync_dirty(drv, shown, other, false);
+  const int64_t t2 = esp_timer_get_time();
+  ++st_flips;
+  if (t1 - t0 > st_flip_max_us) st_flip_max_us = static_cast<uint32_t>(t1 - t0);
+  if (t2 - t1 > st_copy_max_us) st_copy_max_us = static_cast<uint32_t>(t2 - t1);
   lv_disp_flush_ready(drv);
 }
 
@@ -478,17 +574,12 @@ bool panel_gt911_read(uint16_t, uint8_t*, size_t) { return false; }
 
 bool panel_lvgl_start() {
   lv_init();
-  // One PSRAM draw buffer on purpose: panel_flush copies synchronously into
-  // the RGB framebuffer, so a second buffer would not overlap rendering and
-  // flushing, and 2 x 38 KB internal RAM is not available (DIAGSTACK minimum
-  // ~18 KB). Revisit together with an async (DMA/PPA) flush.
-  constexpr uint32_t kLines = 40;
-  uint32_t pixels = static_cast<uint32_t>(kPanelWidth) * kLines;
-  lv_color_t* buf =
-      static_cast<lv_color_t*>(heap_caps_malloc(pixels * sizeof(lv_color_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-  if (buf == nullptr) return false;
-  lv_disp_draw_buf_init(&draw_buf, buf, nullptr, pixels);
+  // Direct mode: LVGL draws into the two RGB framebuffers themselves (see panel_flush).
+  if (fbs[0] == nullptr || fbs[1] == nullptr) return false;
+  const uint32_t pixels = static_cast<uint32_t>(kPanelWidth) * kPanelHeight;
+  lv_disp_draw_buf_init(&draw_buf, fbs[0], fbs[1], pixels);
   lv_disp_drv_init(&disp_drv);
+  disp_drv.direct_mode = 1;
   disp_drv.hor_res = kPanelWidth;
   disp_drv.ver_res = kPanelHeight;
   disp_drv.flush_cb = panel_flush;
@@ -543,6 +634,15 @@ void panel_hw_dump() {
     if (sel != (unsigned)(LCD_DATA_OUT0_IDX + i)) order = false;
     k += snprintf(buf + k, sizeof(buf) - k, "%d:%u ", pins[i], sel - LCD_DATA_OUT0_IDX);
   }
+  const int64_t age = esp_timer_get_time() - st_vsync_last;
+  console_printf("DIAG RGB pclk=%lu fbs=2 bounce=%d vsync=%lu fb_complete=%lu vsync_max_us=%lu last_vsync_age_us=%lld "
+                 "flips=%lu flip_max_us=%lu copy_max_us=%lu flip_timeouts=%lu\n",
+                 (unsigned long)kPclkHz, kPanelWidth * 10, (unsigned long)st_vsync, (unsigned long)st_bounce,
+                 (unsigned long)st_vsync_max_us, (long long)age, (unsigned long)st_flips, (unsigned long)st_flip_max_us,
+                 (unsigned long)st_copy_max_us, (unsigned long)st_flip_timeouts);
+  st_vsync_max_us = 0;  // maxima since the last DIAGHW
+  st_flip_max_us = 0;
+  st_copy_max_us = 0;
   console_printf("DIAG RGBPINS order_ok=%d (gpio:data_bit) %s pclk_sel=%u de_sel=%u\n", order, buf,
                  (unsigned)(GPIO.func_out_sel_cfg[kPinPclk].val & 0x1FF), (unsigned)(GPIO.func_out_sel_cfg[kPinDe].val & 0x1FF));
 }
