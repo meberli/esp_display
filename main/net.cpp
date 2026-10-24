@@ -93,81 +93,13 @@ void on_event(void*, esp_event_base_t base, int32_t id, void* data) {
     // decides when to give up or switch. A scan pauses the retries.
     if (!g_scanning && g_ssid[0] != '\0') reconnect();
   } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
-    wifi_ap_record_t ap = {};
-    if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
-      console_printf("Wi-Fi joined bssid=%02x:%02x:%02x:%02x:%02x:%02x ch=%u rssi=%d\n", ap.bssid[0], ap.bssid[1], ap.bssid[2],
-             ap.bssid[3], ap.bssid[4], ap.bssid[5], ap.primary, ap.rssi);
-    }
     g_connected = true;
     g_failed = false;
     g_retry = 0;
     xEventGroupSetBits(wifi_events(), kBitIp);
   }
 }
-// Simple roaming: the driver never leaves a weak AP by itself. If the RSSI stays
-// below -80 dBm for 3 min, drop the link; the reconnect (all-channel scan, sorted
-// by signal) then picks the strongest BSSID. Re-armed once back at -70 dBm, and
-// at most one roam per 15 min.
-esp_timer_handle_t g_roam_timer = nullptr;
-int64_t g_low_since = 0, g_last_roam = 0;
-bool g_roam_armed = true;
-std::atomic<uint32_t> g_roams{0};
-void roam_cb(void*) {
-  if (!g_connected || g_scanning) {
-    g_low_since = 0;
-    return;
-  }
-  int rssi = 0;
-  if (esp_wifi_sta_get_rssi(&rssi) != ESP_OK) return;
-  const int64_t now = esp_timer_get_time();
-  if (rssi >= -70) g_roam_armed = true;
-  if (rssi >= -80) {
-    g_low_since = 0;
-    return;
-  }
-  if (g_low_since == 0) g_low_since = now;
-  if (g_roam_armed && now - g_low_since >= 180LL * 1000000 &&
-      (g_last_roam == 0 || now - g_last_roam >= 900LL * 1000000)) {
-    g_roam_armed = false;
-    g_last_roam = now;
-    g_low_since = 0;
-    g_roams = g_roams + 1;
-    console_printf("Wi-Fi roam: rssi %d dBm for 3 min, rescanning\n", rssi);
-    esp_wifi_disconnect();  // the disconnect handler reconnects to the best BSSID
-  }
-}
 }  // namespace
-
-uint32_t wifi_roams() { return g_roams; }
-
-void wifi_diag_print() {
-  wifi_ap_record_t ap = {};
-  const bool have = g_connected && esp_wifi_sta_get_ap_info(&ap) == ESP_OK;
-  wifi_config_t wc = {};
-  esp_wifi_get_config(WIFI_IF_STA, &wc);
-  console_printf("DIAG wifi joined=%d bssid=%02x:%02x:%02x:%02x:%02x:%02x ch=%u rssi=%d | cfg scan=%d sort=%d rm=%d btm=%d "
-         "retry=%u | roams=%lu\n",
-         have ? 1 : 0, ap.bssid[0], ap.bssid[1], ap.bssid[2], ap.bssid[3], ap.bssid[4], ap.bssid[5], ap.primary,
-         have ? ap.rssi : 0, (int)wc.sta.scan_method, (int)wc.sta.sort_method, (int)wc.sta.rm_enabled,
-         (int)wc.sta.btm_enabled, (unsigned)wc.sta.failure_retry_cnt, (unsigned long)g_roams.load());
-  if (!g_connected || g_ssid[0] == '\0') return;
-  wifi_scan_config_t sc = {};
-  EXT_RAM_BSS_ATTR static wifi_ap_record_t recs[32];
-  uint16_t num = 32;
-  if (esp_wifi_scan_start(&sc, true) != ESP_OK || esp_wifi_scan_get_ap_records(&num, recs) != ESP_OK) {
-    console_printf("DIAG wifi scan failed\n");
-    return;
-  }
-  int same = 0;
-  for (int i = 0; i < num; ++i) {  // only BSSIDs of our own SSID (the name itself is not printed)
-    if (strcmp(reinterpret_cast<const char*>(recs[i].ssid), g_ssid) != 0) continue;
-    ++same;
-    console_printf("DIAG wifi ap bssid=%02x:%02x:%02x:%02x:%02x:%02x ch=%u rssi=%d%s\n", recs[i].bssid[0], recs[i].bssid[1],
-           recs[i].bssid[2], recs[i].bssid[3], recs[i].bssid[4], recs[i].bssid[5], recs[i].primary, recs[i].rssi,
-           memcmp(recs[i].bssid, ap.bssid, 6) == 0 ? " (joined)" : "");
-  }
-  console_printf("DIAG wifi scan total=%u same_ssid=%d\n", static_cast<unsigned>(num), same);
-}
 
 bool wifi_wait(uint32_t ms) {
   if (g_connected) return true;
@@ -204,26 +136,8 @@ void wifi_start(const char* ssid, const char* password, const char* hostname) {
   snprintf(reinterpret_cast<char*>(wc.sta.ssid), sizeof(wc.sta.ssid), "%s", ssid);
   snprintf(reinterpret_cast<char*>(wc.sta.password), sizeof(wc.sta.password), "%s", password);
   wc.sta.threshold.authmode = password[0] != '\0' ? WIFI_AUTH_WPA_PSK : WIFI_AUTH_OPEN;
-  // The default fast scan joins the FIRST matching BSSID (lowest channel), not
-  // the strongest one: scan all channels and pick by signal.
-  wc.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
-  wc.sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;
-  wc.sta.threshold.rssi = -127;
-  wc.sta.rm_enabled = 1;
-  wc.sta.btm_enabled = 0;
-  wc.sta.failure_retry_cnt = 1;
   esp_wifi_set_mode(WIFI_MODE_STA);
-  esp_err_t cerr = esp_wifi_set_config(WIFI_IF_STA, &wc);
-  wifi_config_t rb = {};
-  esp_wifi_get_config(WIFI_IF_STA, &rb);
-  console_printf("Wi-Fi config %s: scan=%d sort=%d rm=%d\n", esp_err_to_name(cerr), (int)rb.sta.scan_method,
-         (int)rb.sta.sort_method, (int)rb.sta.rm_enabled);
-  if (g_roam_timer == nullptr) {
-    esp_timer_create_args_t a = {};
-    a.callback = roam_cb;
-    a.name = "wifi_roam";
-    if (esp_timer_create(&a, &g_roam_timer) == ESP_OK) esp_timer_start_periodic(g_roam_timer, 10 * 1000000ULL);
-  }
+  esp_wifi_set_config(WIFI_IF_STA, &wc);
   esp_wifi_set_ps(WIFI_PS_NONE);  // was WiFi.setSleep(false)
   esp_wifi_start();
 }

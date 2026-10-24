@@ -19,8 +19,6 @@ bool wifi_wait(uint32_t ms);
 // Blocking scan (call from the network task). Returns the number of APs,
 // strongest first, duplicates merged.
 int wifi_scan(WifiAp* out, int cap);
-void wifi_diag_print();  // DIAGWIFI: joined BSSID/channel + all BSSIDs of our SSID
-uint32_t wifi_roams();
 // SSID of the configured network.
 const char* wifi_ssid();
 
