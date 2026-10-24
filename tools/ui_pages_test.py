@@ -56,7 +56,10 @@ def main():
     home(p); tapn(p, "home:oev", 1.5); chk(p, "oev")
     home(p); tapn(p, "home:cal", 1.0); chk(p, "kalender")
     home(p); tapn(p, "home:energy", 1.0); chk(p, "strom")
+    p.swipe(440, 240, 200, 240, 300); time.sleep(1.0); chk(p, "bilanz")
+    if "page=1" not in state(p): FAILS.append("bilanz page"); print("FAIL bilanz page", state(p)[6:40])
     p.swipe(440, 240, 200, 240, 300); time.sleep(1.0); chk(p, "wasser")
+    if "page=2" not in state(p): FAILS.append("wasser page"); print("FAIL wasser page", state(p)[6:40])
     settings(p); chk(p, "einstellungen", tap_last=True)
     for row in ("set:wifi", "set:loc", "set:disp", "set:time", "set:cams", "set:oev", "set:cal", "set:rem",
                 "set:energy", "set:maint"):

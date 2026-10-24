@@ -16,12 +16,14 @@ def main():
     if port.upper() == "COM5": sys.exit("COM5 is the 3D printer")
     p = Panel(port)
     wait(p, lambda s: "STATE home" in s, 90)
-    pages = [("settings", ["cat:settings", "set:disp"]), ("energie", ["home:energy"]), ("wetter", ["wx:now"]),
+    pages = [("settings", ["cat:settings", "set:disp"]), ("energie", ["home:energy"]), ("bilanz", ["home:energy", "SWIPE"]), ("wetter", ["wx:now"]),
              ("licht", ["cat:licht"])]
     try:
         for name, taps in pages:
             home(p)
-            for t in taps: tapn(p, t, 1.0)
+            for t in taps:
+                if t == "SWIPE": p.swipe(440, 240, 200, 240, 300); time.sleep(1.0)
+                else: tapn(p, t, 1.0)
             before = state(p)
             p.cmd("SCRTO 3")
             time.sleep(5.5)  # screen goes off after 3 s

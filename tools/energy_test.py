@@ -1,6 +1,6 @@
 """Energie (whatwatt Go): hardware test over the serial harness.
 Sets the whatwatt address through Einstellungen > Energie (text edit), waits
-for live data (ENERGY), checks the Strom/Wasser pages and the home chip, the
+for live data (ENERGY), checks the Strom/Bilanz/Wasser pages and the home chip, the
 stale detection (unreachable address -> stale after 60 s), the poll stepping,
 and saves screenshots (v12shots/v12_*.png, no addresses shown on the pages).
 Leaves the address set to HOST (Michael's reader) and other settings restored.
@@ -70,10 +70,16 @@ def main():
     check("energy page=0" in state(p), "home chip opens Strom")
     time.sleep(1.0); p.shot("v12shots/v12_strom.png")
     p.swipe(440, 240, 200, 240, 300); time.sleep(1.2)
-    check("energy page=1" in state(p), "swipe left -> Wasser")
+    check("energy page=1" in state(p), "swipe left -> Bilanz")
+    p.shot("v12shots/v12_bilanz.png")
+    p.swipe(440, 240, 200, 240, 300); time.sleep(1.2)
+    check("energy page=2" in state(p), "swipe left -> Wasser")
     p.shot("v12shots/v12_wasser.png")
+    p.swipe(440, 240, 200, 240, 300); time.sleep(1.0)
+    check("energy page=2" in state(p), "swipe left at the end stays on Wasser")
     p.swipe(200, 240, 440, 240, 300); time.sleep(1.0)
-    check("energy page=0" in state(p), "swipe right -> Strom")
+    p.swipe(200, 240, 440, 240, 300); time.sleep(1.0)
+    check("energy page=0" in state(p), "swipe right x2 -> Strom")
     # Poll interval stepping (10 -> 30 -> 60 -> 5 -> 10)
     home(p); tapn(p, "cat:settings", 0.8); tapn(p, "set:energy", 1.0)
     for _ in range(4): tapn(p, "en:poll", 0.6)

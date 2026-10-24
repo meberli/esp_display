@@ -24,6 +24,7 @@
 #include "settings.h"
 #include "energy_task.h"
 #include "pv_task.h"
+#include "energy_mix.h"
 #include "panel_hw.h"
 #include "board_pins.h"
 #include "weather_derive.h"
@@ -237,7 +238,7 @@ lv_obj_t* set_maint_val = nullptr;
 lv_obj_t* set_rem_val = nullptr;
 lv_obj_t* set_en_val = nullptr;
 // Energie (panel_ui_energy.inc)
-lv_obj_t* en_root[2] = {nullptr, nullptr};  // 0 Strom, 1 Wasser
+lv_obj_t* en_root[3] = {nullptr, nullptr, nullptr};  // 0 Strom, 1 Bilanz (PV), 2 Wasser
 int en_page = 0;
 lv_obj_t* enset_root = nullptr;
 lv_obj_t* chip_en_top = nullptr;

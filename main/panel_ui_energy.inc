@@ -85,8 +85,8 @@ void en_set_bar(lv_obj_t* b, int base, int h, bool up) {
 }
 
 void en_dots(lv_obj_t* root, int active) {
-  for (int i = 0; i < 2; ++i) {
-    lv_obj_t* d = make_bar(root, 228 + i * 16, 452, 8, 8, i == active ? kText : kTextDim, i == active ? LV_OPA_COVER : LV_OPA_50);
+  for (int i = 0; i < 3; ++i) {
+    lv_obj_t* d = make_bar(root, 220 + i * 16, 452, 8, 8, i == active ? kText : kTextDim, i == active ? LV_OPA_COVER : LV_OPA_50);
     (void)d;
   }
 }
@@ -110,6 +110,87 @@ void en_build_status(lv_obj_t* root, lv_obj_t** st) {
   lv_obj_set_style_text_align(*st, LV_TEXT_ALIGN_RIGHT, 0);
   lv_label_set_long_mode(*st, LV_LABEL_LONG_DOT);
   lv_obj_set_pos(*st, 236, 25);
+}
+
+// --- Bilanz (PV): Herkunft (PV vs Netz) and Verwendung (Eigenverbrauch vs Einspeisung) as donuts.
+lv_obj_t* mx_status = nullptr;
+lv_obj_t* mx_sum = nullptr;
+lv_obj_t* mx_arc[2] = {};      // 0 Herkunft (indicator = PV), 1 Verwendung (indicator = Eigenverbrauch)
+lv_obj_t* mx_pct[2] = {};
+lv_obj_t* mx_leg[2][2] = {};
+lv_obj_t* mx_wk = nullptr;
+lv_obj_t* mx_dself[7] = {};
+lv_obj_t* mx_dgrid[7] = {};
+lv_obj_t* mx_dlbl[7] = {};
+constexpr int kMxBase = 110;
+constexpr int kMxH = 64;
+
+lv_obj_t* mx_donut(lv_obj_t* parent, int x, int y, int d) {
+  lv_obj_t* a = lv_arc_create(parent);
+  lv_obj_set_size(a, d, d);
+  lv_obj_set_pos(a, x, y);
+  lv_arc_set_rotation(a, 270);
+  lv_arc_set_bg_angles(a, 0, 360);
+  lv_arc_set_range(a, 0, 1000);
+  lv_arc_set_value(a, 0);
+  lv_obj_remove_style(a, nullptr, LV_PART_KNOB);
+  lv_obj_clear_flag(a, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_style_pad_all(a, 0, 0);
+  const lv_style_selector_t parts[2] = {LV_PART_MAIN, LV_PART_INDICATOR};
+  for (lv_style_selector_t part : parts) {
+    lv_obj_set_style_arc_width(a, 20, part);
+    lv_obj_set_style_arc_rounded(a, false, part);
+  }
+  lv_obj_set_style_arc_color(a, lv_color_hex(kBorder), LV_PART_MAIN);
+  return a;
+}
+
+void build_mix_screen(lv_obj_t* screen) {
+  lv_obj_t* r = en_root[1] = make_screen_root(screen, "Bilanz");
+  lv_obj_set_pos(lv_obj_get_child(r, 0), 56, 20);
+  lv_obj_t* ic = make_label(r, &font_icon_bolt_24, lv_color_hex(kGreen));
+  lv_label_set_text(ic, ICON_BOLT);
+  lv_obj_set_pos(ic, 22, 19);
+  en_build_status(r, &mx_status);
+  lv_obj_t* c = en_card(r, 56, 226);
+  en_lbl(c, &font_inter_sb16, kText, 18, 12, "Heute");
+  mx_sum = en_lbl(c, &font_inter_14, kTextDim, 120, 14, "");
+  lv_obj_set_width(mx_sum, 294);
+  lv_obj_set_style_text_align(mx_sum, LV_TEXT_ALIGN_RIGHT, 0);
+  lv_label_set_long_mode(mx_sum, LV_LABEL_LONG_DOT);
+  const char* titles[2] = {"Herkunft", "Verwendung"};
+  for (int i = 0; i < 2; ++i) {
+    const int x0 = 18 + i * 216;
+    lv_obj_t* t = en_lbl(c, &font_inter_14, kTextDim, x0, 40, titles[i]);
+    lv_obj_set_width(t, 180);
+    lv_obj_set_style_text_align(t, LV_TEXT_ALIGN_CENTER, 0);
+    mx_arc[i] = mx_donut(c, x0 + 42, 62, 96);
+    lv_obj_set_style_arc_color(mx_arc[i], lv_color_hex(kGreen), LV_PART_INDICATOR);
+    mx_pct[i] = make_label(c, &font_inter_sb16, lv_color_hex(kText));
+    lv_obj_set_width(mx_pct[i], 80);
+    lv_obj_set_style_text_align(mx_pct[i], LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_pos(mx_pct[i], x0 + 50, 101);
+    for (int k = 0; k < 2; ++k) {
+      const uint32_t col = k == 0 ? kGreen : i == 0 ? kAmber : kAccent;
+      mx_leg[i][k] = en_lbl(c, &font_inter_14, col, x0, 168 + k * 20, "");
+      lv_obj_set_width(mx_leg[i][k], 180);
+      lv_obj_set_style_text_align(mx_leg[i][k], LV_TEXT_ALIGN_CENTER, 0);
+    }
+  }
+  make_bar(c, 215, 44, 1, 160, kBorder, LV_OPA_COVER);
+  c = en_card(r, 292, 152);
+  en_lbl(c, &font_inter_sb16, kText, 18, 12, "Verbrauch 7 Tage");
+  mx_wk = en_lbl(c, &font_inter_14, kTextDim, 174, 14, "");
+  lv_obj_set_width(mx_wk, 240);
+  lv_obj_set_style_text_align(mx_wk, LV_TEXT_ALIGN_RIGHT, 0);
+  for (int d = 0; d < 7; ++d) {
+    const int x = 30 + d * 56;
+    mx_dself[d] = en_rect(c, x + 4, kMxBase - 1, 28, 1, kGreen);
+    mx_dgrid[d] = en_rect(c, x + 4, kMxBase - 1, 28, 1, kAmber);
+    mx_dlbl[d] = en_lbl(c, &font_inter_14, kTextDim, x + 8, kMxBase + 4, "-");
+  }
+  make_bar(c, 18, kMxBase, 396, 1, kBorder, LV_OPA_COVER);
+  en_dots(r, 1);
 }
 
 void build_energy_screens(lv_obj_t* screen) {
@@ -177,7 +258,8 @@ void build_energy_screens(lv_obj_t* screen) {
   en_dots(r, 0);
 
   // --- Wasser
-  r = en_root[1] = make_screen_root(screen, "Wasser");
+  build_mix_screen(screen);
+  r = en_root[2] = make_screen_root(screen, "Wasser");
   lv_obj_set_pos(lv_obj_get_child(r, 0), 56, 20);
   ic = make_label(r, &font_icons_24, lv_color_hex(kAccent));
   lv_label_set_text(ic, ICON_DROP);
@@ -219,7 +301,7 @@ void build_energy_screens(lv_obj_t* screen) {
     ew_dlbl[d] = en_lbl(c, &font_inter_14, kTextDim, x + 8, kDayBase + 22, "-");
   }
   make_bar(c, 18, kDayBase + 18, 396, 1, kBorder, LV_OPA_COVER);
-  en_dots(r, 1);
+  en_dots(r, 2);
 }
 
 void en_fmt_kwh(char* out, size_t n, float v, bool approx) {
@@ -269,11 +351,11 @@ void energy_refresh_strom() {
     lv_obj_set_style_text_color(es_amps, lv_color_hex(p.have && !p.stale ? kGreen : kTextDim), 0);
     if (p.have && !p.stale && live)
       snprintf(b, sizeof(b), "PV %.0f W \xC2\xB7 %.1f kWh \xC2\xB7 Haus %.0f W", p.r.ac_w, pv_today,
-               net_w + p.r.ac_w < 0 ? 0.0f : net_w + p.r.ac_w);
+               energy_house_w(net_w, p.r.ac_w));
     else if (p.have && !p.stale)
       snprintf(b, sizeof(b), "PV %.0f W \xC2\xB7 heute %.1f kWh", p.r.ac_w, pv_today);
     else if (p.asleep && live)  // inverter off (night): it produces nothing, house = grid
-      snprintf(b, sizeof(b), "PV schl\xC3\xA4" "ft \xC2\xB7 %.1f kWh \xC2\xB7 Haus %.0f W", pv_today, net_w < 0 ? 0.0f : net_w);
+      snprintf(b, sizeof(b), "PV schl\xC3\xA4" "ft \xC2\xB7 %.1f kWh \xC2\xB7 Haus %.0f W", pv_today, energy_house_w(net_w, 0));
     else if (p.asleep)
       snprintf(b, sizeof(b), "PV schl\xC3\xA4" "ft \xC2\xB7 heute %.1f kWh", pv_today);
     else if (p.have)
@@ -416,6 +498,100 @@ void energy_refresh_wasser() {
   lv_label_set_text(ew_wk_tot, b);
 }
 
+// PV production of a day: today from the inverter counter, earlier days from the PV history; -1 = unknown.
+float mix_pv_day(const PvView& p, int32_t ymd, bool today, int64_t now) {
+  if (!p.enabled) return -1;
+  if (today) return pv_today_kwh(p, now);
+  return pv_hist_day(p.hist, ymd);
+}
+
+void energy_refresh_mix() {
+  const EnergyView& v = *en_v;
+  const EnergyHist& h = v.h;
+  const int64_t now = time(nullptr);
+  char b[64];
+  en_status_text(mx_status);
+  pv_get(pv_v);
+  const PvView& p = *pv_v;
+  const EnergyMix m = energy_mix(energy_today_in(h), energy_today_out(h), mix_pv_day(p, h.ymd, true, now));
+  const bool ok = h.have && m.valid;
+  const bool approx = (h.flags & kDayApprox) != 0;
+  if (!h.have) snprintf(b, sizeof(b), "keine Z\xC3\xA4hlerdaten");
+  else if (!p.enabled) snprintf(b, sizeof(b), "PV nicht eingerichtet");
+  else if (m.inconsistent) snprintf(b, sizeof(b), "PV-Daten unvollst\xC3\xA4ndig");
+  // Approx: the meter baseline was taken mid-day (first reading today) while the inverter counts
+  // the whole day, so the PV share is overstated: say so instead of a plain total.
+  else if (approx) snprintf(b, sizeof(b), "~%.1f kWh \xC2\xB7 Z\xC3\xA4hler erst ab heute", m.use_kwh);
+  else snprintf(b, sizeof(b), "Verbrauch %.1f kWh", m.use_kwh);
+  lv_label_set_text(mx_sum, b);
+  lv_obj_set_style_text_color(mx_sum, lv_color_hex(ok && !m.inconsistent && !approx ? kText : kAmber), 0);
+  // Herkunft: PV (indicator) vs Netz (rest); Verwendung: Eigenverbrauch (indicator) vs Einspeisung.
+  const bool has[2] = {ok && m.use_kwh > 0.005f, ok && m.self_kwh + m.export_kwh > 0.005f};
+  const float share[2] = {m.pv_share, m.self_share};
+  const uint32_t rest[2] = {kAmber, kAccent};
+  for (int i = 0; i < 2; ++i) {
+    lv_arc_set_value(mx_arc[i], has[i] ? static_cast<int16_t>(share[i] * 1000 + 0.5f) : 0);
+    lv_obj_set_style_arc_color(mx_arc[i], lv_color_hex(has[i] ? rest[i] : kBorder), LV_PART_MAIN);
+    if (has[i]) snprintf(b, sizeof(b), "%d %%", static_cast<int>(share[i] * 100 + 0.5f));
+    else snprintf(b, sizeof(b), "-");
+    lv_label_set_text(mx_pct[i], b);
+  }
+  const int pv_pct = static_cast<int>(m.pv_share * 100 + 0.5f), self_pct = static_cast<int>(m.self_share * 100 + 0.5f);
+  if (has[0]) {
+    snprintf(b, sizeof(b), "PV %.1f kWh \xC2\xB7 %d %%", m.self_kwh, pv_pct);
+    lv_label_set_text(mx_leg[0][0], b);
+    snprintf(b, sizeof(b), "Netz %.1f kWh \xC2\xB7 %d %%", m.import_kwh, 100 - pv_pct);
+    lv_label_set_text(mx_leg[0][1], b);
+  } else {
+    lv_label_set_text(mx_leg[0][0], "PV -");
+    lv_label_set_text(mx_leg[0][1], "Netz -");
+  }
+  if (has[1]) {
+    snprintf(b, sizeof(b), "Eigen %.1f kWh \xC2\xB7 %d %%", m.self_kwh, self_pct);
+    lv_label_set_text(mx_leg[1][0], b);
+    snprintf(b, sizeof(b), "Einsp. %.1f kWh \xC2\xB7 %d %%", m.export_kwh, 100 - self_pct);
+    lv_label_set_text(mx_leg[1][1], b);
+  } else {
+    lv_label_set_text(mx_leg[1][0], ok ? "noch keine PV-Erzeugung" : "Eigen -");
+    lv_label_set_text(mx_leg[1][1], ok ? "" : "Einsp. -");
+  }
+  // 7 days stacked: PV direkt (green, bottom) + Netz (amber); grey = PV unknown that day.
+  EnergyMix dm[7];
+  int32_t ymd[7];
+  float dmax = 1, su = 0, ss = 0;
+  for (int d = 0; d < 7; ++d) {
+    if (d == 6) {
+      dm[d] = h.have ? m : EnergyMix{};
+      ymd[d] = h.have ? h.ymd : 0;
+    } else {
+      const EnergyDay& e = h.days[5 - d];
+      ymd[d] = e.ymd;
+      dm[d] = e.ymd ? energy_mix(e.in_kwh, e.out_kwh, mix_pv_day(p, e.ymd, false, now)) : EnergyMix{};
+      if (e.ymd && !dm[d].valid) dm[d].use_kwh = dm[d].import_kwh;  // grid only, PV unknown
+    }
+    const float u = dm[d].use_kwh;
+    if (u > dmax) dmax = u;
+    if (dm[d].valid) {
+      su += dm[d].use_kwh;
+      ss += dm[d].self_kwh;
+    }
+  }
+  for (int d = 0; d < 7; ++d) {
+    const int hs = dm[d].valid ? static_cast<int>(dm[d].self_kwh / dmax * kMxH + 0.5f) : 0;
+    const int hg = static_cast<int>(dm[d].import_kwh / dmax * kMxH + 0.5f);
+    en_set_bar(mx_dself[d], kMxBase, hs, true);
+    en_set_bar(mx_dgrid[d], kMxBase - hs, hg, true);
+    lv_obj_set_style_bg_color(mx_dgrid[d], lv_color_hex(dm[d].valid ? kAmber : kTextDim), 0);
+    const uint8_t dfl = d == 6 ? h.flags : h.days[5 - d].flags;
+    lv_label_set_text_fmt(mx_dlbl[d], "%s%s", d == 6 ? "Heute" : en_wday(ymd[d]), (dfl & kDayApprox) && ymd[d] ? "*" : "");
+    lv_obj_set_x(mx_dlbl[d], d == 6 ? 30 + d * 56 - 6 : 30 + d * 56 + 8);
+    lv_obj_set_style_text_color(mx_dlbl[d], lv_color_hex(d == 6 ? kText : kTextDim), 0);
+  }
+  if (su > 0.005f) snprintf(b, sizeof(b), "%.0f kWh \xC2\xB7 PV-Anteil %d %%", su, static_cast<int>(ss / su * 100 + 0.5f));
+  else snprintf(b, sizeof(b), "-");
+  lv_label_set_text(mx_wk, b);
+}
+
 void energy_chip_refresh() {
   if (chip_en_main == nullptr || en_v == nullptr) return;
   energy_get(en_v);
@@ -459,19 +635,20 @@ void energy_refresh() {
   if (en_v == nullptr) return;
   energy_get(en_v);
   if (en_page == 0) energy_refresh_strom();
+  else if (en_page == 1) energy_refresh_mix();
   else energy_refresh_wasser();
 }
 
 void energy_enter(int page) {
   if (message_open || en_root[0] == nullptr) return;
-  en_page = page < 0 ? 0 : page > 1 ? 1 : page;
+  en_page = page < 0 ? 0 : page > 2 ? 2 : page;
   enter_view(Nav::Energy, en_root[en_page]);
   energy_refresh();
 }
 
 void energy_swipe(int dir) {
   int next = en_page + dir;
-  if (next < 0 || next > 1) return;
+  if (next < 0 || next > 2) return;
   energy_enter(next);
 }
 

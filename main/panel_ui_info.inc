@@ -148,6 +148,7 @@ void info_hide_views() {
   hide(rain_root);
   hide(en_root[0]);
   hide(en_root[1]);
+  hide(en_root[2]);
 }
 
 void enter_view(Nav n, lv_obj_t* root) {
