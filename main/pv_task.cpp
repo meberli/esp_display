@@ -38,6 +38,13 @@ int32_t local_ymd(int64_t now) {
   return (lt.tm_year + 1900) * 10000 + (lt.tm_mon + 1) * 100 + lt.tm_mday;
 }
 
+int local_sod(int64_t now) {
+  time_t t = static_cast<time_t>(now);
+  struct tm lt;
+  localtime_r(&t, &lt);
+  return lt.tm_hour * 3600 + lt.tm_min * 60 + lt.tm_sec;
+}
+
 int connect_gw(const char* host, int port) {
   int s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
   if (s < 0) return -1;
@@ -111,7 +118,18 @@ void task(void*) {
   }
   bool loaded = settings_load_pv_hist(hist);
   console_printf("PV: history %s (%u bytes)\n", loaded ? "loaded" : "new", static_cast<unsigned>(sizeof(PvHist)));
-  update([&](PvView& v) { v.hist = *hist; });
+  PvHours* hours = static_cast<PvHours*>(heap_caps_calloc(1, sizeof(PvHours), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  if (hours == nullptr) {
+    vTaskDelete(nullptr);
+    return;
+  }
+  bool hloaded = settings_load_pv_hours(hours);
+  hours->last_t = 0;  // never integrate across a reboot
+  console_printf("PV: hours %s (%u bytes)\n", hloaded ? "loaded" : "new", static_cast<unsigned>(sizeof(PvHours)));
+  update([&](PvView& v) {
+    v.hist = *hist;
+    v.hours = *hours;
+  });
   int s = -1;
   uint16_t tid = 0;
   bool rated_done = false;
@@ -204,6 +222,14 @@ void task(void*) {
             last_save = now_ms() | 1;
             console_printf("PV: history saved=%d%s\n", ok ? 1 : 0, (hres & 2) ? " (new day)" : "");
           }
+          // Hourly buckets: Eac only once the inverter's counter belongs to today (morning reset).
+          const float eac = hist->ymd == ymd && hist->fresh && hist->today >= 0 ? hist->today : -1.0f;
+          const int qres = ymd != 0 ? pv_hours_add(hours, ymd, now, local_sod(now), pr.ac_w, eac) : 0;
+          // NVS wear: persist only when an hour (or day) is entered, <= 24 writes a day, none at night.
+          if (qres & 2) {
+            bool ok = settings_save_pv_hours(*hours);
+            console_printf("PV: hours saved=%d\n", ok ? 1 : 0);
+          }
           static bool first = true;
           if (first) {
             first = false;
@@ -220,6 +246,7 @@ void task(void*) {
             v.ok++;
             v.error[0] = '\0';
             v.hist = *hist;
+            v.hours = *hours;
           });
         } else {
           const bool sleepish = r == -1 || r == -2;  // no RS485 answer (timeout / gateway exception 0x0B)
@@ -255,6 +282,7 @@ void pv_start() {
   g_view = static_cast<PvView*>(heap_caps_calloc(1, sizeof(PvView), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
   if (g_mu == nullptr || g_view == nullptr) return;
   pv_hist_clear(&g_view->hist);
+  pv_hours_clear(&g_view->hours);
   // Core 0, priority 2 (< whatwatt 3 < net 4 < Loxone 5); stack in PSRAM.
   xTaskCreatePinnedToCoreWithCaps(task, "pv", 6 * 1024, nullptr, 2, nullptr, 0, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 }
@@ -263,6 +291,7 @@ void pv_get(PvView* out) {
   if (g_mu == nullptr || g_view == nullptr) {
     memset(out, 0, sizeof(*out));
     pv_hist_clear(&out->hist);
+    pv_hours_clear(&out->hours);
     return;
   }
   xSemaphoreTake(g_mu, portMAX_DELAY);

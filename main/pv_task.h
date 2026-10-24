@@ -29,6 +29,7 @@ struct PvView {
   char error[40];
   PvReading r;
   PvHist hist;           // daily PV production (today = inverter Eac today)
+  PvHours hours;         // today per hour / quarter (integrated AC power + Eac snapshots)
 };
 
 void pv_start();

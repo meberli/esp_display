@@ -25,6 +25,8 @@ lv_obj_t* es_val[3] = {};
 lv_obj_t* es_price = nullptr;
 lv_obj_t* es_hin[24] = {};
 lv_obj_t* es_hout[24] = {};
+lv_obj_t* es_hself[24] = {};  // PV used directly (hourly, under the grid import)
+lv_obj_t* es_hleg = nullptr;
 lv_obj_t* es_wk_tot = nullptr;
 lv_obj_t* es_din[7] = {};
 lv_obj_t* es_dout[7] = {};
@@ -223,7 +225,7 @@ void build_energy_screens(lv_obj_t* screen) {
   es_amps = en_lbl(c, &font_inter_14, kTextDim, 18, 94, "");
   make_bar(c, 228, 14, 1, 106, kBorder, LV_OPA_COVER);
   const char* names[3] = {"Bezug heute", "Einspeisung", "Kosten netto"};
-  const uint32_t colors[3] = {kAmber, kGreen, kText};
+  const uint32_t colors[3] = {kAmber, kAccent, kText};
   for (int i = 0; i < 3; ++i) {
     en_lbl(c, &font_inter_14, kTextDim, 244, 14 + i * 30, names[i]);
     es_val[i] = make_label(c, &font_inter_sb16, lv_color_hex(colors[i]));
@@ -235,10 +237,13 @@ void build_energy_screens(lv_obj_t* screen) {
   lv_obj_set_width(es_price, 184);
   lv_label_set_long_mode(es_price, LV_LABEL_LONG_DOT);
   for (int h = 0; h < 24; ++h) {
+    es_hself[h] = en_rect(c, 22 + h * 16, kEsBase - 1, 11, 1, kGreen);
     es_hin[h] = en_rect(c, 22 + h * 16, kEsBase - 1, 11, 1, kAmber);
-    es_hout[h] = en_rect(c, 22 + h * 16, kEsBase + 1, 11, 1, kGreen);
+    es_hout[h] = en_rect(c, 22 + h * 16, kEsBase + 1, 11, 1, kAccent);
   }
   make_bar(c, 18, kEsBase, 396, 1, kBorder, LV_OPA_COVER);
+  es_hleg = en_lbl(c, &font_inter_14, kGreen, 0, kEsBase + kEsDown + 6, "PV direkt");
+  lv_obj_set_x(es_hleg, 132);
   for (int h = 0; h <= 24; h += 6) en_lbl(c, &font_inter_14, kTextDim, h == 24 ? 386 : 18 + h * 16, kEsBase + kEsDown + 6, h == 24 ? "24" : h == 0 ? "0" : h == 6 ? "6" : h == 12 ? "12" : "18");
   c = en_card(r, 272, 172);
   en_lbl(c, &font_inter_sb16, kText, 18, 12, "Letzte 7 Tage");
@@ -249,12 +254,12 @@ void build_energy_screens(lv_obj_t* screen) {
   for (int d = 0; d < 7; ++d) {
     int x = 30 + d * 56;
     es_din[d] = en_rect(c, x, kDayBase - 1, 16, 1, kAmber);
-    es_dout[d] = en_rect(c, x + 19, kDayBase - 1, 16, 1, kGreen);
+    es_dout[d] = en_rect(c, x + 19, kDayBase - 1, 16, 1, kAccent);
     es_dlbl[d] = en_lbl(c, &font_inter_14, kTextDim, x + 4, kDayBase + 4, "-");
   }
   make_bar(c, 18, kDayBase, 396, 1, kBorder, LV_OPA_COVER);
   en_lbl(c, &font_inter_14, kAmber, 18, 146, "Bezug");
-  es_legend_out = en_lbl(c, &font_inter_14, kGreen, 80, 146, "Einspeisung");
+  es_legend_out = en_lbl(c, &font_inter_14, kAccent, 80, 146, "Einspeisung");
   en_dots(r, 0);
 
   // --- Wasser
@@ -383,16 +388,36 @@ void energy_refresh_strom() {
   energy_format_price(p2, sizeof(p2), v.tariff.feed);
   if (v.show_exp) lv_label_set_text_fmt(es_price, "%s Rp. / Einsp. %s", p1, p2);
   else lv_label_set_text_fmt(es_price, "%s Rp./kWh", p1);
-  // Hourly bars (today), scaled to the largest hour (min 0.5 kWh).
+  // Hourly bars (today): up = consumption = PV used directly (green) + grid import (amber),
+  // down = export. PV per hour = integrated inverter AC power (scaled to Eac); hours
+  // without a known PV value show the import only. Scaled to the largest hour (min 0.5 kWh).
+  float hself[24] = {};
+  bool hknown[24] = {};
+  const bool hpv = pv_v->enabled && h.have && pv_v->hours.ymd == h.ymd;
+  if (hpv) {
+    float ph[24];
+    bool cov[24];
+    const float eac = pv_v->hist.ymd == h.ymd && pv_v->hist.fresh ? pv_v->hist.today : -1.0f;
+    pv_hours_scaled(pv_v->hours, eac, ph, cov);
+    pv_hours_known(pv_v->hours, cov, hknown);
+    for (int i = 0; i < 24; ++i) {
+      if (!cov[i] && h.h_out[i] > 0.005f) hknown[i] = false;  // exporting without PV samples: unknown
+      if (hknown[i]) hself[i] = energy_mix(h.h_in[i], h.h_out[i], ph[i]).self_kwh;
+    }
+  }
   float mx = 0.5f, mo = 0.5f;
   for (int i = 0; i < 24; ++i) {
-    if (h.h_in[i] > mx) mx = h.h_in[i];
+    if (h.h_in[i] + hself[i] > mx) mx = h.h_in[i] + hself[i];
     if (h.h_out[i] > mo) mo = h.h_out[i];
   }
   for (int i = 0; i < 24; ++i) {
-    en_set_bar(es_hin[i], kEsBase, h.have ? static_cast<int>(h.h_in[i] / mx * kEsUp + 0.5f) : 0, true);
+    const int hs = h.have ? static_cast<int>(hself[i] / mx * kEsUp + 0.5f) : 0;
+    en_set_bar(es_hself[i], kEsBase, hs, true);
+    en_set_bar(es_hin[i], kEsBase - hs, h.have ? static_cast<int>(h.h_in[i] / mx * kEsUp + 0.5f) : 0, true);
     en_set_bar(es_hout[i], kEsBase, h.have && v.show_exp ? static_cast<int>(h.h_out[i] / mo * kEsDown + 0.5f) : 0, false);
   }
+  if (hpv) show(es_hleg);
+  else hide(es_hleg);
   // 7 days: [0..5] = days[5..0], [6] = today.
   float din[7], dout[7], tin = 0, tout = 0, dmax = 1;
   int32_t ymd[7];

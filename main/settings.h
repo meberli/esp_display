@@ -152,6 +152,8 @@ bool settings_save_pv_on(bool on);
 bool settings_load_energy_hist(EnergyHist* h);
 bool settings_load_pv_hist(PvHist* h);       // "pv_hist" blob (daily PV kWh)
 bool settings_save_pv_hist(const PvHist& h);
+bool settings_load_pv_hours(PvHours* h);     // "pv_hours" blob (today per hour / quarter)
+bool settings_save_pv_hours(const PvHours& h);
 bool settings_save_energy_hist(const EnergyHist& h);
 
 // --- Termin-Erinnerungen ---

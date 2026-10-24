@@ -112,6 +112,24 @@ void energy_dump() {
     if (d.ymd == 0) console_printf("DIAG energy pv day%d -\n", i);
     else console_printf("DIAG energy pv day%d %ld pv=%.1f\n", i, (long)d.ymd, d.kwh);
   }
+  // PV per hour today (integrated AC power, scaled to the Eac delta) and the resulting consumption.
+  float ph[24];
+  bool cov[24];
+  const float eac = pv.hist.ymd == pv.hours.ymd && pv.hist.fresh ? pv.hist.today : -1.0f;
+  const float k = pv_hours_scaled(pv.hours, eac, ph, cov);
+  float sum = 0;
+  for (float x : ph) sum += x;
+  int nq = 0;
+  for (float e : pv.hours.eac_q) nq += e >= 0;
+  console_printf("DIAG energy pvh ymd=%ld k=%.3f sum=%.3f eac=%.1f snaps=%d\n", (long)pv.hours.ymd, k, sum, eac, nq);
+  const bool same = pv.hours.ymd == v.h.ymd;
+  for (int i = 0; i < 24; ++i) {
+    if (!cov[i] && v.h.h_in[i] <= 0 && v.h.h_out[i] <= 0) continue;
+    const float p = same ? ph[i] : 0.0f;
+    const float self = p - v.h.h_out[i] > 0 ? p - v.h.h_out[i] : 0.0f;
+    console_printf("DIAG energy hour%02d in=%.3f out=%.3f pv=%.3f%s use=%.3f\n", i, v.h.h_in[i], v.h.h_out[i], p,
+                   cov[i] ? "" : "?", v.h.h_in[i] + self);
+  }
 }
 
 std::atomic<uint32_t> t_reads{0}, t_err{0}, t_fresh{0}, t_pressed{0};

@@ -27,7 +27,74 @@ static size_t response(uint8_t* b, uint16_t tid, uint8_t unit, uint8_t fc, const
   return 6 + len;
 }
 
+#define CHECK1(c) CHECK(c, #c)
+#include <cmath>
+// ---- PvHours
+static int64_t T0 = 1793000000;  // arbitrary
+static void hours_tests() {
+  PvHours h;
+  pv_hours_clear(&h);
+  // 1 kW constant for one hour from 10:00, readings every 10 s.
+  int r = 0;
+  for (int s = 0; s <= 3600; s += 10) r |= pv_hours_add(&h, 20261024, T0 + s, 36000 + s, 1000, 1.0f + s / 3600.0f);
+  CHECK1(r & 4);
+  CHECK1(std::fabs(h.wh[10] - 1000.0f * 3590 / 3600) < 1.0f || std::fabs(h.wh[10] + h.wh[11] - 1000) < 1.0f);
+  CHECK1(std::fabs(h.wh[10] + h.wh[11] - 1000) < 1.0f);
+  CHECK1(h.eac_q[40] >= 0.99f && h.eac_q[40] <= 1.01f);
+  CHECK1(h.eac_q[44] >= 1.99f);
+  // Hour change reported once (the 39600 sample entered hour 11 already).
+  CHECK1((pv_hours_add(&h, 20261024, T0 + 3610, 36000 + 3610, 1000, 2.0f) & 2) == 0);
+  // Gap > 60 s: not integrated.
+  float before = h.wh[12];
+  pv_hours_add(&h, 20261024, T0 + 7200, 43200, 1000, 2.5f);
+  pv_hours_add(&h, 20261024, T0 + 7300, 43300, 1000, 2.5f);
+  CHECK1(h.wh[12] == before);
+  pv_hours_add(&h, 20261024, T0 + 7310, 43310, 1000, 2.5f);
+  CHECK1(std::fabs(h.wh[12] - before - 1000.0f * 10 / 3600) < 0.01f);
+  // Negative / corrupt power clamped.
+  float w12 = h.wh[12];
+  pv_hours_add(&h, 20261024, T0 + 7320, 43320, -50, 2.5f);
+  CHECK1(std::fabs(h.wh[12] - w12 - 500.0f * 10 / 3600) < 0.01f);
+  // Eac -1 (morning, not fresh) does not snapshot.
+  PvHours m; pv_hours_clear(&m);
+  pv_hours_add(&m, 20261024, T0, 25200, 100, -1);
+  CHECK1(m.eac_q[28] < 0);
+  pv_hours_add(&m, 20261024, T0 + 10, 25210, 100, 0.0f);
+  CHECK1(m.eac_q[28] == 0.0f);
+  // New day resets.
+  r = pv_hours_add(&h, 20261025, T0 + 86400, 30000, 500, 0.0f);
+  CHECK1((r & 4) && h.wh[10] == 0 && h.ymd == 20261025 && h.last_t == T0 + 86400);
+  // Scaling: integrated 2.0 kWh between snapshots 1.0 -> 3.2 = 2.2: k = 1.1.
+  PvHours s; pv_hours_clear(&s, 20261024);
+  s.wh[11] = 1200; s.wh[12] = 800; s.eac_q[44] = 1.0f;
+  float out[24]; bool cov[24], kn[24];
+  float k = pv_hours_scaled(s, 3.2f, out, cov);
+  CHECK1(std::fabs(k - 1.1f) < 1e-3f && std::fabs(out[11] - 1.32f) < 1e-3f && std::fabs(out[12] - 0.88f) < 1e-3f);
+  CHECK1(cov[11] && !cov[12] && !cov[3]);  // coverage = samples (q_wh) or an Eac snapshot (q44 = 11:00)
+  // Implausible ratio (part of the day missing after a reboot) -> unscaled.
+  k = pv_hours_scaled(s, 6.0f, out);
+  CHECK1(k == 1.0f && std::fabs(out[11] - 1.2f) < 1e-3f);
+  // Small delta (< 0.3 kWh, 0.1 kWh steps) -> unscaled.
+  PvHours t; pv_hours_clear(&t, 20261024); t.wh[8] = 150; t.eac_q[32] = 0.0f;
+  CHECK1(pv_hours_scaled(t, 0.2f, out) == 1.0f);
+  // No Eac -> unscaled.
+  CHECK1(pv_hours_scaled(s, -1, out) == 1.0f);
+  // Known hours: boot at 12:00 with Eac 2.5 already -> morning unknown; boot at 07:00 with 0 -> known.
+  PvHours b; pv_hours_clear(&b, 20261024); b.eac_q[48] = 2.5f; b.q_wh[48] = 10;
+  pv_hours_scaled(b, 2.5f, out, cov); pv_hours_known(b, cov, kn);
+  CHECK1(!kn[9] && kn[12] && kn[20]);
+  pv_hours_clear(&b, 20261024); b.eac_q[28] = 0.0f; b.q_wh[29] = 5;
+  pv_hours_scaled(b, 0.1f, out, cov); pv_hours_known(b, cov, kn);
+  CHECK1(kn[3] && kn[7] && kn[22]);
+  PvHours e; pv_hours_clear(&e, 20261024);
+  pv_hours_scaled(e, -1, out, cov); pv_hours_known(e, cov, kn);
+  CHECK1(!kn[12]);  // nothing at all today: unknown
+  // ymd 0 (clock not set) ignored.
+  CHECK1(pv_hours_add(&e, 0, T0, 100, 100, 1) == 0);
+}
+
 int main() {
+  hours_tests();
   // Request: exact MBAP bytes, and no write function codes ever.
   uint8_t q[16];
   CHECK(pv_mb_request(q, sizeof(q), 0x1234, 1, kPvFcInput, 0, 45) == 12, "request len");

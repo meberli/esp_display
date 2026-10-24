@@ -40,6 +40,7 @@ int main() {
   CHECK(schema_find("en_hist") != nullptr && (schema_find("en_hist")->flags & kKeyInternal));
   CHECK(schema_find("pv_ip") != nullptr && schema_find("pv_port") != nullptr && schema_find("pv_on") != nullptr);
   CHECK(schema_find("pv_gw") != nullptr && schema_find("pv_gwport") != nullptr && schema_find("pv_unit") != nullptr);
+  CHECK(schema_find("pv_hours") != nullptr && (schema_find("pv_hours")->flags & kKeyInternal));
   CHECK(schema_find("pv_hist") != nullptr && (schema_find("pv_hist")->flags & kKeyInternal));
   CHECK(schema_find("wa_bus") != nullptr && schema_find("en_switch") != nullptr);
   CHECK(str("waste_bfs", "3271"));

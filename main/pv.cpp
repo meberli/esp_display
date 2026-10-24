@@ -103,3 +103,81 @@ float pv_hist_day(const PvHist& h, int32_t ymd) {
     if (d.ymd == ymd && ymd != 0) return d.kwh;
   return -1;
 }
+
+void pv_hours_clear(PvHours* h, int32_t ymd) {
+  memset(h, 0, sizeof(*h));
+  h->magic = kPvHoursMagic;
+  h->ymd = ymd;
+  h->last_q = -1;
+  for (float& e : h->eac_q) e = -1;
+}
+
+int pv_hours_add(PvHours* h, int32_t ymd, int64_t t, int sod, float ac_w, float eac_today) {
+  if (ymd == 0 || sod < 0 || sod >= 86400 + 3600) return 0;  // +1 h: DST fall-back day has 25 h
+  if (sod >= 86400) sod = 86399;
+  int res = 0;
+  if (h->ymd != ymd) {
+    pv_hours_clear(h, ymd);
+    res |= 4 | 2 | 1;
+  }
+  if (!(ac_w > 0)) ac_w = 0;
+  if (ac_w > 20000) ac_w = 20000;  // corrupt reading
+  const int q = sod / 900;
+  if (h->last_t > 0 && t > h->last_t && t - h->last_t <= kPvIntGapS) {
+    const float e = (h->last_w + ac_w) * 0.5f * static_cast<float>(t - h->last_t) / 3600.0f;
+    if (e > 0) {
+      h->wh[q / 4] += e;
+      h->q_wh[q] += e;
+      res |= 1;
+    }
+  }
+  if (h->last_q >= 0 && q / 4 != h->last_q / 4) res |= 2;
+  if (eac_today >= 0 && h->eac_q[q] < 0) {
+    h->eac_q[q] = eac_today;
+    res |= 1;
+  }
+  h->last_t = t;
+  h->last_w = ac_w;
+  h->last_q = static_cast<int16_t>(q);
+  return res;
+}
+
+float pv_hours_scaled(const PvHours& h, float eac_now, float out_kwh[24], bool covered[24]) {
+  float sum = 0;
+  for (int i = 0; i < 24; ++i) {
+    out_kwh[i] = h.wh[i] / 1000.0f;
+    sum += out_kwh[i];
+    if (covered) {
+      covered[i] = false;
+      for (int k = 0; k < 4; ++k) covered[i] = covered[i] || h.q_wh[i * 4 + k] > 0 || h.eac_q[i * 4 + k] >= 0;
+    }
+  }
+  // Eac delta over the period the integration could see: from the first snapshot of the day.
+  float first = -1;
+  for (float e : h.eac_q)
+    if (e >= 0) { first = e; break; }
+  if (eac_now < 0 || first < 0) return 1;
+  const float target = eac_now - first;
+  // Below 0.3 kWh the 0.1 kWh steps dominate; far off = the integration missed a part (reboot).
+  if (target < 0.3f || sum < 0.05f) return 1;
+  const float k = target / sum;
+  if (k < 0.7f || k > 1.4f) return 1;
+  for (int i = 0; i < 24; ++i) out_kwh[i] *= k;
+  return k;
+}
+
+void pv_hours_known(const PvHours& h, const bool covered[24], bool known[24]) {
+  int first_h = -1;
+  float first_e = -1;
+  for (int q = 0; q < kPvQuarters; ++q)
+    if (h.eac_q[q] >= 0 || h.q_wh[q] > 0) {
+      first_h = q / 4;
+      first_e = h.eac_q[q];
+      break;
+    }
+  for (int i = 0; i < 24; ++i) {
+    if (covered[i]) known[i] = true;
+    else if (first_h < 0 || i < first_h) known[i] = first_h >= 0 && first_e >= 0 && first_e < 0.05f;
+    else known[i] = true;  // after the first sample: no answer = inverter asleep (0)
+  }
+}

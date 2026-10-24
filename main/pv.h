@@ -73,3 +73,37 @@ void pv_hist_clear(PvHist* h);
 int pv_hist_update(PvHist* h, int32_t ymd, float eac_today);
 // kWh for a finished day, < 0 if unknown.
 float pv_hist_day(const PvHist& h, int32_t ymd);
+
+// --- Hourly / 15-min PV production (separate NVS blob "pv_hours", today only).
+// Integrates the AC power of the good 10 s readings (trapezoid; a pair of
+// readings more than kPvIntGapS apart is not integrated: night, outage, reboot)
+// and snapshots the inverter's "Eac today" at the first fresh reading of each
+// quarter hour. pv_hours_scaled() scales the integrated hours so their sum
+// matches the Eac delta over the covered period (Eac has 0.1 kWh steps).
+constexpr int64_t kPvIntGapS = 60;
+constexpr int kPvQuarters = 96;
+struct PvHours {
+  uint32_t magic;
+  int32_t ymd;          // day of the buckets (local), 0 = none
+  int64_t last_t;       // time of the last integrated reading (0 = none)
+  float last_w;
+  int16_t last_q;       // quarter of the last reading (-1 none)
+  uint16_t pad;
+  float wh[24];         // integrated Wh per hour
+  float q_wh[kPvQuarters];
+  float eac_q[kPvQuarters];  // Eac today (kWh) at the first fresh reading in the quarter, -1 = none
+};
+constexpr uint32_t kPvHoursMagic = 0x50510001;
+void pv_hours_clear(PvHours* h, int32_t ymd = 0);
+// Feed a good reading: local ymd, unix time t, local seconds of the day, AC power, and
+// Eac today if it is known to belong to today (PvHist.fresh), else < 0.
+// Returns bit 1 = changed, 2 = entered a new hour (persist), 4 = new day.
+int pv_hours_add(PvHours* h, int32_t ymd, int64_t t, int sod, float ac_w, float eac_today);
+// Hourly kWh for today, scaled to the Eac delta when plausible. eac_now < 0: unscaled.
+// covered[i] (optional) = the hour has integrated samples. Returns the scale factor used (1 = none).
+float pv_hours_scaled(const PvHours& h, float eac_now, float out_kwh[24], bool covered[24] = nullptr);
+// Which hours have a known PV value: integrated samples, or before the first sample of the
+// day while the inverter had produced nothing yet (first Eac snapshot < 0.05 kWh). Hours
+// without samples after that are 0 when the inverter slept, unknown otherwise; the caller
+// treats them as unknown if the meter shows export in them.
+void pv_hours_known(const PvHours& h, const bool covered[24], bool known[24]);

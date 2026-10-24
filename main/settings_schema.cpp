@@ -76,6 +76,7 @@ const KeySpec kSchema[] = {
     {"pv_gw", KeyType::Str, 7, 15, kKeyHost, 0},
     {"pv_gwport", KeyType::Str, 1, 5, kKeyDigits, 0},
     {"pv_unit", KeyType::Str, 1, 3, kKeyDigits, 0},
+    {"pv_hours", KeyType::Blob, sizeof(PvHours), sizeof(PvHours), kKeyInternal, 0},  // PV hours today: never exported
     {"pv_hist", KeyType::Blob, sizeof(PvHist), sizeof(PvHist), kKeyInternal, 0},  // PV day history: never exported
     {"en_hist", KeyType::Blob, sizeof(EnergyHist), sizeof(EnergyHist), kKeyInternal, 0},  // history: never exported
 };

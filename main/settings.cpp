@@ -737,6 +737,23 @@ bool settings_save_pv_hist(const PvHist& hist) {
   return tx.commit();
 }
 
+bool settings_load_pv_hours(PvHours* hours) {
+  pv_hours_clear(hours);
+  nvs_handle_t h;
+  if (nvs_open(kNs, NVS_READONLY, &h) != ESP_OK) return false;
+  size_t sz = sizeof(*hours);
+  bool ok = nvs_get_blob(h, "pv_hours", hours, &sz) == ESP_OK && sz == sizeof(*hours) && hours->magic == kPvHoursMagic;
+  nvs_close(h);
+  if (!ok) pv_hours_clear(hours);
+  return ok;
+}
+
+bool settings_save_pv_hours(const PvHours& hours) {
+  Tx tx;
+  tx.blob("pv_hours", &hours, sizeof(hours));
+  return tx.commit();
+}
+
 // --- Termin-Erinnerungen ---------------------------------------------------------
 
 ReminderSettings settings_load_reminders() {
