@@ -35,6 +35,8 @@ namespace {
 enum class Sim { Idle, Hold, Move, ReleaseHold };
 
 Sim sim = Sim::Idle;
+uint32_t inv_period = 0, inv_left = 0, inv_next = 0;
+int inv_y1 = 320, inv_y2 = 479;
 int x0_ = 0, y0_ = 0, x1_ = 0, y1_ = 0;
 uint32_t t0 = 0, dur = 0;
 int cur_x = 0, cur_y = 0;
@@ -180,6 +182,15 @@ void handle(char* cmd) {
     char nm[24] = "", v[24] = "", u[12] = "";
     if (sscanf(cmd + 11, "%23s %23s %11s", nm, v, u) >= 2) play_cmd_send(nm, v, u);
     else console_puts("CO4EN ERR");
+  } else if (strncmp(cmd, "INVSTRESS ", 10) == 0) {
+    // INVSTRESS <period_ms> <count> [y1 y2]: invalidate a band of the active screen every
+    // period (default: lower third = the Energie/OEV/Abfuhr tiles) like a value update.
+    int per = 0, cnt = 0, a = 320, b = 479;
+    sscanf(cmd + 10, "%d %d %d %d", &per, &cnt, &a, &b);
+    inv_period = per < 20 ? 20 : static_cast<uint32_t>(per);
+    inv_left = cnt < 0 ? 0 : static_cast<uint32_t>(cnt);
+    inv_y1 = a; inv_y2 = b; inv_next = now_ms();
+    console_printf("OK INVSTRESS %lu %lu %d..%d\n", (unsigned long)inv_period, (unsigned long)inv_left, inv_y1, inv_y2);
   } else if (strcmp(cmd, "SCROLLCHK") == 0) {
     char text[120];
     ui_scroll_check(text, sizeof(text));
@@ -356,6 +367,12 @@ void handle(char* cmd) {
 }  // namespace
 
 void harness_poll() {
+  if (inv_left > 0 && static_cast<int32_t>(now_ms() - inv_next) >= 0) {
+    inv_next = now_ms() + inv_period;
+    --inv_left;
+    lv_area_t ar = {0, static_cast<lv_coord_t>(inv_y1), static_cast<lv_coord_t>(kPanelWidth - 1), static_cast<lv_coord_t>(inv_y2)};
+    lv_obj_invalidate_area(lv_scr_act(), &ar);
+  }
   while (console_available() > 0) {
     int ch = console_read();
     if (ch == '\r') {

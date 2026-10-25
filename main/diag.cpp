@@ -164,7 +164,25 @@ void stacks(bool warn_only) {
 #if CONFIG_FREERTOS_USE_TRACE_FACILITY
   static TaskStatus_t st[32];
   static uint32_t warned = 0;  // bit per slot index of tasks already warned about (by name hash)
+#if CONFIG_PANEL_BOARD_SENSECAP_D1
+  // D1: uxTaskGetSystemState() scans every task's stack for its high-water mark while it
+  // holds the FreeRTOS kernel lock. Core 1's tick ISR then spins on that lock with interrupts
+  // off for > 0.7 ms, the RGB bounce-buffer EOF ISR (also core 1) misses its refill slot and
+  // the driver scans one frame out of a stale bounce buffer + DMA restart: the bottom part of
+  // the screen is drawn shifted for one frame (the "tear"). So only look up our own tasks
+  // (short lock in xTaskGetHandle) and scan their stacks without holding the lock.
+  static const char* const kNames[] = {"ui", "net", "lox", "diag", "httpd", "energy", "pv", "co4en", "tcpip", "wifi"};
+  UBaseType_t n = 0;
+  for (const char* nm : kNames) {
+    TaskHandle_t h = xTaskGetHandle(nm);
+    if (h == nullptr) continue;
+    st[n].pcTaskName = nm;
+    st[n].usStackHighWaterMark = uxTaskGetStackHighWaterMark(h);
+    ++n;
+  }
+#else
   UBaseType_t n = uxTaskGetSystemState(st, 32, nullptr);
+#endif
   char line[480];
   size_t used = snprintf(line, sizeof(line), "DIAG stack free(B):");
   for (UBaseType_t i = 0; i < n; ++i) {
@@ -343,8 +361,15 @@ void diag_task(void*) {
       report(up);
       stacks(every == 5000);  // full table once a minute, warnings always
     }
+#if CONFIG_PANEL_BOARD_SENSECAP_D1
+    // No automatic run-time stats on the D1: vTaskGetRunTimeStats() also walks all tasks under
+    // the kernel lock (one torn frame, see stacks()). DIAGSTATS still prints them on request.
+    if (!stats30 && up >= 30) { stats30 = true; stacks(false); }
+    (void)stats90;
+#else
     if (!stats30 && up >= 30) { stats30 = true; stats(); stacks(false); }
     if (!stats90 && up >= 90) { stats90 = true; stats(); }
+#endif
     if (!health1 && up >= 150) { health1 = true; health(); }  // once after the first fetches
     if (up >= next_health) { next_health += 3600; health(); }
     vTaskDelay(pdMS_TO_TICKS(20));

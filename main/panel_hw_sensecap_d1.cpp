@@ -257,6 +257,19 @@ volatile bool want_vsync = false;
 // VSYNC alone let sync_dirty() write into the FB that was still being scanned -> one-frame
 // flash at the end of scroll/swipe. We now wait for on_frame_buf_complete (= latch point).
 volatile uint32_t st_early_vsync = 0;  // VSYNCs seen while a swap was pending but not latched
+// Position of the last bounce refill (on_frame_buf_complete) relative to VSYNC. It is a
+// fixed point in the scan, so its spread shows how late the bounce EOF ISR ran; a spread
+// near one bounce half (kBounceLines lines) means a refill missed its slot (= shifted frame).
+volatile uint32_t st_fbc_min_us = UINT32_MAX, st_fbc_max_us = 0;
+// What panel_flush was doing when a late refill was seen: 0 = not in flush (LVGL render /
+// other tasks), 1 = writeback of the shown FB, 2 = waiting for the latch, 3 = FB->FB copy.
+volatile uint8_t flush_phase = 0;
+constexpr uint32_t kLateUs = 400;  // > normal ISR jitter (~200 us), < one bounce half (685 us)
+volatile uint32_t st_late[4] = {};
+volatile uint8_t st_isr_core = 0xFF;
+struct LateLog { uint32_t t_ms, us; void* task; };
+LateLog late_log[8];
+volatile uint32_t late_pos = 0;
 
 bool IRAM_ATTR on_vsync(esp_lcd_panel_handle_t, const esp_lcd_rgb_panel_event_data_t*, void*) {
   const int64_t t = esp_timer_get_time();
@@ -273,6 +286,21 @@ bool IRAM_ATTR on_vsync(esp_lcd_panel_handle_t, const esp_lcd_rgb_panel_event_da
 
 bool IRAM_ATTR on_frame_buf_complete(esp_lcd_panel_handle_t, const esp_lcd_rgb_panel_event_data_t*, void*) {
   st_bounce = st_bounce + 1;
+  if (st_vsync_last != 0) {
+    const uint32_t d = static_cast<uint32_t>(esp_timer_get_time() - st_vsync_last);
+    if (d < st_fbc_min_us) st_fbc_min_us = d;
+    if (d > st_fbc_max_us) st_fbc_max_us = d;
+    if (st_fbc_min_us != UINT32_MAX && d > st_fbc_min_us + kLateUs) {
+      st_late[flush_phase & 3] = st_late[flush_phase & 3] + 1;
+      const uint32_t pos = late_pos;
+      late_pos = pos + 1;
+      LateLog& L = late_log[pos % 8];
+      L.t_ms = static_cast<uint32_t>(esp_timer_get_time() / 1000);
+      L.us = d - st_fbc_min_us;
+      L.task = xTaskGetCurrentTaskHandle();
+    }
+  }
+  st_isr_core = static_cast<uint8_t>(xPortGetCoreID());
   BaseType_t woken = pdFALSE;
   if (want_vsync) {  // the driver has just latched cur_fb for the next frame
     want_vsync = false;
@@ -449,7 +477,9 @@ void panel_flush(lv_disp_drv_t* drv, const lv_area_t*, lv_color_t* color) {
   }
   uint16_t* shown = reinterpret_cast<uint16_t*>(color);
   uint16_t* other = shown == fbs[0] ? fbs[1] : fbs[0];
+  flush_phase = 1;
   sync_dirty(drv, shown, nullptr, true);
+  flush_phase = 2;
   const int64_t t0 = esp_timer_get_time();
   xSemaphoreTake(vsync_sem, 0);
   want_vsync = true;
@@ -458,7 +488,9 @@ void panel_flush(lv_disp_drv_t* drv, const lv_area_t*, lv_color_t* color) {
   want_vsync = false;
   const int64_t t1 = esp_timer_get_time();
   fb = shown;
+  flush_phase = 3;
   sync_dirty(drv, shown, other, false);
+  flush_phase = 0;
   const int64_t t2 = esp_timer_get_time();
   ++st_flips;
   {
@@ -666,11 +698,23 @@ void panel_hw_dump() {
   }
   const int64_t age = esp_timer_get_time() - st_vsync_last;
   console_printf("DIAG RGB pclk=%lu fbs=2 bounce=%d vsync=%lu fb_complete=%lu vsync_max_us=%lu last_vsync_age_us=%lld "
-                 "flips=%lu flip_max_us=%lu copy_max_us=%lu flip_timeouts=%lu early_vsync=%lu\n",
+                 "flips=%lu flip_max_us=%lu copy_max_us=%lu flip_timeouts=%lu early_vsync=%lu "
+                 "restarts=%ld fbc_min_us=%lu fbc_max_us=%lu late=%lu/%lu/%lu/%lu isr_core=%u\n",
                  (unsigned long)kPclkHz, kPanelWidth * kBounceLines, (unsigned long)st_vsync, (unsigned long)st_bounce,
                  (unsigned long)st_vsync_max_us, (long long)age, (unsigned long)st_flips, (unsigned long)st_flip_max_us,
                  (unsigned long)st_copy_max_us, (unsigned long)st_flip_timeouts,
-                 (unsigned long)st_early_vsync);
+                 (unsigned long)st_early_vsync,
+                 (long)(st_vsync - st_bounce), (unsigned long)st_fbc_min_us,
+                 (unsigned long)st_fbc_max_us, (unsigned long)st_late[0], (unsigned long)st_late[1],
+                 (unsigned long)st_late[2], (unsigned long)st_late[3], (unsigned)st_isr_core);
+  for (uint32_t i = late_pos > 8 ? late_pos - 8 : 0; i < late_pos; ++i) {
+    const LateLog& L = late_log[i % 8];
+    console_printf("DIAG RGBLATE t=%lu +%luus task=%s\n", (unsigned long)L.t_ms, (unsigned long)L.us,
+                   L.task ? pcTaskGetName(static_cast<TaskHandle_t>(L.task)) : "?");
+  }
+  late_pos = 0;
+  st_fbc_min_us = UINT32_MAX;
+  st_fbc_max_us = 0;
   st_vsync_max_us = 0;  // maxima since the last DIAGHW
   st_flip_max_us = 0;
   st_copy_max_us = 0;
