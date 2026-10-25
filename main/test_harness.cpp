@@ -168,6 +168,14 @@ void handle(char* cmd) {
     play_cmd_fwd(cmd[10] == '1');
   } else if (strcmp(cmd, "CO4EN KVTEXT 1") == 0 || strcmp(cmd, "CO4EN KVTEXT 0") == 0) {
     play_cmd_kvtext(cmd[13] == '1');
+  } else if (strcmp(cmd, "CO4EN CII 1") == 0 || strcmp(cmd, "CO4EN CII 0") == 0) {
+    play_cmd_cii(cmd[10] == '1');
+  } else if (strcmp(cmd, "CO4EN FAST") == 0) {
+    play_cmd_pair_fast();
+  } else if (strncmp(cmd, "CO4EN VSTORE ", 13) == 0) {
+    play_cmd_vstore(static_cast<uint16_t>(atoi(cmd + 13)));
+  } else if (strncmp(cmd, "CO4EN OFFCHAN ", 14) == 0) {
+    play_cmd_offchan(static_cast<uint8_t>(atoi(cmd + 14)));
   } else if (strncmp(cmd, "CO4EN SEND ", 11) == 0) {
     char nm[24] = "", v[24] = "", u[12] = "";
     if (sscanf(cmd + 11, "%23s %23s %11s", nm, v, u) >= 2) play_cmd_send(nm, v, u);

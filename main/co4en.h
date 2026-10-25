@@ -137,3 +137,42 @@ Co4enPairErr co4en_pair_resp_open_win(const uint8_t* f, size_t n, const uint8_t 
 
 // --- default KEYMAP (spec v0.4 §4 proposal); test.* keys get ids from 100 ---------
 uint16_t co4en_default_key_id(const char* key);  // 0 = not in the table
+
+// --- link loss + channel sweep (spec v0.5) -------------------------------------------
+// Probe = normal encrypted unicast DATA (STATUS, ACK_REQ) to the known gateway; a
+// channel counts as found on the ACK-INFO reply (MAC ACK alone is only a hint).
+constexpr int kCo4enLinkMissMax = 3;        // consecutive missed ACKs -> link lost
+constexpr uint32_t kCo4enProbeWaitMs = 50;  // per channel
+constexpr uint32_t kCo4enVstoreMinMv = 15500;
+struct Co4enLink {
+  uint8_t miss;
+};
+// ACK received (any result): link alive.
+inline void co4en_link_ack(Co4enLink* l) { l->miss = 0; }
+// ACK_REQ frame got no ACK (after the app retry): true once the link counts as lost.
+inline bool co4en_link_miss(Co4enLink* l) {
+  if (l->miss < 255) ++l->miss;
+  return l->miss >= kCo4enLinkMissMax;
+}
+
+enum class Co4enSweepSt : uint8_t { Idle = 0, Probing, Backoff, Found };
+struct Co4enSweep {
+  Co4enSweepSt st;
+  uint8_t order[13], n, idx;
+  uint8_t ch;       // channel of the outstanding probe (0 = none)
+  uint8_t found;    // last found channel
+  uint8_t fails;    // failed full sweeps in a row (backoff index)
+  uint32_t t_next;  // next action due (ms)
+};
+// Order: last known channel, then 1, 6, 11, then the rest up to 13 (no duplicates).
+// single_ch != 0: only that channel (Wi-Fi node: stays on the AP channel).
+void co4en_sweep_start(Co4enSweep* s, uint8_t last_ch, uint8_t single_ch, uint32_t now_ms);
+// Backoff after the n-th failed sweep (1-based): 1, 5, 15, then 60 min.
+uint32_t co4en_sweep_backoff_ms(uint8_t fails);
+// Call periodically. Returns the channel to probe now (switch there, send one probe
+// with a new seq), 0 = nothing to do. power_ok: VSTORE >= 15.5 V (CII); otherwise the
+// sweep waits.
+uint8_t co4en_sweep_step(Co4enSweep* s, uint32_t now_ms, bool power_ok);
+// ACK-INFO received for the probe on s->ch: done. Returns true if `found` differs
+// from nvs_ch (caller persists it in NVS).
+bool co4en_sweep_found(Co4enSweep* s, uint8_t nvs_ch);

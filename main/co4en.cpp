@@ -469,8 +469,75 @@ uint16_t co4en_default_key_id(const char* key) {
            {"er.imp", 7},    {"er.exp", 8},    {"p.imp", 10},    {"p.exp", 11},    {"p.l1", 12},     {"p.l2", 13},
            {"p.l3", 14},     {"p.exp.l1", 15}, {"p.exp.l2", 16}, {"p.exp.l3", 17}, {"q.imp", 18},    {"q.exp", 19},
            {"u.l1", 20},     {"u.l2", 21},     {"u.l3", 22},     {"i.l1", 23},     {"i.l2", 24},     {"i.l3", 25},
-           {"f", 26},        {"pf", 27},       {"tariff", 28},   {"meter.id", 29}};
+           {"f", 26},        {"pf", 27},       {"tariff", 28},   {"meter.id", 29},
+           {"er.q1", 30},    {"er.q2", 31},    {"er.q3", 32},    {"er.q4", 33},    {"w.vol", 40}};
   for (const auto& e : t)
     if (strcmp(e.k, key) == 0) return e.id;
   return 0;
+}
+
+// --- link loss + channel sweep ----------------------------------------------------
+void co4en_sweep_start(Co4enSweep* s, uint8_t last_ch, uint8_t single_ch, uint32_t now_ms) {
+  uint8_t keep_fails = s->fails;
+  uint8_t keep_found = s->found;
+  memset(s, 0, sizeof(*s));
+  s->fails = keep_fails;
+  s->found = keep_found;
+  auto add = [s](uint8_t c) {
+    if (c < 1 || c > 13) return;
+    for (uint8_t i = 0; i < s->n; ++i)
+      if (s->order[i] == c) return;
+    s->order[s->n++] = c;
+  };
+  if (single_ch != 0) {
+    add(single_ch);
+  } else {
+    add(last_ch);
+    add(1);
+    add(6);
+    add(11);
+    for (uint8_t c = 1; c <= 13; ++c) add(c);
+  }
+  s->st = Co4enSweepSt::Probing;
+  s->t_next = now_ms;
+}
+
+uint32_t co4en_sweep_backoff_ms(uint8_t fails) {
+  static const uint32_t m[] = {1, 5, 15, 60};
+  uint8_t i = fails == 0 ? 0 : fails - 1;
+  if (i > 3) i = 3;
+  return m[i] * 60000u;
+}
+
+uint8_t co4en_sweep_step(Co4enSweep* s, uint32_t now_ms, bool power_ok) {
+  if (s->st == Co4enSweepSt::Idle || s->st == Co4enSweepSt::Found) return 0;
+  if (static_cast<int32_t>(now_ms - s->t_next) < 0) return 0;
+  if (s->st == Co4enSweepSt::Backoff) {  // retry: same order again
+    s->st = Co4enSweepSt::Probing;
+    s->idx = 0;
+  }
+  if (!power_ok) {
+    s->ch = 0;
+    s->t_next = now_ms + 1000;
+    return 0;
+  }
+  if (s->idx >= s->n) {  // all channels tried without ACK-INFO
+    s->ch = 0;
+    if (s->fails < 255) ++s->fails;
+    s->st = Co4enSweepSt::Backoff;
+    s->t_next = now_ms + co4en_sweep_backoff_ms(s->fails);
+    return 0;
+  }
+  s->ch = s->order[s->idx++];
+  s->t_next = now_ms + kCo4enProbeWaitMs;
+  return s->ch;
+}
+
+bool co4en_sweep_found(Co4enSweep* s, uint8_t nvs_ch) {
+  if (s->st != Co4enSweepSt::Probing || s->ch == 0) return false;
+  s->found = s->ch;
+  s->ch = 0;
+  s->fails = 0;
+  s->st = Co4enSweepSt::Found;
+  return s->found != nvs_ch;
 }

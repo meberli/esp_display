@@ -8,6 +8,9 @@
 
 void wifi_start(const char* ssid, const char* password, const char* hostname);
 bool wifi_connected();
+// Playground CII mode: hold = disconnect and stop reconnecting (credentials kept);
+// release = reconnect normally.
+void wifi_hold(bool on);
 // true once the driver reported a final failure (wrong password, no AP).
 bool wifi_failed();
 int wifi_auth_fails();   // auth / 4-way handshake rejections since wifi_start

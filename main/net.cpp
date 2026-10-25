@@ -25,6 +25,7 @@ namespace {
 std::atomic<bool> g_connected{false};
 std::atomic<bool> g_failed{false};
 std::atomic<bool> g_scanning{false};    // no reconnects while a scan runs
+std::atomic<bool> g_hold{false};        // Playground CII mode: stay disconnected
 std::atomic<int> g_last_reason{0};      // last WIFI_REASON_* of a disconnect
 std::atomic<int> g_auth_fails{0};       // auth / handshake rejections since wifi_start
 std::atomic<int> g_noap_fails{0};       // "AP not found" since wifi_start
@@ -35,7 +36,7 @@ char g_ssid[33] = "";
 int g_retry = 0;
 esp_timer_handle_t g_retry_timer = nullptr;
 void retry_cb(void*) {
-  if (!g_scanning && g_ssid[0] != '\0' && !g_connected) esp_wifi_connect();
+  if (!g_scanning && !g_hold && g_ssid[0] != '\0' && !g_connected) esp_wifi_connect();
 }
 void reconnect() {
   int n = g_retry++;
@@ -71,7 +72,7 @@ bool is_auth_reason(int r) {
 
 void on_event(void*, esp_event_base_t base, int32_t id, void* data) {
   if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
-    if (g_ssid[0] != '\0') esp_wifi_connect();  // empty SSID: station only for scanning
+    if (g_ssid[0] != '\0' && !g_hold) esp_wifi_connect();  // empty SSID: station only for scanning
   } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
     if (g_connected) diag_wifi_disconnect();
     g_connected = false;
@@ -91,7 +92,7 @@ void on_event(void*, esp_event_base_t base, int32_t id, void* data) {
     printf("Wi-Fi disconnect reason %d (auth %d, no AP %d)\n", reason, g_auth_fails.load(), g_noap_fails.load());
     // Keep trying (also the saved network after a failed boot); the caller
     // decides when to give up or switch. A scan pauses the retries.
-    if (!g_scanning && g_ssid[0] != '\0') reconnect();
+    if (!g_scanning && !g_hold && g_ssid[0] != '\0') reconnect();
   } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
     g_connected = true;
     g_failed = false;
@@ -143,6 +144,19 @@ void wifi_start(const char* ssid, const char* password, const char* hostname) {
 }
 
 bool wifi_connected() { return g_connected; }
+void wifi_hold(bool on) {
+  if (on == g_hold) return;
+  g_hold = on;
+  if (on) {
+    if (g_retry_timer != nullptr) esp_timer_stop(g_retry_timer);
+    esp_wifi_disconnect();
+    printf("Wi-Fi held (Playground CII mode)\n");
+  } else {
+    g_retry = 0;
+    if (g_ssid[0] != '\0') esp_wifi_connect();
+    printf("Wi-Fi released: reconnecting\n");
+  }
+}
 bool wifi_failed() { return g_failed; }
 int wifi_auth_fails() { return g_auth_fails; }
 int wifi_noap_fails() { return g_noap_fails; }

@@ -172,7 +172,7 @@ int main() {
 
   // Default KEYMAP (spec v0.4 §4)
   CHECK(co4en_default_key_id("e.imp") == 1 && co4en_default_key_id("p.imp") == 2 + 8 && co4en_default_key_id("er.exp") == 8 &&
-            co4en_default_key_id("meter.id") == 29 && co4en_default_key_id("w.vol") == 0 && co4en_default_key_id("test.x") == 0,
+            co4en_default_key_id("meter.id") == 29 && co4en_default_key_id("w.vol") == 40 && co4en_default_key_id("er.q1") == 30 && co4en_default_key_id("er.q4") == 33 && co4en_default_key_id("test.x") == 0,
         "default key ids");
 
   uint8_t ak[64];
@@ -189,6 +189,65 @@ int main() {
   while (co4en_kv_text(&f, "p.l1", co4en_f32(1))) ++n;
   CHECK(n == 19 && f.overflow && f.n <= CO4EN_MAX_FRAME, "frame limit 250 B");
 
+
+  {  // link loss: 3 consecutive missed ACKs, an ACK resets
+    Co4enLink l = {};
+    CHECK(!co4en_link_miss(&l) && !co4en_link_miss(&l), "link: 2 misses not lost");
+    co4en_link_ack(&l);
+    CHECK(!co4en_link_miss(&l) && !co4en_link_miss(&l) && co4en_link_miss(&l), "link: 3 consecutive misses -> lost");
+  }
+  {  // sweep order: last known, 1, 6, 11, rest
+    Co4enSweep s = {};
+    co4en_sweep_start(&s, 6, 0, 0);
+    const uint8_t want[13] = {6, 1, 11, 2, 3, 4, 5, 7, 8, 9, 10, 12, 13};
+    CHECK(s.n == 13 && memcmp(s.order, want, 13) == 0, "sweep: order last,1,6,11,rest");
+    co4en_sweep_start(&s, 0, 0, 0);
+    const uint8_t want0[4] = {1, 6, 11, 2};
+    CHECK(s.n == 13 && memcmp(s.order, want0, 4) == 0, "sweep: no last channel");
+    co4en_sweep_start(&s, 9, 6, 0);
+    CHECK(s.n == 1 && s.order[0] == 6, "sweep: Wi-Fi node stays on the AP channel");
+  }
+  {  // found on channel 11 after 1, 6 (last=1), 50 ms each; NVS persisted only on change
+    Co4enSweep s = {};
+    uint8_t nvs = 1;  // fake NVS
+    co4en_sweep_start(&s, nvs, 0, 1000);
+    uint32_t t = 1000;
+    CHECK(co4en_sweep_step(&s, t, true) == 1, "sweep: probe ch1");
+    CHECK(co4en_sweep_step(&s, t + 49, true) == 0, "sweep: waits 50 ms");
+    t += 50;
+    CHECK(co4en_sweep_step(&s, t, true) == 6, "sweep: then ch6");
+    t += 50;
+    CHECK(co4en_sweep_step(&s, t, true) == 11, "sweep: then ch11");
+    if (co4en_sweep_found(&s, nvs)) nvs = s.found;
+    CHECK(s.st == Co4enSweepSt::Found && s.found == 11 && nvs == 11 && s.fails == 0, "sweep: found ch11, NVS updated");
+    CHECK(co4en_sweep_step(&s, t + 1000, true) == 0, "sweep: idle after found");
+    co4en_sweep_start(&s, nvs, 0, t);
+    CHECK(co4en_sweep_step(&s, t, true) == 11, "sweep: next sweep starts on the persisted channel");
+    CHECK(!co4en_sweep_found(&s, nvs), "sweep: same channel -> no NVS write");
+    CHECK(!co4en_sweep_found(&s, nvs), "sweep: found without probe ignored");
+  }
+  {  // not found: backoff 1, 5, 15, 60, 60 min; VSTORE low pauses
+    Co4enSweep s = {};
+    co4en_sweep_start(&s, 0, 0, 0);
+    uint32_t t = 0;
+    const uint32_t bo[5] = {60000, 300000, 900000, 3600000, 3600000};
+    bool ok = true;
+    for (int round = 0; round < 5; ++round) {
+      int probes = 0;
+      while (co4en_sweep_step(&s, t, true) != 0) { ++probes; t += 50; }
+      ok &= probes == 13 && s.st == Co4enSweepSt::Backoff && s.t_next == t + bo[round];
+      ok &= co4en_sweep_step(&s, s.t_next - 1, true) == 0;
+      t = s.t_next;
+    }
+    CHECK(ok, "sweep: 13 probes per sweep, backoff 1/5/15/60/60 min");
+    Co4enSweep p = {};
+    co4en_sweep_start(&p, 3, 0, 0);
+    CHECK(co4en_sweep_step(&p, 0, false) == 0 && p.t_next == 1000 && p.idx == 0, "sweep: VSTORE low -> waits");
+    CHECK(co4en_sweep_step(&p, 1000, true) == 3, "sweep: VSTORE ok -> probes");
+    co4en_sweep_start(&p, 3, 3, 0);
+    CHECK(co4en_sweep_step(&p, 0, true) == 3 && co4en_sweep_step(&p, 50, true) == 0 && p.st == Co4enSweepSt::Backoff &&
+              p.t_next == 50 + 60000, "sweep: single channel (Wi-Fi) not found -> backoff");
+  }
   printf(fails ? "RESULT FAIL (%d)\n" : "RESULT PASS\n", fails);
   return fails ? 1 : 0;
 }

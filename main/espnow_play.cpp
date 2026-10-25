@@ -35,7 +35,8 @@ constexpr uint32_t kFwdMinMs = 5000;
 constexpr int kAckEvery = 6;
 constexpr uint8_t kCaps = CO4EN_CAP_KV_TEXT | CO4EN_CAP_KV_ID | CO4EN_CAP_MAINS | CO4EN_CAP_TEST;
 
-enum class CmdKind : uint8_t { Open, Pair, Reset, Fwd, Send, Rx, KvText };
+enum class CmdKind : uint8_t { Open, Pair, Reset, Fwd, Send, Rx, KvText, Cii, PairFast, Vstore, OffChan };
+constexpr uint32_t kCiiMaxMs = 30 * 60000;  // CII mode switches itself off: Wi-Fi always comes back
 struct Cmd {
   CmdKind kind;
   bool on;
@@ -65,6 +66,15 @@ bool kv_text_mode = false;  // NVS "kvtext"
 bool km_done[128];          // KEYMAP announced since pairing / boot / ACK result 1
 char test_keys[16][CO4EN_KEY_MAX + 1];  // test.* keys -> ids 100..115 (this boot)
 Co4enNonceWin nwin;  // latest PAIR_REQ nonce and the one before
+// Link loss + channel recovery (spec v0.5).
+bool cii_mode = false;      // Wi-Fi disconnected, ESP-NOW hops channels (not persisted)
+uint32_t cii_until = 0;
+uint16_t vstore_mv = 16000; // simulated VSTORE (test parameter; mains display)
+Co4enLink link = {};
+Co4enSweep sw = {};
+bool probe_out = false;     // pend is a sweep probe
+uint8_t pair_hop = 0;       // CII pairing: next channel index of the PAIR_REQ round
+uint8_t hint_ch = 0;        // last "gateway channel != Wi-Fi channel" hint logged
 bool nonce_valid = false;
 uint32_t pair_t0 = 0, next_pair = 0;
 uint32_t pair_req_n = 0, sent_n = 0, acked_n = 0, failed_n = 0, dry_n = 0, last_seq_v = 0;
@@ -97,7 +107,7 @@ PlayCounters counters() {
   uint8_t ch = 0;
   wifi_second_chan_t sc;
   if (esp_wifi_get_channel(&ch, &sc) == ESP_OK) c.channel = ch;
-  if (st == PlayState::Confirming || st == PlayState::Paired) memcpy(c.gw_mac, gw_mac, 6);
+  if (st != PlayState::Off && st != PlayState::Pairing) memcpy(c.gw_mac, gw_mac, 6);
   c.pair_req = pair_req_n;
   c.sent = sent_n;
   c.mac_ok = a_mac_ok.load();
@@ -105,6 +115,14 @@ PlayCounters counters() {
   c.failed = failed_n + a_mac_fail.load();
   c.dry = dry_n;
   c.last_seq = last_seq_v;
+  c.cii = cii_mode;
+  c.link_miss = link.miss;
+  c.sweep_st = static_cast<uint8_t>(sw.st);
+  c.sweep_ch = sw.ch;
+  c.sweep_fails = sw.fails;
+  c.sweep_next_s = sw.st == Co4enSweepSt::Backoff ? (sw.t_next - now_ms()) / 1000 : 0;
+  c.gw_chan = gw_chan;
+  c.vstore_mv = vstore_mv;
   return c;
 }
 
@@ -137,6 +155,8 @@ const char* state_name(PlayState s) {
     case PlayState::Pairing: return "pairing";
     case PlayState::Confirming: return "confirming";
     case PlayState::Paired: return "paired";
+    case PlayState::Lost: return "lost";
+    case PlayState::Searching: return "searching";
     default: return "off";
   }
 }
@@ -282,7 +302,7 @@ bool add_gw_peer() {
 
 bool radio_up() {
   if (radio) return true;
-  if (!wifi_connected()) return false;
+  if (!wifi_connected() && !cii_mode) return false;
   if (esp_now_init() != ESP_OK) {
     logf("esp_now_init failed");
     return false;
@@ -294,7 +314,7 @@ bool radio_up() {
   p.channel = 0;
   p.ifidx = WIFI_IF_STA;
   esp_now_add_peer(&p);
-  if (st == PlayState::Paired || st == PlayState::Confirming) {
+  if (st != PlayState::Off && st != PlayState::Pairing) {
     esp_now_set_pmk(pmk);
     add_gw_peer();
   }
@@ -349,10 +369,10 @@ void send_data(Co4enFrame* f, uint8_t flags, bool force_ack) {
     ++data_n;
   }
   if (ack) flags |= CO4EN_F_ACK_REQ;
-  if (!linked) {  // unpaired: only PAIR_REQ goes on air; data stays local (logged, seq 0, not sent)
+  if (!linked) {  // unpaired / gateway lost: data stays local (logged, seq 0, not sent)
     f->b[2] = flags;
     memset(&f->b[4], 0, 4);
-    tx(*f, nullptr, "dry");
+    tx(*f, nullptr, st == PlayState::Lost || st == PlayState::Searching ? "dry-lost" : "dry");
     return;
   }
   uint32_t s = next_seq();
@@ -389,6 +409,141 @@ void send_status_frame(bool force_ack) {
   begin_data(&f, &flags);
   add_status(&f);
   send_data(&f, flags, force_ack);
+}
+
+// --- link loss + channel recovery ---------------------------------------------------
+uint8_t cur_channel() {
+  uint8_t ch = 0;
+  wifi_second_chan_t sc;
+  esp_wifi_get_channel(&ch, &sc);
+  return ch;
+}
+
+// Only without Wi-Fi: an associated STA stays on the AP channel.
+void set_channel(uint8_t ch) {
+  if (!cii_mode || ch < 1 || ch > 13) return;
+  esp_err_t e = esp_wifi_set_channel(ch, WIFI_SECOND_CHAN_NONE);
+  if (e != ESP_OK) logf("set channel %u failed (%d)", ch, static_cast<int>(e));
+}
+
+void channel_hint(uint8_t gw_ch) {
+  uint8_t ch = cur_channel();
+  if (cii_mode || gw_ch == 0 || gw_ch == ch || gw_ch == hint_ch) return;
+  hint_ch = gw_ch;
+  logf("gateway channel %u != WLAN channel %u (panel stays on the WLAN channel)", gw_ch, ch);
+}
+
+void start_search(const char* why) {
+  pend.active = false;
+  probe_out = false;
+  st = PlayState::Lost;
+  co4en_sweep_start(&sw, gw_chan, cii_mode ? 0 : cur_channel(), now_ms());
+  logf("%s: searching gateway (%s)", why, cii_mode ? "sweep ch 1-13" : "WLAN channel only");
+}
+
+// Probe = normal encrypted unicast DATA with STATUS + ACK_REQ, new seq every time.
+void send_probe(uint8_t ch) {
+  set_channel(ch);
+  if (!radio_up()) return;
+  Co4enFrame f;
+  uint8_t flags;
+  begin_data(&f, &flags);
+  add_status(&f);
+  flags |= CO4EN_F_ACK_REQ;
+  uint32_t s = next_seq();
+  f.b[2] = flags;
+  memcpy(&f.b[4], &s, 4);
+  char mode[16];
+  snprintf(mode, sizeof(mode), "probe-ch%u", ch);
+  tx(f, gw_mac, mode);
+  remember_ack_seq(s);
+  pend.active = true;
+  pend.seq = s;
+  pend.deadline = now_ms() + kCo4enProbeWaitMs;
+  pend.retries = 0;
+  pend.f = f;
+  probe_out = true;
+}
+
+void search_tick(uint32_t t) {
+  if (st != PlayState::Lost && st != PlayState::Searching) return;
+  if (pend.active) return;
+  bool power_ok = !cii_mode || vstore_mv >= kCo4enVstoreMinMv;
+  uint8_t ch = co4en_sweep_step(&sw, t, power_ok);
+  if (ch != 0) {
+    st = PlayState::Searching;
+    send_probe(ch);
+  } else if (sw.st == Co4enSweepSt::Backoff && st == PlayState::Searching) {
+    st = PlayState::Lost;
+    logf("gateway not found: next search in %lu min", static_cast<unsigned long>(co4en_sweep_backoff_ms(sw.fails) / 60000));
+  }
+}
+
+void probe_found(const Co4enAck& a) {
+  uint8_t ch = cii_mode ? sw.ch : cur_channel();
+  bool changed = co4en_sweep_found(&sw, gw_chan);
+  probe_out = false;
+  st = PlayState::Paired;
+  co4en_link_ack(&link);
+  if (changed && cii_mode) {
+    gw_chan = ch;
+    nvs_save_u8(CO4EN_NVS_CHANNEL, gw_chan);
+  }
+  logf("gateway found on ch %u (ACK-INFO ch %u)%s", ch, a.channel, changed && cii_mode ? ", saved" : "");
+  channel_hint(a.channel);
+}
+
+void cii_set(bool on) {
+  if (on == cii_mode) return;
+  if (on) {
+    cii_mode = true;
+    cii_until = now_ms() + kCiiMaxMs;
+    wifi_hold(true);
+    radio_up();
+    set_channel(gw_chan != 0 ? gw_chan : 1);
+    logf("CII mode on: WLAN disconnected, no whatwatt forward (manual values only)");
+    if (st == PlayState::Paired || st == PlayState::Lost || st == PlayState::Searching) start_search("CII mode");
+    if (st == PlayState::Pairing) next_pair = now_ms();
+  } else {
+    cii_mode = false;
+    pair_hop = 0;
+    wifi_hold(false);
+    logf("CII mode off: WLAN reconnecting");
+    if (st == PlayState::Lost || st == PlayState::Searching) {
+      pend.active = false;
+      st = PlayState::Lost;
+      sw.st = Co4enSweepSt::Idle;  // restarted on the AP channel once Wi-Fi is back
+    }
+  }
+}
+
+// Experimental: IDF 6.1 esp_now_switch_channel_tx (off-channel TX while associated).
+void offchan_test(uint8_t ch) {
+  if (!radio_up()) {
+    logf("offchan: radio not up");
+    return;
+  }
+  Co4enFrame f;
+  uint8_t flags;
+  begin_data(&f, &flags);
+  add_status(&f);
+  uint32_t s = next_seq();
+  memcpy(&f.b[4], &s, 4);
+  size_t sz = sizeof(esp_now_switch_channel_t) + f.n;
+  auto* c = static_cast<esp_now_switch_channel_t*>(calloc(1, sz));
+  if (c == nullptr) return;
+  c->type = WIFI_OFFCHAN_TX_REQ;
+  c->channel = ch;
+  c->sec_channel = WIFI_SECOND_CHAN_NONE;
+  c->wait_time_ms = kCo4enProbeWaitMs;
+  memcpy(c->dest_mac, kBcast, 6);
+  c->data_len = f.n;
+  memcpy(c->data, f.b, f.n);
+  uint32_t t0 = now_ms();
+  esp_err_t e = esp_now_switch_channel_tx(c);
+  free(c);
+  logf("offchan ch %u seq %lu: %s (%d) in %lu ms, wifi=%d", ch, static_cast<unsigned long>(s), esp_err_to_name(e),
+       static_cast<int>(e), static_cast<unsigned long>(now_ms() - t0), wifi_connected() ? 1 : 0);
 }
 
 // --- KV encoding: KV-ID + KEYMAP (CII default) or KV-Text (Playground option) ------
@@ -442,7 +597,7 @@ void send_pair_req() {
   co4en_pair_req(&f, secret, my_mac, CO4EN_DEV_CII, fw, kCaps, nonce, next_seq(), ts, flags);
   co4en_wipe(nonce, sizeof(nonce));
   ++pair_req_n;
-  tx(f, kBcast, "bcast");
+  tx(f, kBcast, cii_mode ? "bcast-hop" : "bcast");
 }
 
 void start_pairing() {
@@ -484,11 +639,11 @@ void on_pair_resp(const uint8_t src[6], const uint8_t* d, size_t n) {
   nonce_valid = false;
   co4en_nonce_clear(&nwin);
   km_reset();
-  uint8_t ch = 0;
-  wifi_second_chan_t sc;
-  esp_wifi_get_channel(&ch, &sc);
-  if (gw_chan != 0 && gw_chan != ch)
-    logf("gateway channel %u != Wi-Fi channel %u (panel stays on Wi-Fi channel)", gw_chan, ch);
+  hint_ch = 0;
+  if (cii_mode) gw_chan = cur_channel();  // found by the PAIR_REQ hop
+  else channel_hint(gw_chan);
+  pair_hop = 0;
+  co4en_link_ack(&link);
   nvs_save_blob(CO4EN_NVS_GW_MAC, gw_mac, 6);
   nvs_save_blob(CO4EN_NVS_PMK, pmk, 16);
   nvs_save_blob(CO4EN_NVS_LMK, lmk, 16);
@@ -507,7 +662,7 @@ void on_pair_resp(const uint8_t src[6], const uint8_t* d, size_t n) {
 }
 
 void on_ack(const uint8_t src[6], const uint8_t* d, size_t n) {
-  if (st != PlayState::Paired && st != PlayState::Confirming) return;
+  if (st == PlayState::Off || st == PlayState::Pairing) return;
   if (memcmp(src, gw_mac, 6) != 0) return;
   Co4enAck a;
   if (!co4en_parse_ack(d, n, &a)) {
@@ -520,15 +675,22 @@ void on_ack(const uint8_t src[6], const uint8_t* d, size_t n) {
     logf("ACK for unknown seq %lu", static_cast<unsigned long>(a.acked_seq));
     return;
   }
+  bool probe_hit = probe_out && pend.active && a.acked_seq == pend.seq;
   if (pend.active && (a.acked_seq == pend.seq)) pend.active = false;
+  co4en_link_ack(&link);  // any ACK-INFO: the gateway hears us
+  if (probe_hit && st == PlayState::Searching) probe_found(a);
   if (a.result != CO4EN_ACK_OK) {
     ++failed_n;
-    if (a.result == 1) km_reset();  // gateway could not decode: announce the KEYMAP again
+    if (a.result == CO4EN_ACK_ERR_DECODE) {  // e.g. unknown KV-ID: announce the KEYMAP again
+      km_reset();
+      logf("gateway: unknown id / decode error -> KEYMAP re-announced with the next frame");
+    }
     logf("ACK seq=%lu result=%u", static_cast<unsigned long>(a.acked_seq), a.result);
     return;
   }
   ++acked_n;
   logf("ACK seq=%lu ok ch=%u", static_cast<unsigned long>(a.acked_seq), a.channel);
+  channel_hint(a.channel);
   if (st == PlayState::Confirming) {
     st = PlayState::Paired;
     nvs_save_u8(CO4EN_NVS_PAIRED, 1);
@@ -547,6 +709,9 @@ void on_rx(const Cmd& c) {
 
 void do_reset() {
   pend.active = false;
+  probe_out = false;
+  sw.st = Co4enSweepSt::Idle;
+  link.miss = 0;
   drop_keys();
   st = PlayState::Off;
   nonce_valid = false;
@@ -611,7 +776,7 @@ void do_send(const Cmd& c) {
   }
   if (now_ms() - last_status_ms >= kHeartbeatMs && co4en_room(f) >= 12) add_status(&f);
   logf("send %s=%s%s", key, v, (st == PlayState::Paired || st == PlayState::Confirming) ? "" : " (dry: not paired)");
-  send_data(&f, flags, false);
+  send_data(&f, flags, true);  // manual value: always ACK_REQ (user feedback, link check)
 }
 
 // Greedy KV-Text packing: a value that does not fit closes the frame.
@@ -657,6 +822,9 @@ void forward(const EnergyReading& r) {
   if (r.e_out_t2 >= 0) p.put("e.exp.t2", co4en_i64(static_cast<int64_t>(r.e_out_t2 * 1000.0 + 0.5)));
   if (r.er_in >= 0) p.put("er.imp", co4en_i64(static_cast<int64_t>(r.er_in * 1000.0 + 0.5)));
   if (r.er_out >= 0) p.put("er.exp", co4en_i64(static_cast<int64_t>(r.er_out * 1000.0 + 0.5)));
+  static const char* const erq[4] = {"er.q1", "er.q2", "er.q3", "er.q4"};  // varh, OBIS 5.8.0..8.8.0
+  for (int q = 0; q < 4; ++q)
+    if (r.er_q[q] >= 0) p.put(erq[q], co4en_i64(static_cast<int64_t>(r.er_q[q] * 1000.0 + 0.5)));
   const char* il[3] = {"i.l1", "i.l2", "i.l3"};
   for (int i = 0; i < 3; ++i)
     if (r.i_a[i] >= 0) p.put(il[i], co4en_f32(r.i_a[i]));
@@ -677,6 +845,7 @@ void forward(const EnergyReading& r) {
 }
 
 void fwd_tick() {
+  if (cii_mode) return;  // no WLAN: no whatwatt data
   if (!fwd || now_ms() - fwd_poll_ms < 1000) return;
   fwd_poll_ms = now_ms();
   if (ev == nullptr) ev = static_cast<EnergyView*>(heap_caps_calloc(1, sizeof(EnergyView), MALLOC_CAP_SPIRAM));
@@ -691,10 +860,23 @@ void fwd_tick() {
 
 void tick() {
   uint32_t t = now_ms();
+  if (cii_mode && static_cast<int32_t>(t - cii_until) >= 0) cii_set(false);
   if (st == PlayState::Pairing && static_cast<int32_t>(t - next_pair) >= 0) {
+    // CII: one PAIR_REQ per channel 1..13, 50 ms apart, then the normal period.
+    if (cii_mode) set_channel(static_cast<uint8_t>(pair_hop + 1));
     send_pair_req();
     uint32_t period = t - pair_t0 < CO4EN_PAIR_FAST_DURATION_MS ? CO4EN_PAIR_FAST_PERIOD_MS : 30000;
+    if (cii_mode && ++pair_hop < 13) period = kCo4enProbeWaitMs;
+    else pair_hop = 0;
     next_pair = t + period;
+  }
+  if ((st == PlayState::Lost || st == PlayState::Searching) && sw.st == Co4enSweepSt::Idle &&
+      (cii_mode || wifi_connected()) && radio_up())
+    co4en_sweep_start(&sw, gw_chan, cii_mode ? 0 : cur_channel(), t);  // after leaving CII mode
+  if (pend.active && probe_out && static_cast<int32_t>(t - pend.deadline) >= 0) {
+    pend.active = false;  // one probe per channel, no retry
+    probe_out = false;
+    ++failed_n;
   }
   if (pend.active && static_cast<int32_t>(t - pend.deadline) >= 0) {
     if (pend.retries > 0 && st != PlayState::Off) {
@@ -709,8 +891,10 @@ void tick() {
     } else {
       pend.active = false;
       ++failed_n;
+      if (st == PlayState::Paired && co4en_link_miss(&link)) start_search("Gateway verloren (3 ACKs missed)");
     }
   }
+  search_tick(t);
   if (st == PlayState::Confirming && !pend.active && t - last_data_ms >= kConfirmPeriodMs) {
     if (confirm_n >= kConfirmFrames) {
       logf("no ACK after %d frames: back to pairing", confirm_n);
@@ -724,7 +908,7 @@ void tick() {
     }
   }
   if (st == PlayState::Paired && t - last_status_ms >= kHeartbeatMs && t - last_data_ms >= 1000) {
-    if (radio_up()) send_status_frame(false);
+    if (radio_up()) send_status_frame(true);  // heartbeat with ACK_REQ: feeds the link-loss detection
     else last_status_ms = t;  // try again in a minute
   }
   if (st == PlayState::Paired && !radio) radio_up();
@@ -766,6 +950,20 @@ void task(void*) {
           logf("encoding %s", kv_text_mode ? "KV-Text (test/dev)" : "KV-ID + KEYMAP");
           break;
         case CmdKind::Rx: on_rx(c); break;
+        case CmdKind::Cii: cii_set(c.on); break;
+        case CmdKind::PairFast:
+          if (st == PlayState::Off) start_pairing();
+          if (st == PlayState::Pairing) {
+            pair_t0 = next_pair = now_ms();
+            pair_hop = 0;
+            logf("pairing: fast 3 s phase restarted");
+          }
+          break;
+        case CmdKind::Vstore:
+          vstore_mv = c.n;
+          logf("VSTORE (simulated) %u mV", vstore_mv);
+          break;
+        case CmdKind::OffChan: offchan_test(static_cast<uint8_t>(c.n)); break;
       }
       ui_post(PlayMsgKind::Status, state_name(st));
     }
@@ -812,6 +1010,18 @@ void play_cmd_reset() {
   c->kind = CmdKind::Reset;
   post(*c);
 }
+static void post_n(CmdKind k, bool on, uint16_t n);
+void play_cmd_cii(bool on) { post_n(CmdKind::Cii, on, 0); }
+void play_cmd_pair_fast() { post_n(CmdKind::PairFast, true, 0); }
+void play_cmd_vstore(uint16_t mv) { post_n(CmdKind::Vstore, true, mv); }
+void play_cmd_offchan(uint8_t ch) { post_n(CmdKind::OffChan, true, ch); }
+static void post_n(CmdKind k, bool on, uint16_t n) {
+  Cmd* c = cmd_buf();
+  c->kind = k;
+  c->on = on;
+  c->n = n;
+  post(*c);
+}
 void play_cmd_kvtext(bool on) {
   Cmd* c = cmd_buf();
   c->kind = CmdKind::KvText;
@@ -843,15 +1053,19 @@ void play_cmd_inject(const uint8_t src[6], const uint8_t* f, size_t n) {
   post(*c);
 }
 
+static const char* const kSweepNames[4] = {"idle", "probing", "backoff", "found"};
 void play_diag() {
   PlayCounters c = counters();  // read-only snapshot; racy but harmless for diagnostics
   console_printf("CO4EN state=%s fwd=%d radio=%d ch=%u gw=%02X%02X%02X%02X%02X%02X pair_req=%lu sent=%lu mac_ok=%lu "
-                 "acked=%lu failed=%lu dry=%lu seq=%lu enc=%s\n",
+                 "acked=%lu failed=%lu dry=%lu seq=%lu enc=%s cii=%d gw_ch=%u link_miss=%u sweep=%s sweep_ch=%u "
+                 "sweep_fails=%u next=%lus vstore=%u\n",
                  state_name(c.state), c.fwd ? 1 : 0, c.radio ? 1 : 0, c.channel, c.gw_mac[0], c.gw_mac[1], c.gw_mac[2],
                  c.gw_mac[3], c.gw_mac[4], c.gw_mac[5], static_cast<unsigned long>(c.pair_req),
                  static_cast<unsigned long>(c.sent), static_cast<unsigned long>(c.mac_ok),
                  static_cast<unsigned long>(c.acked), static_cast<unsigned long>(c.failed),
-                 static_cast<unsigned long>(c.dry), static_cast<unsigned long>(c.last_seq), c.kv_text ? "kvtext" : "kvid");
+                 static_cast<unsigned long>(c.dry), static_cast<unsigned long>(c.last_seq), c.kv_text ? "kvtext" : "kvid", c.cii ? 1 : 0,
+                 c.gw_chan, c.link_miss, kSweepNames[c.sweep_st & 3], c.sweep_ch, c.sweep_fails,
+                 static_cast<unsigned long>(c.sweep_next_s), c.vstore_mv);
 }
 
 void play_print_qr_test_only() { console_printf("CO4ENQR %s\n", qr); }

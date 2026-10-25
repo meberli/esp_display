@@ -14,7 +14,8 @@
 
 #include "co4en.h"
 
-enum class PlayState : uint8_t { Off = 0, Pairing, Confirming, Paired };
+// Lost: "Gateway verloren" (backoff), Searching: probing channels (auto-recovery).
+enum class PlayState : uint8_t { Off = 0, Pairing, Confirming, Paired, Lost, Searching };
 
 struct PlayCounters {
   PlayState state;
@@ -30,6 +31,14 @@ struct PlayCounters {
   uint32_t failed;   // send error, MAC failure, or app ACK timeout
   uint32_t dry;      // encoded and logged but not transmitted (not paired)
   uint32_t last_seq;
+  bool cii;             // CII mode: Wi-Fi off, channel sweep (not persisted)
+  uint8_t link_miss;    // consecutive missed ACKs
+  uint8_t sweep_st;     // Co4enSweepSt
+  uint8_t sweep_ch;     // channel of the outstanding probe
+  uint8_t sweep_fails;
+  uint32_t sweep_next_s;
+  uint8_t gw_chan;      // last known gateway channel (NVS)
+  uint16_t vstore_mv;   // simulated VSTORE
 };
 
 enum class PlayMsgKind : uint8_t { Status, Log, Frame, Qr };
@@ -48,6 +57,10 @@ void play_cmd_pair(bool start);
 void play_cmd_reset();             // drop keys, new device secret (new QR)
 void play_cmd_fwd(bool on);
 void play_cmd_kvtext(bool on);   // Playground option: KV-Text encoding
+void play_cmd_cii(bool on);      // CII mode: Wi-Fi disconnected, real channel sweep (not persisted, 30 min max)
+void play_cmd_pair_fast();       // restart the fast 3 s PAIR_REQ phase
+void play_cmd_vstore(uint16_t mv);  // test: simulated VSTORE (sweep needs >= 15.5 V)
+void play_cmd_offchan(uint8_t ch);  // test: esp_now_switch_channel_tx feasibility
 void play_cmd_send(const char* name, const char* value, const char* unit);
 // Test harness: feed a received frame as if it came from src (ESP-NOW RX).
 void play_cmd_inject(const uint8_t src[6], const uint8_t* f, size_t n);

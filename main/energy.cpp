@@ -72,6 +72,7 @@ bool energy_parse_report(const char* json, size_t len, int water_bus, EnergyRead
   for (float& i : out->i_a) i = -1;
   out->e_in_t1 = out->e_in_t2 = out->e_out_t1 = out->e_out_t2 = -1;
   out->er_in = out->er_out = -1;
+  for (double& q : out->er_q) q = -1;
   StaticJsonDocument<768> filter;
   filter["report"]["date_time_utc"] = true;
   filter["report"]["tariff"] = true;
@@ -121,6 +122,15 @@ bool energy_parse_report(const char* json, size_t len, int water_bus, EnergyRead
       if (v < 0) v = o.is<JsonObjectConst>() ? num(o["total"], -1) : num(o, -1);
     }
     (d == 0 ? out->er_in : out->er_out) = v < 0 ? -1 : v * k;
+  }
+  // Quadrant registers (whatwatt docs): import inductive = Q1, export capacitive = Q2,
+  // export inductive = Q3, import capacitive = Q4.
+  const char* qsrc[4][2] = {{"imported", "inductive"}, {"exported", "capacitive"}, {"exported", "inductive"},
+                            {"imported", "capacitive"}};
+  for (int q = 0; q < 4; ++q) {
+    JsonVariantConst o = er[qsrc[q][0]][qsrc[q][1]];
+    double v = o.is<JsonObjectConst>() ? num(o["total"], -1) : num(o, -1);
+    out->er_q[q] = v < 0 ? -1 : v * k;
   }
   out->tariff = static_cast<int>(num(rep["tariff"], 0));
   out->ts = parse_utc(rep["date_time_utc"] | "");

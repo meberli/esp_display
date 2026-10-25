@@ -45,6 +45,9 @@ static void test_parse() {
   CHECK(NEAR(r.i_a[1], 2.39, 1e-5), "current L2");
   CHECK(NEAR(r.e_in, 28519.384, 1e-6) && NEAR(r.e_out, 19684.866, 1e-6), "energy totals");
   CHECK(r.er_in < 0 && r.er_out < 0, "reactive: quadrant registers only -> no er.imp/er.exp (never summed)");
+  CHECK(NEAR(r.er_q[0], 2.676, 1e-9) && NEAR(r.er_q[1], 20646.697, 1e-6) && NEAR(r.er_q[2], 8858.133, 1e-6) &&
+            NEAR(r.er_q[3], 0.459, 1e-9),
+        "reactive quadrants: Q1 imp.ind, Q2 exp.cap, Q3 exp.ind, Q4 imp.cap");
   CHECK(strcmp(r.meter_id, "00000000") == 0, "meter id");
   CHECK(NEAR(r.e_in_t1, 7039.711, 1e-6) && NEAR(r.e_in_t2, 21479.674, 1e-6), "import T1/T2");
   CHECK(r.has_water && NEAR(r.water_m3, 1398.985, 1e-9), "water bus 2");

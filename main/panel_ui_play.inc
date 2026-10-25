@@ -14,6 +14,10 @@ lv_obj_t* play_fwd_lbl = nullptr;
 lv_obj_t* play_enc_btn = nullptr;
 lv_obj_t* play_enc_lbl = nullptr;
 bool play_last_kvtext = false;
+bool play_last_cii = false;
+lv_obj_t* play_cii_btn = nullptr;
+lv_obj_t* play_cii_lbl = nullptr;
+lv_obj_t* play_cii_info = nullptr;
 lv_obj_t* play_key_ta = nullptr;
 lv_obj_t* play_val_ta = nullptr;
 lv_obj_t* play_unit_ta = nullptr;
@@ -36,6 +40,8 @@ void on_play_btn(lv_event_t* e) {
   if (which == 1) play_cmd_reset();
   if (which == 2) play_cmd_fwd(!play_last_fwd);
   if (which == 4) play_cmd_kvtext(!play_last_kvtext);
+  if (which == 5) play_cmd_pair_fast();
+  if (which == 6) play_cmd_cii(!play_last_cii);
   if (which == 3) {
     play_cmd_send(lv_textarea_get_text(play_key_ta), lv_textarea_get_text(play_val_ta),
                   lv_textarea_get_text(play_unit_ta));
@@ -103,14 +109,22 @@ void build_play_screen(lv_obj_t* screen) {
   play_btn(play_root, kMargin, 362, 270, "Senden", 3, "play:send", nullptr);
   // CII default is KV-ID + KEYMAP; KV-Text stays available for test/dev.
   play_enc_btn = play_btn(play_root, kMargin + 280, 362, 160, "KV-ID", 4, "play:enc", &play_enc_lbl);
+  // Restart the fast 3 s PAIR_REQ phase; CII mode = Wi-Fi off, real channel sweep.
+  play_btn(play_root, kMargin, 424, 170, "Pairing 3 s neu", 5, "play:fast", nullptr);
+  play_cii_btn = play_btn(play_root, kMargin + 180, 424, 260, "CII-Modus (ohne WLAN): AUS", 6, "play:cii", &play_cii_lbl);
+  play_cii_info = make_label(play_root, &font_inter_14, lv_color_hex(kTextDim));
+  lv_obj_set_pos(play_cii_info, 24, 482);
+  lv_obj_set_width(play_cii_info, kScreen - 48);
+  lv_label_set_long_mode(play_cii_info, LV_LABEL_LONG_WRAP);
+  lv_label_set_text(play_cii_info, "");
   play_cnt = make_label(play_root, &font_inter_14, lv_color_hex(kText));
-  lv_obj_set_pos(play_cnt, 24, 426);
+  lv_obj_set_pos(play_cnt, 24, 530);
   lv_obj_set_width(play_cnt, kScreen - 48);
   lv_label_set_long_mode(play_cnt, LV_LABEL_LONG_WRAP);
   lv_label_set_text(play_cnt, "");
-  make_caption(play_root, 470, "Letzter Frame");
+  make_caption(play_root, 574, "Letzter Frame");
   play_hex = make_label(play_root, &font_inter_14, lv_color_hex(kTeal));
-  lv_obj_set_pos(play_hex, 24, 490);
+  lv_obj_set_pos(play_hex, 24, 594);
   lv_obj_set_width(play_hex, kScreen - 48);
   lv_label_set_long_mode(play_hex, LV_LABEL_LONG_WRAP);
   lv_label_set_text(play_hex, "-");
@@ -136,6 +150,8 @@ const char* play_state_de(PlayState s) {
     case PlayState::Pairing: return "Pairing l\xC3\xA4uft ...";
     case PlayState::Confirming: return "Best\xC3\xA4tige Pairing ...";
     case PlayState::Paired: return "Gekoppelt";
+    case PlayState::Lost: return "Gateway verloren";
+    case PlayState::Searching: return "Gateway verloren \xC2\xB7 suche ...";
     default: return "Nicht gekoppelt";
   }
 }
@@ -145,6 +161,8 @@ void play_apply(const PlayUiMsg& m) {
   play_last_state = c.state;
   play_last_fwd = c.fwd;
   play_last_kvtext = c.kv_text;
+  play_last_cii = c.cii;
+  bool linked = c.state != PlayState::Off && c.state != PlayState::Pairing;
   lv_label_set_text(play_enc_lbl, c.kv_text ? "KV-Text" : "KV-ID");
   if (c.kv_text) lv_obj_add_state(play_enc_btn, LV_STATE_CHECKED);
   else lv_obj_clear_state(play_enc_btn, LV_STATE_CHECKED);
@@ -176,13 +194,28 @@ void play_apply(const PlayUiMsg& m) {
     lv_label_set_text(play_log, all);
   }
   char st[96];
-  if (c.state == PlayState::Paired || c.state == PlayState::Confirming)
+  if (linked)
     snprintf(st, sizeof(st), "%s\nGW %02X:%02X:%02X:%02X:%02X:%02X \xC2\xB7 Kanal %u", play_state_de(c.state),
              c.gw_mac[0], c.gw_mac[1], c.gw_mac[2], c.gw_mac[3], c.gw_mac[4], c.gw_mac[5], c.channel);
   else
     snprintf(st, sizeof(st), "%s \xC2\xB7 Kanal %u", play_state_de(c.state), c.channel);
   lv_label_set_text(play_state, st);
-  lv_obj_set_pos(play_qr_txt, 176, c.state == PlayState::Paired || c.state == PlayState::Confirming ? 112 : 92);
+  lv_obj_set_pos(play_qr_txt, 176, linked ? 112 : 92);
+  lv_label_set_text(play_cii_lbl, c.cii ? "CII-Modus (ohne WLAN): EIN" : "CII-Modus (ohne WLAN): AUS");
+  if (c.cii) lv_obj_add_state(play_cii_btn, LV_STATE_CHECKED);
+  else lv_obj_clear_state(play_cii_btn, LV_STATE_CHECKED);
+  char ci[200];
+  int n = 0;
+  if (c.cii)
+    n = snprintf(ci, sizeof(ci), "WLAN getrennt \xC2\xB7 Kanalsuche 1-13 \xC2\xB7 kein whatwatt-Forward, nur manuelle Werte");
+  else
+    n = snprintf(ci, sizeof(ci), "Mit WLAN: Panel bleibt auf dem WLAN-Kanal");
+  if (c.state == PlayState::Searching && n > 0)
+    snprintf(ci + n, sizeof(ci) - n, "\nSuche: Kanal %u \xC2\xB7 Fehlversuche %u", c.sweep_ch, c.sweep_fails);
+  else if (c.state == PlayState::Lost && n > 0)
+    snprintf(ci + n, sizeof(ci) - n, "\nN\xC3\xA4" "chste Suche in %lu s \xC2\xB7 Fehlversuche %u",
+             static_cast<unsigned long>(c.sweep_next_s), c.sweep_fails);
+  lv_label_set_text(play_cii_info, ci);
   lv_label_set_text(play_pair_lbl, c.state == PlayState::Off       ? "Pairing starten"
                                    : c.state == PlayState::Pairing ? "Pairing stoppen"
                                                                    : "Gekoppelt");
