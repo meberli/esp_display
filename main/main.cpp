@@ -1,3 +1,4 @@
+#include "espnow_play.h"
 #include "esp_attr.h"
 #include <ArduinoJson.h>
 
@@ -977,4 +978,5 @@ void app_start() {
   xTaskCreatePinnedToCore(ui_task, "ui", 16 * 1024, nullptr, 5, &ui_handle, 1);
   energy_start();  // whatwatt Go polling (core 0, below net and Loxone)
   pv_start();      // Growatt via Modbus TCP gateway, read only (core 0, lowest)
+  play_start();    // Playground CO4EN test sender: idle until used (core 0)
 }

@@ -44,6 +44,8 @@ static void test_parse() {
   CHECK(NEAR(r.p_in_kw, 0.609, 1e-6) && r.p_out_kw == 0, "power kW");
   CHECK(NEAR(r.i_a[1], 2.39, 1e-5), "current L2");
   CHECK(NEAR(r.e_in, 28519.384, 1e-6) && NEAR(r.e_out, 19684.866, 1e-6), "energy totals");
+  CHECK(NEAR(r.er_in, 2.676 + 0.459, 1e-6) && NEAR(r.er_out, 8858.133 + 20646.697, 1e-6), "reactive totals");
+  CHECK(strcmp(r.meter_id, "00000000") == 0, "meter id");
   CHECK(NEAR(r.e_in_t1, 7039.711, 1e-6) && NEAR(r.e_in_t2, 21479.674, 1e-6), "import T1/T2");
   CHECK(r.has_water && NEAR(r.water_m3, 1398.985, 1e-9), "water bus 2");
   CHECK(r.ts == at(2026, 10, 17, 19, 30) + 10, "date_time_utc");

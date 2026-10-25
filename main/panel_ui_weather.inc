@@ -604,7 +604,8 @@ void swipe_page(int dir) {
     if (dir > 0) open_weather_day(0);
     return;
   }
-  if (nav == Nav::TransitSet || nav == Nav::CalSet || nav == Nav::Maint || nav == Nav::RemSet) {
+  if (nav == Nav::TransitSet || nav == Nav::CalSet || nav == Nav::Maint || nav == Nav::RemSet ||
+      nav == Nav::Playground) {
     if (dir < 0) settings_back();
     return;
   }

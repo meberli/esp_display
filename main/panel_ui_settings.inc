@@ -692,6 +692,7 @@ void on_kb_event(lv_event_t* e) {
     cam_kb_ready(ta);
     st_kb_ready(ta);
     txt_kb_ready(ta);
+    play_kb_ready(ta);
   } else if (code == LV_EVENT_CANCEL) {
     lv_keyboard_set_textarea(kb, nullptr);
     hide(kb);
@@ -717,6 +718,7 @@ void on_settings_row(lv_event_t* e) {
   if (which == 7) open_remset();
   if (which == 8) open_maint();
   if (which == 9) open_enset();
+  if (which == 10) open_play();
 }
 
 void on_msg_wifi(lv_event_t*) {
@@ -770,18 +772,18 @@ void build_settings_screens(lv_obj_t* screen) {
   set_root = make_screen_root(screen, "Einstellungen");
   // Scrollable list: eight rows do not fit on one screen.
   lv_obj_t* set_list = make_list(set_root, 56, 404);
-  constexpr int kRows = 10;
+  constexpr int kRows = 11;
   // Row order on screen; the callback gets the row id (Wartung stays 8, Energie is 9).
   const char* names[kRows] = {"WLAN", "Wetter-Ort", "Bildschirm", "Uhrzeit", "Kameras", "\xC3\x96V", "Kalender",
-                              "Erinnerungen", "Energie", "Wartung"};
+                              "Erinnerungen", "Energie", "Wartung", "Playground"};
   const char* icons[kRows] = {ICON_WIFI3, ICON_PLACE, ICON_SCREEN, ICON_SCHEDULE, ICON_VIDEOCAM, ICON_TRAIN,
-                              ICON_EVENT, ICON_NOTIFY, ICON_BOLT, ICON_MEMORY};
-  const uint32_t colors[kRows] = {kAccent, kAmber, kPurple, kGreen, kTeal, kAccent, kPurple, kAmber, kAmber, kOrange};
+                              ICON_EVENT, ICON_NOTIFY, ICON_BOLT, ICON_MEMORY, ICON_ROUTER};
+  const uint32_t colors[kRows] = {kAccent, kAmber, kPurple, kGreen, kTeal, kAccent, kPurple, kAmber, kAmber, kOrange, kTeal};
   lv_obj_t** vals[kRows] = {&set_wifi_val, &set_loc_val, &set_disp_val, &set_time_val, &set_cam_val,
-                            &set_tr_val,   &set_cal_val, &set_rem_val,  &set_en_val,   &set_maint_val};
+                            &set_tr_val,   &set_cal_val, &set_rem_val,  &set_en_val,   &set_maint_val, &set_play_val};
   const char* keys[kRows] = {"set:wifi", "set:loc", "set:disp", "set:time", "set:cams",
-                             "set:oev",  "set:cal", "set:rem",  "set:energy", "set:maint"};
-  const int ids[kRows] = {0, 1, 2, 3, 4, 5, 6, 7, 9, 8};
+                             "set:oev",  "set:cal", "set:rem",  "set:energy", "set:maint", "set:play"};
+  const int ids[kRows] = {0, 1, 2, 3, 4, 5, 6, 7, 9, 8, 10};
   for (int i = 0; i < kRows; ++i) {
     lv_obj_t* row = make_row(set_list, 72, icons[i], colors[i], on_settings_row, ids[i]);
     reg(keys[i], row);

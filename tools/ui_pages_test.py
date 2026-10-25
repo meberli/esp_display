@@ -32,6 +32,8 @@ def chk(p, page, tap_last=False):
         vis = 0 <= y <= 466
         print("PASS" if vis else "FAIL", f"{page:14s} finger-scroll: {name} at y={y}")
         if not vis: FAILS.append(page + " finger-scroll"); return
+        if page == "set:play":  # last item is Send: empty fields -> no state change; no radio frames from a UI sweep
+            print("SKIP", f"{page:14s} tap {name} (send button, nothing to send)"); return
         p.tap(x, y); time.sleep(1.0)
         s1 = state(p)
         tapped = s1 != s0
@@ -62,7 +64,7 @@ def main():
     if "page=2" not in state(p): FAILS.append("wasser page"); print("FAIL wasser page", state(p)[6:40])
     settings(p); chk(p, "einstellungen", tap_last=True)
     for row in ("set:wifi", "set:loc", "set:disp", "set:time", "set:cams", "set:oev", "set:cal", "set:rem",
-                "set:energy", "set:maint"):
+                "set:energy", "set:maint", "set:play"):
         settings(p, row); chk(p, row, tap_last=True)
     settings(p, "set:cal"); tapn(p, "calset:bfs", 1.0); chk(p, "text-edit")
     home(p)

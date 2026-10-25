@@ -1,0 +1,117 @@
+#pragma once
+// CO4EN v0.4 (gwuno-fw ESP-NOW protocol, DRAFT): pure encoder / decoder for
+// the node side (no ESP-IDF, host tested in tools/test_co4en.cpp against the
+// co4en_ref.py test vectors). Constants and wire structs come unchanged from
+// gwuno's co4en.h (main/co4en_proto.h).
+//
+// Secrets and derived keys are never formatted into text by this module.
+
+#include <stddef.h>
+#include <stdint.h>
+
+#if defined(__cplusplus) && !defined(_Static_assert)
+#define _Static_assert static_assert  // gwuno's header uses the C11 spelling (newlib maps it already)
+#define CO4EN_SA_SHIM
+#endif
+#include "co4en_proto.h"
+#ifdef CO4EN_SA_SHIM
+#undef _Static_assert
+#undef CO4EN_SA_SHIM
+#endif
+
+// --- crypto (portable SHA-256, HMAC, HKDF) --------------------------------------
+void co4en_sha256(const uint8_t* data, size_t n, uint8_t out[32]);
+// HMAC-SHA256 over the concatenation of up to 3 parts (nullptr / 0 = unused).
+void co4en_hmac(const uint8_t* key, size_t key_n, const uint8_t* a, size_t an, const uint8_t* b, size_t bn,
+                const uint8_t* c, size_t cn, uint8_t out[32]);
+void co4en_hkdf(const uint8_t* ikm, size_t ikm_n, const char* info, uint8_t* out, size_t n);  // salt "CO4EN1"
+void co4en_k_auth(const uint8_t secret[CO4EN_SECRET_LEN], uint8_t out[32]);
+void co4en_k_enc(const uint8_t secret[CO4EN_SECRET_LEN], uint8_t out[32]);
+void co4en_wipe(void* p, size_t n);
+
+// --- QR / pairing string ----------------------------------------------------------
+// "CO4EN1:<MAC hex upper>:<base32 secret, no padding>" (49 chars + NUL).
+constexpr size_t kCo4enQrLen = 6 + 1 + 12 + 1 + 26 + 1;
+void co4en_qr_make(const uint8_t mac[6], const uint8_t secret[CO4EN_SECRET_LEN], char out[kCo4enQrLen]);
+
+// --- frame writer ---------------------------------------------------------------
+struct Co4enFrame {
+  uint8_t b[CO4EN_MAX_FRAME];
+  size_t n;
+  bool overflow;  // a TLV did not fit: the frame must not be sent
+};
+void co4en_begin(Co4enFrame* f, uint8_t type, uint8_t flags, uint32_t seq, uint32_t ts);
+size_t co4en_room(const Co4enFrame& f);  // bytes left
+bool co4en_tlv(Co4enFrame* f, uint8_t tag, const uint8_t* v, size_t n);
+
+// Values (vtype bits 0-3); q = quality; ts_ofs only if has_ofs.
+struct Co4enValue {
+  uint8_t type;  // CO4EN_VT_*
+  uint8_t q;
+  bool has_ofs;
+  int16_t ts_ofs;
+  bool b;
+  int32_t i32;
+  int64_t i64;
+  float f32;
+  double f64;
+  const uint8_t* data;  // string / bytes
+  size_t data_n;
+};
+Co4enValue co4en_f32(float v);
+Co4enValue co4en_f64(double v);
+Co4enValue co4en_i32(int32_t v);
+Co4enValue co4en_i64(int64_t v);
+Co4enValue co4en_str(const char* s);
+
+bool co4en_key_ok(const char* key);  // [a-z0-9_.-]{1,32}
+size_t co4en_kv_text_size(const char* key, const Co4enValue& v);  // TLV incl. tag+len, 0 if invalid
+bool co4en_kv_text(Co4enFrame* f, const char* key, const Co4enValue& v);
+bool co4en_kv_id(Co4enFrame* f, uint16_t id, const Co4enValue& v);
+bool co4en_keymap(Co4enFrame* f, uint16_t id, const char* key);
+bool co4en_status(Co4enFrame* f, uint16_t vstore_mv, uint32_t uptime_s, uint16_t err_bits);
+
+// PAIR_REQ (52 B) with the MIC.
+void co4en_pair_req(Co4enFrame* f, const uint8_t secret[CO4EN_SECRET_LEN], const uint8_t mac[6], uint8_t dev_type,
+                    const uint8_t fw[3], uint16_t caps, const uint8_t nonce_n[CO4EN_NONCE_LEN], uint32_t seq,
+                    uint32_t ts, uint8_t flags);
+
+// --- PAIR_RESP key wrap (exchangeable: v0.4 XOR keystream, AES-CCM planned) -----
+struct Co4enKeyWrap {
+  const char* name;
+  // in: 32 wrapped bytes; out: PMK and LMK. False if the wrap cannot be opened.
+  bool (*open)(const uint8_t k_enc[32], const uint8_t nonce_n[CO4EN_NONCE_LEN], const uint8_t nonce_g[CO4EN_NONCE_LEN],
+               const uint8_t* in, size_t in_n, uint8_t pmk[16], uint8_t lmk[16]);
+};
+extern const Co4enKeyWrap kCo4enWrapXorV04;
+
+struct Co4enPairResult {
+  uint8_t gw_mac[6];
+  uint8_t channel;
+  uint32_t unix;
+  uint32_t seq;
+  uint8_t pmk[16];
+  uint8_t lmk[16];
+};
+enum Co4enPairErr { kPairOk = 0, kPairFormat, kPairMic, kPairNonce, kPairWrap };
+// Node side: check format, MIC and the nonce_n echo, then open the keys.
+Co4enPairErr co4en_pair_resp_open(const uint8_t* f, size_t n, const uint8_t secret[CO4EN_SECRET_LEN],
+                                  const uint8_t nonce_n[CO4EN_NONCE_LEN], const Co4enKeyWrap& wrap,
+                                  Co4enPairResult* out);
+
+// --- decoding of what a node receives ------------------------------------------------
+struct Co4enHdr {
+  uint8_t ver, type, flags, rsv;
+  uint32_t seq, ts;
+};
+bool co4en_hdr(const uint8_t* f, size_t n, Co4enHdr* h);
+struct Co4enAck {
+  uint32_t seq;        // the ACK's own seq
+  uint32_t acked_seq;
+  uint8_t channel;
+  uint32_t unix;
+  uint8_t result;
+};
+bool co4en_parse_ack(const uint8_t* f, size_t n, Co4enAck* out);
+
+void co4en_hex(const uint8_t* b, size_t n, char* out, size_t out_n);  // "0105..." (upper, no spaces)

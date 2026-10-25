@@ -1,3 +1,4 @@
+#include "espnow_play.h"
 #include "esp_attr.h"
 #include "diag.h"
 
@@ -222,7 +223,8 @@ void stacks(bool warn_only) {
 
 bool read_only(const char* line) {
   return strcmp(line, "DIAGGT") == 0 || strcmp(line, "DIAGHW") == 0 || strcmp(line, "DIAGFB") == 0 || strcmp(line, "DIAGSTATS") == 0 ||
-         strcmp(line, "DIAGSTACK") == 0 || strcmp(line, "DIAGENERGY") == 0 || strcmp(line, "DIAGHEALTH") == 0;
+         strcmp(line, "DIAGSTACK") == 0 || strcmp(line, "DIAGENERGY") == 0 || strcmp(line, "DIAGHEALTH") == 0 ||
+         strcmp(line, "DIAGCO4EN") == 0;
 }
 
 void handle(const char* line) {
@@ -296,6 +298,8 @@ void handle(const char* line) {
     energy_dump();
   } else if (strcmp(line, "DIAGHEALTH") == 0) {
     health();
+  } else if (strcmp(line, "DIAGCO4EN") == 0) {
+    play_diag();  // state and counters only, never keys
   }
 }
 

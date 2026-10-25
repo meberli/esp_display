@@ -23,6 +23,7 @@
 #include "material_icons.h"
 #include "settings.h"
 #include "energy_task.h"
+#include "espnow_play.h"
 #include "pv_task.h"
 #include "energy_mix.h"
 #include "panel_hw.h"
@@ -74,7 +75,8 @@ enum Section : uint8_t { kSecFav = 0, kSecLight = 1, kSecShutter = 2, kSecOther 
 enum class Nav : uint8_t {
   Home, Category, Weather, Settings, WifiList, WifiPass, Location, Display, Time,
   Cameras, CamSettings, CamId, CamSearch, CamKey,
-  Transit, Calendar, Rain, TransitSet, StationSearch, CalSet, TextEdit, Maint, RemSet, Energy, EnSet
+  Transit, Calendar, Rain, TransitSet, StationSearch, CalSet, TextEdit, Maint, RemSet, Energy, EnSet,
+  Playground
 };
 
 const char* kShutterLabel[2] = {"Auf", "Ab"};
@@ -261,6 +263,14 @@ bool rem_shown_now();
 bool rem_ok_hit(int x, int y);
 bool rem_ok_pressing();
 void info_hide_all();
+// Playground (panel_ui_play.inc)
+lv_obj_t* set_play_val = nullptr;
+PlayState play_last_state = PlayState::Off;
+bool play_last_fwd = false;
+void play_hide();
+void play_tick();
+void play_kb_ready(lv_obj_t* ta);
+void open_play();
 void info_hide_views();
 void home_chips_refresh();
 void home_warn_refresh();
@@ -454,6 +464,7 @@ int round_c(float v) { return static_cast<int>(v >= 0.f ? v + 0.5f : v - 0.5f); 
 #include "panel_ui_info.inc"
 #include "panel_ui_rem.inc"
 #include "panel_ui_energy.inc"
+#include "panel_ui_play.inc"
 
 }  // namespace
 
@@ -818,6 +829,7 @@ static void ui_init_impl() {
   build_info_screens(screen);
   build_energy_screens(screen);
   build_enset_screen(screen);
+  build_play_screen(screen);
   lv_obj_move_foreground(kb);
   build_sleep_layer();
   build_reminders(screen);

@@ -140,6 +140,7 @@ void info_hide_all() {
   hide(txt_root);
   hide(maint_root);
   hide(remset_root);
+  play_hide();
 }
 
 void info_hide_views() {
@@ -1304,6 +1305,7 @@ void build_web_confirm() {
 
 // Once a second (clock_tick).
 void info_tick() {
+  play_tick();
   static uint32_t last = 0;
   disp_save_flush(false);
   if (maint_web_tick() && nav == Nav::Maint) maint_refresh();
@@ -1357,6 +1359,9 @@ bool info_describe(char* out, size_t n) {
       return true;
     case Nav::EnSet:
       snprintf(out, n, "enset");
+      return true;
+    case Nav::Playground:
+      snprintf(out, n, "playground state=%d fwd=%d", static_cast<int>(play_last_state), play_last_fwd ? 1 : 0);
       return true;
     case Nav::TextEdit: {
       char v[256];

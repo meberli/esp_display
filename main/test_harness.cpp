@@ -1,3 +1,4 @@
+#include "espnow_play.h"
 #include "energy_task.h"
 #include "pv_task.h"
 #include <time.h>
@@ -140,6 +141,35 @@ void handle(char* cmd) {
   int a, b, c, d, e;
   if (strcmp(cmd, "PING") == 0) {
     console_puts("PONG");
+  } else if (strcmp(cmd, "CO4ENQR") == 0) {
+    play_print_qr_test_only();  // test builds only: the pairing string holds the device secret
+  } else if (strncmp(cmd, "CO4ENRX ", 8) == 0) {
+    // CO4ENRX <src mac 12 hex> <frame hex>: as if received over ESP-NOW
+    uint8_t mac[6], f[CO4EN_MAX_FRAME];
+    const char* p = cmd + 8;
+    size_t n = 0;
+    bool ok = strlen(p) > 13 && p[12] == ' ';
+    for (int i = 0; ok && i < 6; ++i) ok = sscanf(p + 2 * i, "%2hhx", &mac[i]) == 1;
+    for (const char* h = p + 13; ok && h[0] != '\0' && h[1] != '\0' && n < sizeof(f); h += 2)
+      ok = sscanf(h, "%2hhx", &f[n++]) == 1;
+    if (ok && n >= CO4EN_HDR_LEN) {
+      play_cmd_inject(mac, f, n);
+      console_printf("CO4ENRX queued %u\n", static_cast<unsigned>(n));
+    } else {
+      console_puts("CO4ENRX ERR");
+    }
+  } else if (strcmp(cmd, "CO4EN PAIR") == 0) {
+    play_cmd_pair(true);
+  } else if (strcmp(cmd, "CO4EN STOP") == 0) {
+    play_cmd_pair(false);
+  } else if (strcmp(cmd, "CO4EN RESET") == 0) {
+    play_cmd_reset();
+  } else if (strcmp(cmd, "CO4EN FWD 1") == 0 || strcmp(cmd, "CO4EN FWD 0") == 0) {
+    play_cmd_fwd(cmd[10] == '1');
+  } else if (strncmp(cmd, "CO4EN SEND ", 11) == 0) {
+    char nm[24] = "", v[24] = "", u[12] = "";
+    if (sscanf(cmd + 11, "%23s %23s %11s", nm, v, u) >= 2) play_cmd_send(nm, v, u);
+    else console_puts("CO4EN ERR");
   } else if (strcmp(cmd, "SCROLLCHK") == 0) {
     char text[120];
     ui_scroll_check(text, sizeof(text));

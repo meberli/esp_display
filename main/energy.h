@@ -21,6 +21,8 @@ struct EnergyReading {
   int64_t ts;           // report.date_time_utc (Unix seconds), 0 = missing: electricity meter time
   int64_t water_ts;     // volume[bus].date_time (with its UTC offset), 0 = missing: M-Bus reading time
   uint32_t meter;       // hash of meter.id (meter change guard)
+  double er_in, er_out; // reactive kvarh (inductive + capacitive per direction), < 0: not reported
+  char meter_id[24];    // meter.id (truncated), "" = missing
 };
 
 // water_bus: M-Bus number of the water meter (0 = none).

@@ -71,6 +71,7 @@ bool energy_parse_report(const char* json, size_t len, int water_bus, EnergyRead
   memset(out, 0, sizeof(*out));
   for (float& i : out->i_a) i = -1;
   out->e_in_t1 = out->e_in_t2 = out->e_out_t1 = out->e_out_t2 = -1;
+  out->er_in = out->er_out = -1;
   StaticJsonDocument<768> filter;
   filter["report"]["date_time_utc"] = true;
   filter["report"]["tariff"] = true;
@@ -78,6 +79,7 @@ bool energy_parse_report(const char* json, size_t len, int water_bus, EnergyRead
   filter["report"]["instantaneous_power"]["active"] = true;
   filter["report"]["current"] = true;
   filter["report"]["energy"]["active"] = true;
+  filter["report"]["energy"]["reactive"] = true;
   filter["report"]["volume"] = true;
   filter["meter"]["status"] = true;
   filter["meter"]["id"] = true;
@@ -106,6 +108,23 @@ bool energy_parse_report(const char* json, size_t len, int water_bus, EnergyRead
     out->e_in *= k;
     out->e_out *= k;
   }
+  // Reactive: {"imported":{"inductive":{"total":x},"capacitive":y},"exported":{...}}
+  // (whatwatt); a plain {"positive":{"total":x}} layout is accepted as well.
+  JsonObjectConst er = rep["energy"]["reactive"];
+  const char* dir[2][2] = {{"imported", "positive"}, {"exported", "negative"}};
+  for (int d = 0; d < 2; ++d) {
+    JsonObjectConst o = er[dir[d][0]];
+    double v = -1;
+    if (!o.isNull()) {
+      JsonVariantConst ji = o["inductive"], jc = o["capacitive"];
+      double a = ji.is<JsonObjectConst>() ? num(ji["total"], -1) : num(ji, -1);
+      double c = jc.is<JsonObjectConst>() ? num(jc["total"], -1) : num(jc, -1);
+      if (a >= 0 || c >= 0) v = (a > 0 ? a : 0) + (c > 0 ? c : 0);
+    } else {
+      v = num(er[dir[d][1]]["total"], -1);
+    }
+    (d == 0 ? out->er_in : out->er_out) = v < 0 ? -1 : v * k;
+  }
   out->tariff = static_cast<int>(num(rep["tariff"], 0));
   out->ts = parse_utc(rep["date_time_utc"] | "");
   if (water_bus > 0) {
@@ -121,6 +140,7 @@ bool energy_parse_report(const char* json, size_t len, int water_bus, EnergyRead
   }
   const char* st = doc["meter"]["status"] | "";
   out->meter = fnv(doc["meter"]["id"] | "");
+  snprintf(out->meter_id, sizeof(out->meter_id), "%s", doc["meter"]["id"] | "");
   out->ok = strcmp(st, "OK") == 0 && out->e_in >= 0;
   return true;
 }
