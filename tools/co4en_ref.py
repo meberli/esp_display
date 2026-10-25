@@ -157,6 +157,8 @@ def decode(f, secret=None, keymap_tbl=None):
         elif tag == TAG_KEYMAP:
             kid, p = dec_kid(v, 0); keymap_tbl[kid] = v[p + 1:p + 1 + v[p]].decode()
             r["items"].append(dict(keymap=kid, key=keymap_tbl[kid]))
+        elif tag == TAG_STATUS:
+            mv, up, err = struct.unpack("<HIH", v[:8]); r["items"].append(dict(status=dict(vstore_mv=mv, uptime_s=up, err_bits=err)))
         elif tag == TAG_CMD:
             r["items"].append(dict(cmd=v.hex()))
         elif tag == TAG_ACK_INFO:

@@ -166,6 +166,8 @@ void handle(char* cmd) {
     play_cmd_reset();
   } else if (strcmp(cmd, "CO4EN FWD 1") == 0 || strcmp(cmd, "CO4EN FWD 0") == 0) {
     play_cmd_fwd(cmd[10] == '1');
+  } else if (strcmp(cmd, "CO4EN KVTEXT 1") == 0 || strcmp(cmd, "CO4EN KVTEXT 0") == 0) {
+    play_cmd_kvtext(cmd[13] == '1');
   } else if (strncmp(cmd, "CO4EN SEND ", 11) == 0) {
     char nm[24] = "", v[24] = "", u[12] = "";
     if (sscanf(cmd + 11, "%23s %23s %11s", nm, v, u) >= 2) play_cmd_send(nm, v, u);

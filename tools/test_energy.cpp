@@ -44,7 +44,7 @@ static void test_parse() {
   CHECK(NEAR(r.p_in_kw, 0.609, 1e-6) && r.p_out_kw == 0, "power kW");
   CHECK(NEAR(r.i_a[1], 2.39, 1e-5), "current L2");
   CHECK(NEAR(r.e_in, 28519.384, 1e-6) && NEAR(r.e_out, 19684.866, 1e-6), "energy totals");
-  CHECK(NEAR(r.er_in, 2.676 + 0.459, 1e-6) && NEAR(r.er_out, 8858.133 + 20646.697, 1e-6), "reactive totals");
+  CHECK(r.er_in < 0 && r.er_out < 0, "reactive: quadrant registers only -> no er.imp/er.exp (never summed)");
   CHECK(strcmp(r.meter_id, "00000000") == 0, "meter id");
   CHECK(NEAR(r.e_in_t1, 7039.711, 1e-6) && NEAR(r.e_in_t2, 21479.674, 1e-6), "import T1/T2");
   CHECK(r.has_water && NEAR(r.water_m3, 1398.985, 1e-9), "water bus 2");
@@ -55,6 +55,12 @@ static void test_parse() {
   const char* minimal = "{\"report\":{\"energy\":{\"active\":{\"positive\":{\"total\":5}}}},\"meter\":{\"status\":\"OK\"}}";
   CHECK(energy_parse_report(minimal, strlen(minimal), 2, &r) && r.ok && r.e_in == 5 && r.e_out == 0 && r.i_a[0] < 0 &&
             r.e_in_t1 < 0 && r.ts == 0 && !r.has_water, "minimal report");
+  {
+    const char* rt = "{\"report\":{\"energy\":{\"active\":{\"positive\":{\"total\":5}},\"reactive\":{\"imported\":{\"total\":1.5,"
+                     "\"inductive\":{\"total\":1}},\"negative\":{\"total\":2.25}}}},\"meter\":{\"status\":\"OK\"}}";
+    CHECK(energy_parse_report(rt, strlen(rt), 2, &r) && NEAR(r.er_in, 1.5, 1e-9) && NEAR(r.er_out, 2.25, 1e-9),
+          "reactive 3.8.0/4.8.0 totals as delivered");
+  }
   const char* nodata = "{\"report\":{},\"meter\":{\"status\":\"NO DATA\"}}";
   CHECK(energy_parse_report(nodata, strlen(nodata), 2, &r) && !r.ok, "NO DATA -> not ok");
   CHECK(!energy_parse_report("<html>", 6, 2, &r), "HTML page rejected");

@@ -19,6 +19,7 @@ enum class PlayState : uint8_t { Off = 0, Pairing, Confirming, Paired };
 struct PlayCounters {
   PlayState state;
   bool fwd;          // whatwatt forward (persisted)
+  bool kv_text;      // KV-Text instead of KV-ID + KEYMAP (persisted, test/dev)
   bool radio;        // ESP-NOW initialised
   uint8_t channel;   // Wi-Fi primary channel
   uint8_t gw_mac[6];
@@ -46,6 +47,7 @@ void play_cmd_open();              // Playground page opened: send status + QR
 void play_cmd_pair(bool start);
 void play_cmd_reset();             // drop keys, new device secret (new QR)
 void play_cmd_fwd(bool on);
+void play_cmd_kvtext(bool on);   // Playground option: KV-Text encoding
 void play_cmd_send(const char* name, const char* value, const char* unit);
 // Test harness: feed a received frame as if it came from src (ESP-NOW RX).
 void play_cmd_inject(const uint8_t src[6], const uint8_t* f, size_t n);

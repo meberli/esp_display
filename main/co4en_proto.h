@@ -128,10 +128,15 @@ typedef struct {
 } co4en_obis_hdr_t;
 #pragma pack(pop)
 
-_Static_assert(sizeof(co4en_hdr_t) == 12, "hdr");
-_Static_assert(sizeof(co4en_ack_info_t) == 10, "ack");
-_Static_assert(sizeof(co4en_pair_req_t) == 20, "preq");
-_Static_assert(sizeof(co4en_pair_resp_t) == 59, "presp");
+#if defined(__cplusplus)
+#define CO4EN_SASSERT(c, m) static_assert(c, m)
+#else
+#define CO4EN_SASSERT(c, m) _Static_assert(c, m)
+#endif
+CO4EN_SASSERT(sizeof(co4en_hdr_t) == 12, "hdr");
+CO4EN_SASSERT(sizeof(co4en_ack_info_t) == 10, "ack");
+CO4EN_SASSERT(sizeof(co4en_pair_req_t) == 20, "preq");
+CO4EN_SASSERT(sizeof(co4en_pair_resp_t) == 59, "presp");
 
 /* frame sizes */
 #define CO4EN_PAIR_REQ_LEN   (12 + 2 + 20 + 2 + 16)  /* 52 */

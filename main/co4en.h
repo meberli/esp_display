@@ -9,15 +9,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#if defined(__cplusplus) && !defined(_Static_assert)
-#define _Static_assert static_assert  // gwuno's header uses the C11 spelling (newlib maps it already)
-#define CO4EN_SA_SHIM
-#endif
 #include "co4en_proto.h"
-#ifdef CO4EN_SA_SHIM
-#undef _Static_assert
-#undef CO4EN_SA_SHIM
-#endif
 
 // --- crypto (portable SHA-256, HMAC, HKDF) --------------------------------------
 void co4en_sha256(const uint8_t* data, size_t n, uint8_t out[32]);
@@ -115,3 +107,33 @@ struct Co4enAck {
 bool co4en_parse_ack(const uint8_t* f, size_t n, Co4enAck* out);
 
 void co4en_hex(const uint8_t* b, size_t n, char* out, size_t out_n);  // "0105..." (upper, no spaces)
+
+// --- seq (monotonic across reboots) -------------------------------------------------
+// NVS holds the start of the current block; every seq in use is < nvs + 256.
+// The next block is reserved (NVS written) proactively at +224, so no frame ever
+// has to wait for a flash write and a cold boot always starts above anything sent.
+constexpr uint32_t kCo4enSeqAhead = 224;
+struct Co4enSeq {
+  uint32_t next;
+  uint32_t nvs;  // value that is (or must be) in NVS
+};
+// Boot: returns true if s->nvs must be written to NVS before the first frame.
+bool co4en_seq_boot(Co4enSeq* s, bool nvs_have, uint32_t nvs_base, bool rtc_ok, uint32_t rtc_next);
+// Next seq; *persist = true if s->nvs changed and must be written now (before use).
+uint32_t co4en_seq_take(Co4enSeq* s, bool* persist);
+
+// --- PAIR_RESP nonce window: latest nonce_n and the one before, max. 10 s old ------
+constexpr uint32_t kCo4enNonceMaxAgeMs = 10000;
+struct Co4enNonceWin {
+  uint8_t n[2][CO4EN_NONCE_LEN];  // [0] latest
+  uint32_t t_ms[2];
+  bool valid[2];
+};
+void co4en_nonce_push(Co4enNonceWin* w, const uint8_t nonce[CO4EN_NONCE_LEN], uint32_t now_ms);
+void co4en_nonce_clear(Co4enNonceWin* w);
+Co4enPairErr co4en_pair_resp_open_win(const uint8_t* f, size_t n, const uint8_t secret[CO4EN_SECRET_LEN],
+                                      const Co4enNonceWin& w, uint32_t now_ms, const Co4enKeyWrap& wrap,
+                                      Co4enPairResult* out);
+
+// --- default KEYMAP (spec v0.4 §4 proposal); test.* keys get ids from 100 ---------
+uint16_t co4en_default_key_id(const char* key);  // 0 = not in the table

@@ -108,20 +108,17 @@ bool energy_parse_report(const char* json, size_t len, int water_bus, EnergyRead
     out->e_in *= k;
     out->e_out *= k;
   }
-  // Reactive: {"imported":{"inductive":{"total":x},"capacitive":y},"exported":{...}}
-  // (whatwatt); a plain {"positive":{"total":x}} layout is accepted as well.
+  // Reactive totals er.imp / er.exp = OBIS 3.8.0 (Q1+Q2) / 4.8.0 (Q3+Q4), only as
+  // the meter delivers them: {"imported":{"total":x}} / {"imported":x} or
+  // {"positive":{"total":x}}. Inductive and capacitive registers (per quadrant)
+  // are never summed into a total.
   JsonObjectConst er = rep["energy"]["reactive"];
   const char* dir[2][2] = {{"imported", "positive"}, {"exported", "negative"}};
   for (int d = 0; d < 2; ++d) {
-    JsonObjectConst o = er[dir[d][0]];
     double v = -1;
-    if (!o.isNull()) {
-      JsonVariantConst ji = o["inductive"], jc = o["capacitive"];
-      double a = ji.is<JsonObjectConst>() ? num(ji["total"], -1) : num(ji, -1);
-      double c = jc.is<JsonObjectConst>() ? num(jc["total"], -1) : num(jc, -1);
-      if (a >= 0 || c >= 0) v = (a > 0 ? a : 0) + (c > 0 ? c : 0);
-    } else {
-      v = num(er[dir[d][1]]["total"], -1);
+    for (const char* name : dir[d]) {
+      JsonVariantConst o = er[name];
+      if (v < 0) v = o.is<JsonObjectConst>() ? num(o["total"], -1) : num(o, -1);
     }
     (d == 0 ? out->er_in : out->er_out) = v < 0 ? -1 : v * k;
   }

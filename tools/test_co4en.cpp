@@ -106,6 +106,75 @@ int main() {
   CHECK(co4en_pair_resp_open(pr, prn, kSecret, kNonceN, kCo4enWrapXorV04, &res) == kPairMic, "pair_resp tampered");
   CHECK(co4en_pair_resp_open(pr, prn - 1, kSecret, kNonceN, kCo4enWrapXorV04, &res) == kPairFormat, "pair_resp short");
 
+  // PAIR_RESP nonce window: latest and previous nonce_n, max. 10 s old
+  pr[30] ^= 1;  // undo the tamper above
+  {
+    Co4enNonceWin w;
+    co4en_nonce_clear(&w);
+    uint8_t n2[8] = {1, 2, 3, 4, 5, 6, 7, 8}, n3[8] = {9, 9, 9, 9, 9, 9, 9, 9};
+    CHECK(co4en_pair_resp_open_win(pr, prn, kSecret, w, 1000, kCo4enWrapXorV04, &res) == kPairNonce, "win: empty");
+    co4en_nonce_push(&w, kNonceN, 1000);
+    CHECK(co4en_pair_resp_open_win(pr, prn, kSecret, w, 1500, kCo4enWrapXorV04, &res) == kPairOk, "win: latest");
+    co4en_nonce_push(&w, n2, 4000);
+    CHECK(co4en_pair_resp_open_win(pr, prn, kSecret, w, 4100, kCo4enWrapXorV04, &res) == kPairOk, "win: previous");
+    CHECK(co4en_pair_resp_open_win(pr, prn, kSecret, w, 1000 + 10000, kCo4enWrapXorV04, &res) == kPairOk, "win: 10 s ok");
+    CHECK(co4en_pair_resp_open_win(pr, prn, kSecret, w, 1000 + 10001, kCo4enWrapXorV04, &res) == kPairNonce, "win: >10 s old");
+    co4en_nonce_push(&w, n3, 7000);  // kNonceN is now two back
+    CHECK(co4en_pair_resp_open_win(pr, prn, kSecret, w, 7100, kCo4enWrapXorV04, &res) == kPairNonce, "win: older than previous");
+    co4en_nonce_clear(&w);
+    co4en_nonce_push(&w, kNonceN, 0xFFFFF000u);  // millis wrap
+    CHECK(co4en_pair_resp_open_win(pr, prn, kSecret, w, 0x00000100u, kCo4enWrapXorV04, &res) == kPairOk, "win: ms wrap");
+    pr[30] ^= 1;
+    CHECK(co4en_pair_resp_open_win(pr, prn, kSecret, w, 0x00000100u, kCo4enWrapXorV04, &res) == kPairMic, "win: tampered");
+    pr[30] ^= 1;
+  }
+
+  // seq: monotonic, NVS reserved at +224, never backwards across reboots
+  {
+    Co4enSeq q;
+    bool persist = false, mono = true, early = true;
+    uint32_t nvs = 0, last = 0;
+    CHECK(co4en_seq_boot(&q, false, 0, false, 0) && q.next == 256 && q.nvs == 256, "seq: first boot 256, persist");
+    nvs = q.nvs;
+    for (int i = 0; i < 1000; ++i) {
+      uint32_t s = co4en_seq_take(&q, &persist);
+      if (persist) {
+        if (s != nvs + 224) early = false;  // proactive: exactly at +224
+        nvs = q.nvs;
+      }
+      if (i > 0 && s <= last) mono = false;
+      if (s >= nvs + 256) early = false;  // NVS (written before use) always covers s
+      last = s;
+    }
+    CHECK(mono, "seq: strictly increasing");
+    CHECK(early && q.next < q.nvs + 256, "seq: next block reserved at +224, before use");
+    Co4enSeq c;  // cold boot with the stored NVS value
+    CHECK(co4en_seq_boot(&c, true, nvs, false, 0) && c.next > last, "seq: cold boot above last sent");
+    Co4enSeq wq;  // warm boot (RTC) inside the block
+    bool pw = co4en_seq_boot(&wq, true, nvs, true, q.next);
+    CHECK(wq.next >= q.next && (pw || wq.nvs == nvs), "seq: warm boot continues");
+    Co4enSeq bad;  // RTC garbage below the block: must not go back
+    CHECK(co4en_seq_boot(&bad, true, nvs, true, 5) && bad.next > last, "seq: stale RTC ignored");
+    Co4enSeq hi;  // RTC beyond the safe range: cold path
+    CHECK(co4en_seq_boot(&hi, true, nvs, true, nvs + 230) && hi.next >= nvs + 256, "seq: RTC near block end -> cold");
+    // power cut right after the proactive write: the new block start is above everything sent
+    Co4enSeq z;
+    co4en_seq_boot(&z, true, 1000, false, 0);
+    uint32_t zl = 0, zn = z.nvs;
+    for (int i = 0; i < 300; ++i) {
+      zl = co4en_seq_take(&z, &persist);
+      if (persist) zn = z.nvs;
+    }
+    Co4enSeq z2;
+    co4en_seq_boot(&z2, true, zn, false, 0);
+    CHECK(z2.next > zl, "seq: cold boot after block switch");
+  }
+
+  // Default KEYMAP (spec v0.4 §4)
+  CHECK(co4en_default_key_id("e.imp") == 1 && co4en_default_key_id("p.imp") == 2 + 8 && co4en_default_key_id("er.exp") == 8 &&
+            co4en_default_key_id("meter.id") == 29 && co4en_default_key_id("w.vol") == 0 && co4en_default_key_id("test.x") == 0,
+        "default key ids");
+
   uint8_t ak[64];
   size_t akn = unhex("01030200F50100004102DF6A410A020000000B4102DF6A00", ak);
   Co4enAck a;

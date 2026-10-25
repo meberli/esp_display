@@ -35,7 +35,7 @@ constexpr uint32_t kFwdMinMs = 5000;
 constexpr int kAckEvery = 6;
 constexpr uint8_t kCaps = CO4EN_CAP_KV_TEXT | CO4EN_CAP_KV_ID | CO4EN_CAP_MAINS | CO4EN_CAP_TEST;
 
-enum class CmdKind : uint8_t { Open, Pair, Reset, Fwd, Send, Rx };
+enum class CmdKind : uint8_t { Open, Pair, Reset, Fwd, Send, Rx, KvText };
 struct Cmd {
   CmdKind kind;
   bool on;
@@ -61,9 +61,11 @@ bool fwd = false, radio = false, have_secret = false, first_data = true;
 uint8_t secret[CO4EN_SECRET_LEN];
 uint8_t my_mac[6];
 uint8_t gw_mac[6], pmk[16], lmk[16], gw_chan = 0;
-uint8_t nonce[CO4EN_NONCE_LEN];
+bool kv_text_mode = false;  // NVS "kvtext"
+bool km_done[128];          // KEYMAP announced since pairing / boot / ACK result 1
+char test_keys[16][CO4EN_KEY_MAX + 1];  // test.* keys -> ids 100..115 (this boot)
+Co4enNonceWin nwin;  // latest PAIR_REQ nonce and the one before
 bool nonce_valid = false;
-uint32_t seq = 0, seq_end = 0;
 uint32_t pair_t0 = 0, next_pair = 0;
 uint32_t pair_req_n = 0, sent_n = 0, acked_n = 0, failed_n = 0, dry_n = 0, last_seq_v = 0;
 uint32_t data_n = 0, last_data_ms = 0, last_status_ms = 0, last_status_post = 0;
@@ -90,6 +92,7 @@ PlayCounters counters() {
   PlayCounters c = {};
   c.state = st;
   c.fwd = fwd;
+  c.kv_text = kv_text_mode;
   c.radio = radio;
   uint8_t ch = 0;
   wifi_second_chan_t sc;
@@ -195,6 +198,9 @@ void load() {
     size_t n = sizeof(secret);
     have_secret = nvs_get_blob(h, CO4EN_NVS_SECRET, secret, &n) == ESP_OK && n == sizeof(secret);
     nvs_get_u8(h, "fwd", &f);
+    uint8_t kt = 0;
+    nvs_get_u8(h, "kvtext", &kt);
+    kv_text_mode = kt != 0;
     nvs_get_u8(h, CO4EN_NVS_PAIRED, &paired);
     size_t a = 6, b = 16, c = 16;
     bool keys = nvs_get_blob(h, CO4EN_NVS_GW_MAC, gw_mac, &a) == ESP_OK && a == 6 &&
@@ -210,31 +216,26 @@ void load() {
   if (st != PlayState::Paired && paired != 0) drop_keys();  // unconfirmed keys from before a reboot
 }
 
-// seq: RTC RAM across warm reboots, NVS block of 256 across power cycles.
+// seq: RTC RAM across warm reboots, NVS block of 256 across power cycles; the
+// next block is reserved at +224 (co4en_seq_*), so seq never goes backwards.
+Co4enSeq seqst;
+bool seq_ready = false;
 uint32_t next_seq() {
-  if (seq_end == 0) {
+  if (!seq_ready) {
     uint32_t base = 0;
+    bool have = false;
     nvs_handle_t h;
     if (nvs_open(CO4EN_NVS_NS, NVS_READONLY, &h) == ESP_OK) {
-      nvs_get_u32(h, CO4EN_NVS_SEQ_BASE, &base);
+      have = nvs_get_u32(h, CO4EN_NVS_SEQ_BASE, &base) == ESP_OK;
       nvs_close(h);
     }
-    if (rtc_magic == kRtcMagic && rtc_seq >= base && rtc_seq < base + CO4EN_SEQ_NVS_STEP) {
-      seq = rtc_seq;
-      seq_end = base + CO4EN_SEQ_NVS_STEP;
-    } else {
-      base += CO4EN_SEQ_NVS_STEP;
-      nvs_save_u32(CO4EN_NVS_SEQ_BASE, base);
-      seq = base;
-      seq_end = base + CO4EN_SEQ_NVS_STEP;
-    }
+    if (co4en_seq_boot(&seqst, have, base, rtc_magic == kRtcMagic, rtc_seq)) nvs_save_u32(CO4EN_NVS_SEQ_BASE, seqst.nvs);
+    seq_ready = true;
   }
-  if (seq >= seq_end) {  // block used up: reserve the next one first
-    nvs_save_u32(CO4EN_NVS_SEQ_BASE, seq_end);
-    seq_end += CO4EN_SEQ_NVS_STEP;
-  }
-  uint32_t s = seq++;
-  rtc_seq = seq;
+  bool persist = false;
+  uint32_t s = co4en_seq_take(&seqst, &persist);
+  if (persist) nvs_save_u32(CO4EN_NVS_SEQ_BASE, seqst.nvs);  // before the frame leaves
+  rtc_seq = seqst.next;
   rtc_magic = kRtcMagic;
   last_seq_v = s;
   return s;
@@ -348,13 +349,15 @@ void send_data(Co4enFrame* f, uint8_t flags, bool force_ack) {
     ++data_n;
   }
   if (ack) flags |= CO4EN_F_ACK_REQ;
-  uint32_t s = next_seq();
-  f->b[2] = flags;
-  memcpy(&f->b[4], &s, 4);  // LE target
-  if (!linked) {
+  if (!linked) {  // unpaired: only PAIR_REQ goes on air; data stays local (logged, seq 0, not sent)
+    f->b[2] = flags;
+    memset(&f->b[4], 0, 4);
     tx(*f, nullptr, "dry");
     return;
   }
+  uint32_t s = next_seq();
+  f->b[2] = flags;
+  memcpy(&f->b[4], &s, 4);  // LE target
   radio_up();
   tx(*f, gw_mac, "gw");
   first_data = false;
@@ -388,13 +391,47 @@ void send_status_frame(bool force_ack) {
   send_data(&f, flags, force_ack);
 }
 
+// --- KV encoding: KV-ID + KEYMAP (CII default) or KV-Text (Playground option) ------
+void km_reset() { memset(km_done, 0, sizeof(km_done)); }
+
+uint16_t key_id(const char* key) {
+  uint16_t id = co4en_default_key_id(key);
+  if (id != 0 || strncmp(key, "test.", 5) != 0) return id;
+  for (int i = 0; i < 16; ++i) {
+    if (test_keys[i][0] == '\0') {
+      snprintf(test_keys[i], sizeof(test_keys[i]), "%s", key);
+      return static_cast<uint16_t>(100 + i);
+    }
+    if (strcmp(test_keys[i], key) == 0) return static_cast<uint16_t>(100 + i);
+  }
+  return 0;  // table full: KV-Text
+}
+
+// Appends one value; false (frame unchanged) if it does not fit.
+bool put_kv(Co4enFrame* f, const char* key, const Co4enValue& v) {
+  Co4enFrame t = *f;
+  uint16_t id = kv_text_mode ? 0 : key_id(key);
+  bool ok;
+  if (id == 0) {
+    ok = co4en_kv_text(&t, key, v);  // KV-Text mode, or a key without a KV-ID (e.g. w.vol)
+  } else {
+    ok = (km_done[id] || co4en_keymap(&t, id, key)) && co4en_kv_id(&t, id, v);
+  }
+  if (!ok || t.overflow) return false;
+  *f = t;
+  if (id != 0) km_done[id] = true;
+  return true;
+}
+
 // --- pairing -------------------------------------------------------------------
 void send_pair_req() {
   if (!radio_up()) {
     logf("pairing: waiting for Wi-Fi");
     return;
   }
+  uint8_t nonce[CO4EN_NONCE_LEN];
   esp_fill_random(nonce, sizeof(nonce));
+  co4en_nonce_push(&nwin, nonce, now_ms());
   nonce_valid = true;
   unsigned a = 0, b = 0, c = 0;
   sscanf(esp_app_get_description()->version, "%u.%u.%u", &a, &b, &c);
@@ -403,6 +440,7 @@ void send_pair_req() {
   uint32_t ts = unix_now(&flags);
   Co4enFrame f;
   co4en_pair_req(&f, secret, my_mac, CO4EN_DEV_CII, fw, kCaps, nonce, next_seq(), ts, flags);
+  co4en_wipe(nonce, sizeof(nonce));
   ++pair_req_n;
   tx(f, kBcast, "bcast");
 }
@@ -422,7 +460,7 @@ void stop_pairing() {
   if (st != PlayState::Pairing) return;
   st = PlayState::Off;
   nonce_valid = false;
-  co4en_wipe(nonce, sizeof(nonce));
+  co4en_nonce_clear(&nwin);
   logf("pairing stopped");
   radio_down();
 }
@@ -430,7 +468,7 @@ void stop_pairing() {
 void on_pair_resp(const uint8_t src[6], const uint8_t* d, size_t n) {
   if (st != PlayState::Pairing || !nonce_valid) return;
   Co4enPairResult r;
-  Co4enPairErr e = co4en_pair_resp_open(d, n, secret, nonce, kCo4enWrapXorV04, &r);
+  Co4enPairErr e = co4en_pair_resp_open_win(d, n, secret, nwin, now_ms(), kCo4enWrapXorV04, &r);
   if (e != kPairOk) {
     static const char* names[] = {"ok", "format", "mic", "nonce", "wrap"};
     logf("PAIR_RESP from %02X:%02X:%02X:%02X:%02X:%02X rejected: %s", src[0], src[1], src[2], src[3], src[4], src[5],
@@ -444,6 +482,8 @@ void on_pair_resp(const uint8_t src[6], const uint8_t* d, size_t n) {
   gw_chan = r.channel;
   co4en_wipe(&r, sizeof(r));
   nonce_valid = false;
+  co4en_nonce_clear(&nwin);
+  km_reset();
   uint8_t ch = 0;
   wifi_second_chan_t sc;
   esp_wifi_get_channel(&ch, &sc);
@@ -483,6 +523,7 @@ void on_ack(const uint8_t src[6], const uint8_t* d, size_t n) {
   if (pend.active && (a.acked_seq == pend.seq)) pend.active = false;
   if (a.result != CO4EN_ACK_OK) {
     ++failed_n;
+    if (a.result == 1) km_reset();  // gateway could not decode: announce the KEYMAP again
     logf("ACK seq=%lu result=%u", static_cast<unsigned long>(a.acked_seq), a.result);
     return;
   }
@@ -509,6 +550,7 @@ void do_reset() {
   drop_keys();
   st = PlayState::Off;
   nonce_valid = false;
+  co4en_nonce_clear(&nwin);
   radio_down();
   new_secret();
   logf("reset: keys dropped, new device secret");
@@ -563,7 +605,7 @@ void do_send(const Cmd& c) {
   Co4enFrame f;
   uint8_t flags;
   begin_data(&f, &flags);
-  if (!co4en_kv_text(&f, key, val) || f.overflow) {
+  if (!put_kv(&f, key, val)) {
     logf("encode failed");
     return;
   }
@@ -594,11 +636,11 @@ struct Packer {
   }
   void put(const char* key, const Co4enValue& v) {
     if (!open) start();
-    if (co4en_room(f) < co4en_kv_text_size(key, v)) {
+    if (!put_kv(&f, key, v)) {
       flush();
       start();
+      put_kv(&f, key, v);
     }
-    co4en_kv_text(&f, key, v);
   }
 };
 
@@ -718,6 +760,11 @@ void task(void*) {
           logf("whatwatt forward %s", fwd ? "on" : "off");
           break;
         case CmdKind::Send: do_send(c); break;
+        case CmdKind::KvText:
+          kv_text_mode = c.on;
+          nvs_save_u8("kvtext", kv_text_mode ? 1 : 0);
+          logf("encoding %s", kv_text_mode ? "KV-Text (test/dev)" : "KV-ID + KEYMAP");
+          break;
         case CmdKind::Rx: on_rx(c); break;
       }
       ui_post(PlayMsgKind::Status, state_name(st));
@@ -765,6 +812,13 @@ void play_cmd_reset() {
   c->kind = CmdKind::Reset;
   post(*c);
 }
+void play_cmd_kvtext(bool on) {
+  Cmd* c = cmd_buf();
+  c->kind = CmdKind::KvText;
+  c->on = on;
+  post(*c);
+}
+
 void play_cmd_fwd(bool on) {
   Cmd* c = cmd_buf();
   c->kind = CmdKind::Fwd;
@@ -792,12 +846,12 @@ void play_cmd_inject(const uint8_t src[6], const uint8_t* f, size_t n) {
 void play_diag() {
   PlayCounters c = counters();  // read-only snapshot; racy but harmless for diagnostics
   console_printf("CO4EN state=%s fwd=%d radio=%d ch=%u gw=%02X%02X%02X%02X%02X%02X pair_req=%lu sent=%lu mac_ok=%lu "
-                 "acked=%lu failed=%lu dry=%lu seq=%lu\n",
+                 "acked=%lu failed=%lu dry=%lu seq=%lu enc=%s\n",
                  state_name(c.state), c.fwd ? 1 : 0, c.radio ? 1 : 0, c.channel, c.gw_mac[0], c.gw_mac[1], c.gw_mac[2],
                  c.gw_mac[3], c.gw_mac[4], c.gw_mac[5], static_cast<unsigned long>(c.pair_req),
                  static_cast<unsigned long>(c.sent), static_cast<unsigned long>(c.mac_ok),
                  static_cast<unsigned long>(c.acked), static_cast<unsigned long>(c.failed),
-                 static_cast<unsigned long>(c.dry), static_cast<unsigned long>(c.last_seq));
+                 static_cast<unsigned long>(c.dry), static_cast<unsigned long>(c.last_seq), c.kv_text ? "kvtext" : "kvid");
 }
 
 void play_print_qr_test_only() { console_printf("CO4ENQR %s\n", qr); }

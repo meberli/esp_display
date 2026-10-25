@@ -411,3 +411,66 @@ void co4en_hex(const uint8_t* b, size_t n, char* out, size_t out_n) {
   }
   if (out_n) out[o] = '\0';
 }
+
+// --- seq -------------------------------------------------------------------------------
+bool co4en_seq_boot(Co4enSeq* s, bool nvs_have, uint32_t nvs_base, bool rtc_ok, uint32_t rtc_next) {
+  if (nvs_have && rtc_ok && rtc_next >= nvs_base && rtc_next < nvs_base + kCo4enSeqAhead) {
+    s->next = rtc_next;  // warm reboot inside the reserved block
+    s->nvs = nvs_base;
+    return false;
+  }
+  // Cold boot (or RTC outside the safe range): skip the whole block that may be in use.
+  s->nvs = (nvs_have ? nvs_base : 0) + CO4EN_SEQ_NVS_STEP;  // seq 0 is never used
+  s->next = s->nvs;
+  return true;
+}
+
+uint32_t co4en_seq_take(Co4enSeq* s, bool* persist) {
+  *persist = false;
+  if (s->next >= s->nvs + kCo4enSeqAhead) {  // reserve the next block before using this seq
+    s->nvs += CO4EN_SEQ_NVS_STEP;
+    *persist = true;
+  }
+  return s->next++;
+}
+
+// --- nonce window --------------------------------------------------------------------------
+void co4en_nonce_push(Co4enNonceWin* w, const uint8_t nonce[CO4EN_NONCE_LEN], uint32_t now_ms) {
+  memcpy(w->n[1], w->n[0], CO4EN_NONCE_LEN);
+  w->t_ms[1] = w->t_ms[0];
+  w->valid[1] = w->valid[0];
+  memcpy(w->n[0], nonce, CO4EN_NONCE_LEN);
+  w->t_ms[0] = now_ms;
+  w->valid[0] = true;
+}
+
+void co4en_nonce_clear(Co4enNonceWin* w) { co4en_wipe(w, sizeof(*w)); }
+
+Co4enPairErr co4en_pair_resp_open_win(const uint8_t* f, size_t n, const uint8_t secret[CO4EN_SECRET_LEN],
+                                      const Co4enNonceWin& w, uint32_t now_ms, const Co4enKeyWrap& wrap,
+                                      Co4enPairResult* out) {
+  Co4enPairErr last = kPairNonce;
+  for (int i = 0; i < 2; ++i) {
+    if (!w.valid[i] || now_ms - w.t_ms[i] > kCo4enNonceMaxAgeMs) continue;
+    Co4enPairErr e = co4en_pair_resp_open(f, n, secret, w.n[i], wrap, out);
+    if (e == kPairOk) return e;
+    if (e != kPairNonce) return e;  // format / MIC / wrap: same for both nonces
+    last = e;
+  }
+  return last;
+}
+
+// --- default KEYMAP --------------------------------------------------------------------------
+uint16_t co4en_default_key_id(const char* key) {
+  static const struct {
+    const char* k;
+    uint16_t id;
+  } t[] = {{"e.imp", 1},     {"e.imp.t1", 2},  {"e.imp.t2", 3},  {"e.exp", 4},     {"e.exp.t1", 5},  {"e.exp.t2", 6},
+           {"er.imp", 7},    {"er.exp", 8},    {"p.imp", 10},    {"p.exp", 11},    {"p.l1", 12},     {"p.l2", 13},
+           {"p.l3", 14},     {"p.exp.l1", 15}, {"p.exp.l2", 16}, {"p.exp.l3", 17}, {"q.imp", 18},    {"q.exp", 19},
+           {"u.l1", 20},     {"u.l2", 21},     {"u.l3", 22},     {"i.l1", 23},     {"i.l2", 24},     {"i.l3", 25},
+           {"f", 26},        {"pf", 27},       {"tariff", 28},   {"meter.id", 29}};
+  for (const auto& e : t)
+    if (strcmp(e.k, key) == 0) return e.id;
+  return 0;
+}

@@ -11,6 +11,9 @@ lv_obj_t* play_pair_btn = nullptr;
 lv_obj_t* play_pair_lbl = nullptr;
 lv_obj_t* play_fwd_btn = nullptr;
 lv_obj_t* play_fwd_lbl = nullptr;
+lv_obj_t* play_enc_btn = nullptr;
+lv_obj_t* play_enc_lbl = nullptr;
+bool play_last_kvtext = false;
 lv_obj_t* play_key_ta = nullptr;
 lv_obj_t* play_val_ta = nullptr;
 lv_obj_t* play_unit_ta = nullptr;
@@ -32,6 +35,7 @@ void on_play_btn(lv_event_t* e) {
   if (which == 0) play_cmd_pair(play_last_state == PlayState::Off);
   if (which == 1) play_cmd_reset();
   if (which == 2) play_cmd_fwd(!play_last_fwd);
+  if (which == 4) play_cmd_kvtext(!play_last_kvtext);
   if (which == 3) {
     play_cmd_send(lv_textarea_get_text(play_key_ta), lv_textarea_get_text(play_val_ta),
                   lv_textarea_get_text(play_unit_ta));
@@ -96,7 +100,9 @@ void build_play_screen(lv_obj_t* screen) {
   play_key_ta = play_ta(play_root, kMargin, 300, 196, "name", "play:key", 20);
   play_val_ta = play_ta(play_root, kMargin + 204, 300, 128, "Wert", "play:val", 20);
   play_unit_ta = play_ta(play_root, kMargin + 340, 300, 100, "Einheit", "play:unit", 10);
-  play_btn(play_root, kMargin, 362, kScreen - 2 * kMargin, "Senden", 3, "play:send", nullptr);
+  play_btn(play_root, kMargin, 362, 270, "Senden", 3, "play:send", nullptr);
+  // CII default is KV-ID + KEYMAP; KV-Text stays available for test/dev.
+  play_enc_btn = play_btn(play_root, kMargin + 280, 362, 160, "KV-ID", 4, "play:enc", &play_enc_lbl);
   play_cnt = make_label(play_root, &font_inter_14, lv_color_hex(kText));
   lv_obj_set_pos(play_cnt, 24, 426);
   lv_obj_set_width(play_cnt, kScreen - 48);
@@ -138,6 +144,10 @@ void play_apply(const PlayUiMsg& m) {
   const PlayCounters& c = m.c;
   play_last_state = c.state;
   play_last_fwd = c.fwd;
+  play_last_kvtext = c.kv_text;
+  lv_label_set_text(play_enc_lbl, c.kv_text ? "KV-Text" : "KV-ID");
+  if (c.kv_text) lv_obj_add_state(play_enc_btn, LV_STATE_CHECKED);
+  else lv_obj_clear_state(play_enc_btn, LV_STATE_CHECKED);
   if (set_play_val != nullptr) lv_label_set_text(set_play_val, play_state_de(c.state));
   if (play_root == nullptr) return;
   if (m.kind == PlayMsgKind::Qr) {
