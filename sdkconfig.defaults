@@ -1,0 +1,142 @@
+# Guition ESP32-4848S040C: ESP32-S3 (QFN56 rev 0.2), 16 MB QIO flash, 8 MB octal PSRAM.
+# Flash verified with `esptool.py -p COM14 flash_id`: manufacturer 0x85, device 0x2018, 16 MB.
+# Never edit the generated sdkconfig; overrides belong here. After changes:
+# `idf.py reconfigure` (or delete build/).
+
+# --- Target / flash / partitions ---
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+
+# --- PSRAM (octal, 80 MHz) ---
+# Large buffers are allocated explicitly with heap_caps_malloc(MALLOC_CAP_SPIRAM);
+# no external stacks or BSS.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_BOOT_INIT=y
+CONFIG_SPIRAM_USE_MALLOC=y
+# malloc() below this size stays internal. 16 KB put every LVGL object and
+# label text into internal RAM; with the camera screens that left too little
+# for TLS/AES DMA buffers ("esp-aes: Failed to allocate memory").
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=2048
+CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=65536
+# Not CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP: measured on IDF 6.1 it lowered
+# free internal RAM (96 -> 69 KB, minimum 27 -> 7 KB).
+# RGB LCD: run code/rodata from PSRAM so flash operations (NVS, Wi-Fi
+# calibration) do not stall the panel; bounce buffers are set in panel_hw.cpp.
+CONFIG_SPIRAM_XIP_FROM_PSRAM=y
+# Large zero-initialised statics marked EXT_RAM_BSS_ATTR (UI model, weather,
+# calendar, Loxone controls) live in PSRAM: ~40 KB internal RAM freed (v0.9.2).
+CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
+CONFIG_LCD_RGB_ISR_IRAM_SAFE=y
+
+# --- Cache (ESP32-S3 cache sizes, not vector instructions) ---
+CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y
+CONFIG_ESP32S3_DATA_CACHE_64KB=y
+CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
+
+# --- FreeRTOS ---
+CONFIG_FREERTOS_HZ=1000
+CONFIG_FREERTOS_UNICORE=n
+CONFIG_FREERTOS_ENABLE_BACKWARD_COMPATIBILITY=n
+CONFIG_FREERTOS_CHECK_STACKOVERFLOW_CANARY=y
+CONFIG_FREERTOS_WATCHPOINT_END_OF_STACK=y
+
+# --- Watchdogs ---
+CONFIG_ESP_TASK_WDT_EN=y
+CONFIG_ESP_TASK_WDT_INIT=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=5
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=y
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=y
+CONFIG_ESP_TASK_WDT_PANIC=y
+CONFIG_ESP_INT_WDT=y
+CONFIG_ESP_INT_WDT_TIMEOUT_MS=800
+
+# --- Compiler / logging / panic ---
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+CONFIG_COMPILER_WARN_WRITE_STRINGS=y
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+# No ANSI colour codes: they break the serial log parsers (tools/*.py).
+CONFIG_LOG_COLORS=n
+CONFIG_ESP_SYSTEM_PANIC_PRINT_REBOOT=y
+
+# --- Core dump to the "coredump" partition (idf.py coredump-info) ---
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+
+# --- Console: UART0 via CH340 (GPIO19/20 are touch/LCD, no USB-Serial-JTAG) ---
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+CONFIG_ESP_CONSOLE_UART_BAUDRATE=115200
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+
+# --- Networking ---
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
+# TLS contexts (~40 KB per connection) from PSRAM: internal RAM is needed for
+# the RGB bounce buffers, Wi-Fi and task stacks; with it internal, HTTPS failed
+# with PSA_ERROR_INSUFFICIENT_MEMORY (-0x008D) once the webcam viewer existed.
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
+# api.windy.com sends GTS Root R1 cross-signed by the old GlobalSign Root CA,
+# which is no longer in the bundle; verify cross-signed chains against GTS R1.
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY=y
+CONFIG_ESP_HTTP_CLIENT_ENABLE_BASIC_AUTH=y
+# Maintenance web server (Einstellungen > Wartung): browsers send long headers.
+CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
+CONFIG_HTTPD_MAX_URI_LEN=512
+
+# --- OTA (two app slots, see partitions.csv) ---
+# A new image must reach Wi-Fi once (maint_mark_valid), else the bootloader
+# rolls back to the previous slot on the next reset.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+# "Update-URL" may point to a PC on the LAN (http://...); GitHub uses HTTPS.
+
+# --- LVGL 8.4 via Kconfig (replaces include/lv_conf.h) ---
+CONFIG_LV_CONF_SKIP=y
+CONFIG_LV_COLOR_DEPTH_16=y
+CONFIG_LV_COLOR_16_SWAP=n
+# LVGL heap through malloc: with SPIRAM_USE_MALLOC, blocks >16 KB land in PSRAM.
+CONFIG_LV_MEM_CUSTOM=y
+# ... and from PSRAM for every block (objects, styles, label texts), see
+# main/lv_mem_psram.h. The path is relative to lvgl/src/misc/lv_mem.c.
+CONFIG_LV_MEM_CUSTOM_INCLUDE="../../../../main/lv_mem_psram.h"
+CONFIG_LV_INDEV_DEF_READ_PERIOD=15
+CONFIG_LV_FONT_MONTSERRAT_14=n
+CONFIG_LV_FONT_MONTSERRAT_16=y
+# Montserrat 16 only for the keyboard (LV_SYMBOL glyphs); UI text uses Inter.
+CONFIG_LV_FONT_MONTSERRAT_28=n
+CONFIG_LV_FONT_CUSTOM_DECLARE="LV_FONT_DECLARE(font_inter_14) LV_FONT_DECLARE(font_inter_20)"
+CONFIG_LV_FONT_DEFAULT_MONTSERRAT_16=y
+CONFIG_LV_THEME_DEFAULT_DARK=y
+CONFIG_LV_USE_SNAPSHOT=y
+CONFIG_LV_BUILD_EXAMPLES=n
+CONFIG_LV_USE_DEMO_WIDGETS=n
+CONFIG_LV_USE_KEYBOARD=y
+CONFIG_LV_USE_TEXTAREA=y
+CONFIG_LV_USE_FLEX=y
+CONFIG_LV_USE_SWITCH=y
+CONFIG_LV_USE_QRCODE=y
+# Diagnostics: per-task CPU load in the serial log (diag.cpp)
+CONFIG_FREERTOS_USE_TRACE_FACILITY=y
+CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y
+CONFIG_FREERTOS_USE_STATS_FORMATTING_FUNCTIONS=y
+
+# Signed apps WITHOUT hardware secure boot (no eFuses burned): every OTA image
+# (URL or web upload) must carry an RSA-3072 signature (Secure Boot v2 scheme)
+# made with the same key as the running app. The key lives outside git in
+# secure/signing_key.pem (CI: secret APP_SIGNING_KEY). Unsigned apps abort at
+# boot, so local builds need the key too.
+CONFIG_SECURE_SIGNED_APPS_NO_SECURE_BOOT=y
+CONFIG_SECURE_SIGNED_APPS_RSA_SCHEME=y
+CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT=y
+CONFIG_SECURE_BOOT_BUILD_SIGNED_BINARIES=y
+CONFIG_SECURE_BOOT_SIGNING_KEY="secure/signing_key.pem"
+
+# tcpip task: 3072 left ~170 B free after failed connects (whatwatt unreachable, 0.9.0 test)
+CONFIG_LWIP_TCPIP_TASK_STACK_SIZE=4096
+
+# Sockets: Loxone, PV listener + stick, whatwatt, HTTPS fetch, httpd (3), headroom
+# for a web mirror / Modbus. LWIP_MAX_ACTIVE_TCP stays 16.
+CONFIG_LWIP_MAX_SOCKETS=16

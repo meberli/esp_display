@@ -1,0 +1,8 @@
+# Vorlage für lokale Geheimnisse. Kopieren nach sdkconfig.defaults.local
+# (gitignored) und ausfüllen. Diese Datei NIE mit echten Werten committen.
+
+# Windy Webcams API-Key (https://api.windy.com/keys)
+CONFIG_PANEL_WINDY_API_KEY=""
+
+# Privater iCal-URL des Familienkalenders
+CONFIG_PANEL_ICAL_URL=""

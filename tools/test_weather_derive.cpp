@@ -1,5 +1,5 @@
-// Host unit test for src/weather_derive.cpp.
-//   g++ -std=c++17 -I src tools/test_weather_derive.cpp src/weather_derive.cpp -o t && ./t [days.txt]
+// Host unit test for main/weather_derive.cpp.
+//   g++ -std=c++17 -I main tools/test_weather_derive.cpp main/weather_derive.cpp -o t && ./t [days.txt]
 // days.txt (from tools/openmeteo_days.py): per day one line
 //   "DAY <date> <sunrise_h> <sunset_h> <precip_sum> <daily_code>"
 // followed by 24 lines "code precip temp cloud".

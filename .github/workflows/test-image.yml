@@ -1,0 +1,111 @@
+# Signed test images on demand (Actions > "Test image" > Run workflow): same
+# clean, signed build as release.yml, but no tag and no release. The version is
+# marked "<version.txt>-test.<shortsha>" (sorts below the release, so the normal
+# OTA update still offers the next release). Artifact: app images only (no
+# bootloader, partition table or otadata), kept 7 days.
+name: Test image
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch or commit to build
+        default: cursor/esp-idf-migration
+        required: true
+      target:
+        description: Board
+        type: choice
+        options: [sensecap_d1, guition, both]
+        default: sensecap_d1
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: espressif/idf:v6.1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - name: Check that no local secret files are present
+        shell: bash
+        run: |
+          for f in sdkconfig.defaults.local main/panel_config.h include/panel_config.h; do
+            if [ -e "$f" ]; then echo "::error::$f must not be in the repository"; exit 1; fi
+          done
+      - name: Mark version as test build
+        id: ver
+        shell: bash
+        run: |
+          git config --global --add safe.directory '*'
+          sha=$(git rev-parse HEAD)
+          v="$(tr -d ' \r\n' < version.txt)-test.${sha:0:7}"
+          printf '%s\n' "$v" > version.txt   # PROJECT_VER comes from version.txt
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          mkdir -p out
+      - name: Signing key from secret
+        shell: bash
+        env:
+          APP_SIGNING_KEY: ${{ secrets.APP_SIGNING_KEY }}
+        run: |
+          if [ -z "$APP_SIGNING_KEY" ]; then echo "::error::secret APP_SIGNING_KEY missing - test image must be signed"; exit 1; fi
+          mkdir -p secure && umask 077 && printf '%s\n' "$APP_SIGNING_KEY" > secure/signing_key.pem
+      - name: Build Guition
+        if: inputs.target == 'guition' || inputs.target == 'both'
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh"
+          idf.py set-target esp32s3
+          idf.py build
+          espsecure verify-signature --version 2 --keyfile tools/esp_display_signing_pub.pem build/loxone_panel.bin
+          python tools/check_secrets.py --generic build/loxone_panel.bin
+          grep -q "^CONFIG_PANEL_WINDY_API_KEY=\"\"$" sdkconfig
+          grep -q "^CONFIG_PANEL_ICAL_URL=\"\"$" sdkconfig
+          cp build/loxone_panel.bin out/
+      - name: Build SenseCAP Indicator D1
+        if: inputs.target == 'sensecap_d1' || inputs.target == 'both'
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh"
+          D1="-B build-d1 -DSDKCONFIG=build-d1/sdkconfig -DPANEL_BOARD=sensecap_d1"
+          idf.py $D1 set-target esp32s3
+          idf.py $D1 build
+          espsecure verify-signature --version 2 --keyfile tools/esp_display_signing_pub.pem build-d1/loxone_panel_sensecap_d1.bin
+          python tools/check_secrets.py --generic build-d1/loxone_panel_sensecap_d1.bin
+          grep -q "^CONFIG_PANEL_BOARD_SENSECAP_D1=y$" build-d1/sdkconfig
+          grep -q "^CONFIG_PANEL_WINDY_API_KEY=\"\"$" build-d1/sdkconfig
+          grep -q "^CONFIG_PANEL_ICAL_URL=\"\"$" build-d1/sdkconfig
+          cp build-d1/loxone_panel_sensecap_d1.bin out/
+      - name: Remove signing key
+        if: always()
+        shell: bash
+        run: rm -rf secure
+      - name: Checksums and info
+        shell: bash
+        run: |
+          cd out
+          sha256sum *.bin > sha256.txt
+          {
+            echo "TEST BUILD - not a release"
+            echo "ref: ${{ inputs.ref }}"
+            echo "commit: ${{ steps.ver.outputs.sha }}"
+            echo "version: ${{ steps.ver.outputs.version }}"
+            echo "target: ${{ inputs.target }}"
+            echo "built: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "app slots (reference only, flash into the booted/target OTA slot):"
+            [ -e loxone_panel.bin ] && grep -E "^ota_[01]" ../partitions.csv | sed 's/^/  guition: /'
+            [ -e loxone_panel_sensecap_d1.bin ] && grep -E "^ota_[01]" ../partitions_sensecap.csv | sed 's/^/  sensecap_d1: /'
+            true
+          } > info.txt
+          ls -la
+          if ls | grep -viE '^(loxone_panel(_sensecap_d1)?\.bin|sha256\.txt|info\.txt)$'; then echo "::error::unexpected file in artifact"; exit 1; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: test-image-${{ inputs.target }}-${{ steps.ver.outputs.version }}
+          path: out/
+          retention-days: 7
+          if-no-files-found: error

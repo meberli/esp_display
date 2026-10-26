@@ -2,5 +2,36 @@
 .vscode/
 .idea/
 include/panel_config.h
+main/panel_config.h
 
 __pycache__/
+
+# ESP-IDF
+build/
+build-*/
+managed_components/
+sdkconfig
+sdkconfig.old
+
+v2shots/
+idfshots/
+v3shots/
+
+# Local secrets (Windy API key)
+sdkconfig.defaults.local
+v4shots/
+v5shots/
+shot.png
+*.pyc
+
+# App signing key (never in git; CI gets it from the APP_SIGNING_KEY secret)
+secure/
+*.pem
+!tools/esp_display_signing_pub.pem
+v*shots/
+
+# SenseCAP D1 flash backups (contain NVS incl. Wi-Fi data)
+sensecap_backup/
+*_backup*.bin
+*.backup.bin
+
