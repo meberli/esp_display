@@ -16,6 +16,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: No double-encoded UTF-8 (mojibake) in text files
+        shell: python
+        run: |
+          # UTF-8 read as cp1252 and saved again (e.g. "\u00c3\u00bc" instead of "\u00fc").
+          # The generated font files list U+00C3 legitimately and are skipped.
+          import re, subprocess, sys
+          bad = re.compile("\u00c3[\u0080-\u00bf\u2013-\u203a\u20ac\u2122\u0152\u0153\u0160\u0161\u0178\u017d\u017e\u0192\u02c6\u02dc]|\u00e2\u20ac|\u00c2[\u00a0-\u00bf]")
+          files = subprocess.run(["git", "grep", "-Il", ""], capture_output=True, text=True).stdout.split()
+          hits = 0
+          for f in files:
+              if re.match(r"main/font_.*\.c$", f):
+                  continue
+              for n, line in enumerate(open(f, encoding="utf-8", errors="replace"), 1):
+                  if bad.search(line):
+                      print(f"::error file={f},line={n}::mojibake (file saved with the wrong encoding)")
+                      hits += 1
+          sys.exit(1 if hits else 0)
       - name: Host tests
         run: |
           set -e
