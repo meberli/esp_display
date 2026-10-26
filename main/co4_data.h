@@ -56,7 +56,7 @@ struct Co4Source {
   bool (*fetch)(const char* zone_id, const char* bearer, int64_t now_ms, Co4Data* out, char* err, size_t err_n);
 };
 const Co4Source& co4_fixture_source();
-// Placeholder until Co4 delivers the series API: always fails ("noch nicht angebunden").
+// Placeholder without network (host builds); the panel uses the BFF source in co4_task.cpp.
 const Co4Source& co4_live_source();
 
 // Fixture: anonymised synthetic example data for the day around now_ms (local

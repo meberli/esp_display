@@ -46,7 +46,7 @@ jobs:
           g++ -std=c++17 -Wall -I main -I components/ArduinoJson/src tools/test_energy.cpp main/energy.cpp -o /tmp/te && TZ=Europe/Zurich /tmp/te
           g++ -std=c++17 -Wall -I main tools/test_energy_mix.cpp main/energy_mix.cpp -o /tmp/tmix && /tmp/tmix
           g++ -std=c++17 -Wall -Wextra -I main tools/test_co4en.cpp main/co4en.cpp -o /tmp/tc && /tmp/tc
-          g++ -std=c++17 -Wall -I main -I components/ArduinoJson/src tools/test_co4.cpp main/co4_data.cpp main/co4_oidc.cpp -o /tmp/tco4 && TZ=Europe/Zurich /tmp/tco4
+          g++ -std=c++17 -Wall -I main -I components/ArduinoJson/src tools/test_co4.cpp main/co4_data.cpp main/co4_bff.cpp main/co4_oidc.cpp -o /tmp/tco4 && TZ=Europe/Zurich /tmp/tco4
           g++ -std=c++17 -Wall -I main tools/test_pv.cpp main/pv.cpp -o /tmp/tp && /tmp/tp
           g++ -std=c++17 -Wall -I main tools/test_waste_window.cpp main/waste_window.cpp -o /tmp/tww && TZ=Europe/Zurich /tmp/tww
           g++ -std=c++17 -Wall -I main tools/test_weather_derive.cpp main/weather_derive.cpp -o /tmp/tw && /tmp/tw

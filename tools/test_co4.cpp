@@ -7,6 +7,7 @@
 #include <string.h>
 #include <time.h>
 
+#include "co4_bff.h"
 #include "co4_data.h"
 #include "co4_oidc.h"
 
@@ -168,6 +169,83 @@ static void test_refresh_at() {
   CHECK(co4_refresh_at(0, 20) == 10000);
 }
 
+// Anonymised, shortened copies of real BFF answers (structure as delivered,
+// placeholder niids/names, 4 blocks instead of 96).
+static const char kStatsJson[] =
+    "{\"data\":{\"energyStats\":{\"start\":1793055600000,"
+    "\"end\":[1793056500000,1793057400000,1793058300000,1793059200000],"
+    "\"sources\":[{\"category\":\"ELECTRICITY\",\"type\":\"GRID\",\"production\":[0.25,0.5,null,1.0]},"
+    "{\"category\":\"ELECTRICITY\",\"type\":\"PV\",\"production\":[0,0.125,0.5,null]},"
+    "{\"category\":\"ELECTRICITY\",\"type\":\"PV\",\"production\":[0,0.125,0,0]},"
+    "{\"category\":\"ELECTRICITY\",\"type\":\"BATTERY\",\"production\":[9,9,9,9]}],"
+    "\"partialSources\":true}}}";
+static const char kZonesJson[] =
+    "{\"data\":{\"zones\":[{\"id\":11,\"niid\":1001,\"zoneType\":\"PRIVATE\",\"subAccountId\":\"sub-x\","
+    "\"zoneOccupations\":[{\"invoicingEmail\":\"person@example.invalid\"}],"
+    "\"details\":{\"name\":[{\"value\":\"Wohnung 1 B\xC3\xBC" "ro\"}]}},"
+    "{\"id\":12,\"niid\":\"1002\",\"zoneType\":\"SHARED\",\"details\":{\"name\":[]}},"
+    "{\"id\":13,\"niid\":\"x;y\",\"zoneType\":\"SHARED\"}]}}";
+
+static void test_bff() {
+  char p[160];
+  CHECK(co4_bff_stats_path(p, sizeof(p), "1001", 1000, 2000, "900S"));
+  CHECK(strcmp(p, "zevGetZoneEnergyStats?zoneNiid=1001&start=1000&end=2000&period=900S") == 0);
+  CHECK(!co4_bff_stats_path(p, sizeof(p), "zone-beispiel-1", 1000, 2000, "900S"));
+  CHECK(!co4_bff_stats_path(p, sizeof(p), "1001&x=1", 1000, 2000, "900S"));
+  CHECK(!co4_bff_stats_path(p, 20, "1001", 1000, 2000, "900S"));
+  CHECK(co4_bff_zones_path(p, sizeof(p), "42") && strcmp(p, "zevGetConsumptionZones?niid=42") == 0);
+  CHECK(!co4_bff_niid_ok("") && !co4_bff_niid_ok("12345678901234567890") && co4_bff_niid_ok("1234567890123456789"));
+
+  // 2026-10-26 15:37 local (UTC+1)
+  const int64_t now = 1793025000LL * 1000 + 7 * 60000;  // fixture time + 7 min
+  Co4BffWindow w[3];
+  co4_bff_windows(now, w);
+  CHECK(strcmp(w[0].period, "900S") == 0 && w[0].step_ms == 900000);
+  CHECK(w[0].end_ms >= now && w[0].end_ms - now < 900000 && (w[0].end_ms - w[0].start_ms) % 900000 == 0);
+  CHECK(strcmp(w[1].period, "1D") == 0 && (w[1].end_ms - w[1].start_ms) == 26LL * 86400000 + 3600000);  // DST end Oct 25
+  CHECK(strcmp(w[2].period, "1M") == 0 && w[2].res == Co4Res::Month);
+  time_t t = static_cast<time_t>(w[2].start_ms / 1000);
+  struct tm lt;
+  localtime_r(&t, &lt);
+  CHECK(lt.tm_mon == 0 && lt.tm_mday == 1 && lt.tm_hour == 0);
+  t = static_cast<time_t>(w[2].end_ms / 1000);
+  localtime_r(&t, &lt);
+  CHECK(lt.tm_mon == 10 && lt.tm_mday == 1);
+
+  static Co4Curve c;
+  char err[64];
+  bool partial = false;
+  CHECK(co4_bff_parse_stats(kStatsJson, strlen(kStatsJson), &c.v[0][0], 96, &c.n, &partial, err, sizeof(err)) ==
+        Co4BffRc::Ok);
+  CHECK(c.n == 4 && partial);
+  CHECK(c.v[kCo4Bezug][1] == 0.5f && isnan(c.v[kCo4Bezug][2]));
+  CHECK(c.v[kCo4Eigen][1] == 0.25f && c.v[kCo4Eigen][2] == 0.5f && c.v[kCo4Eigen][3] == 0.0f);
+  CHECK(isnan(c.v[kCo4Einspeisung][0]) && isnan(c.v[kCo4Pv][0]));
+  co4_bff_energy_to_power(c.v[kCo4Bezug], c.n, 900000);
+  CHECK(c.v[kCo4Bezug][0] == 1.0f && isnan(c.v[kCo4Bezug][2]));
+  // capping: only 2 of 4 blocks
+  static Co4Totals tt;
+  CHECK(co4_bff_parse_stats(kStatsJson, strlen(kStatsJson), &tt.v[0][0], 2, &tt.n, &partial, err, sizeof(err)) ==
+        Co4BffRc::Ok);
+  CHECK(tt.n == 2 && tt.v[kCo4Bezug][1] == 0.5f);
+
+  const char nr[] = "{\"data\":{\"energyStats\":{\"start\":1,\"end\":[2,3],\"sources\":null,\"partialSources\":false}}}";
+  CHECK(co4_bff_parse_stats(nr, strlen(nr), &c.v[0][0], 96, &c.n, &partial, err, sizeof(err)) == Co4BffRc::NotReady);
+  const char em[] = "{\"data\":{\"energyStats\":{\"start\":1,\"end\":[2],\"sources\":[],\"partialSources\":false}}}";
+  CHECK(co4_bff_parse_stats(em, strlen(em), &c.v[0][0], 96, &c.n, &partial, err, sizeof(err)) == Co4BffRc::Ok);
+  CHECK(c.n == 1 && isnan(c.v[kCo4Bezug][0]));
+  const char er[] = "{\"errors\":[{\"message\":\"Permission denied\"}],\"data\":null}";
+  CHECK(co4_bff_parse_stats(er, strlen(er), &c.v[0][0], 96, &c.n, &partial, err, sizeof(err)) == Co4BffRc::Error);
+  CHECK(co4_bff_parse_stats("{", 1, &c.v[0][0], 96, &c.n, &partial, err, sizeof(err)) == Co4BffRc::Error);
+
+  Co4ZoneList zl;
+  CHECK(co4_bff_parse_zones(kZonesJson, strlen(kZonesJson), &zl, err, sizeof(err)));
+  CHECK(zl.n == 2);
+  CHECK(strcmp(zl.z[0].id, "1001") == 0 && strcmp(zl.z[0].name, "Wohnung 1 B\xC3\xBCro") == 0);
+  CHECK(strcmp(zl.z[1].id, "1002") == 0 && strcmp(zl.z[1].name, "1002") == 0);
+  CHECK(!co4_bff_parse_zones(er, strlen(er), &zl, err, sizeof(err)));
+}
+
 int main() {
   test_fixture();
   test_ratio();
@@ -178,6 +256,7 @@ int main() {
   test_token();
   test_form();
   test_refresh_at();
+  test_bff();
   printf(fails ? "%d FAILED\n" : "all Co4 tests passed\n", fails);
   return fails ? 1 : 0;
 }

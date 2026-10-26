@@ -4,6 +4,7 @@
 #include <string.h>
 #include <time.h>
 
+#include "co4_bff.h"
 #include "co4_oidc.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -337,6 +338,63 @@ void do_zone_pick() {
   g_next_data = now_ms();
 }
 
+// Live source: zevGetZoneEnergyStats on the Co4 BFF, three windows (today 15 min,
+// month per day, year per month). Runs on the Co4 task; body buffer in PSRAM.
+bool bff_get(const char* path, const char* bearer, size_t* len, char* err, size_t err_n) {
+  char url[256];
+  int w = snprintf(url, sizeof(url), "%s/operations/%s", CONFIG_PANEL_CO4_BFF_URL, path);
+  if (w <= 0 || static_cast<size_t>(w) >= sizeof(url)) {
+    snprintf(err, err_n, "Anfrage zu lang");
+    return false;
+  }
+  snprintf(g_w->form, sizeof(g_w->form), "Bearer %s", bearer);
+  HttpGetResult r = http_get(url, nullptr, nullptr, reinterpret_cast<uint8_t*>(g_w->body), kBodyCap, 20000,
+                             "Authorization", g_w->form);
+  wipe(g_w->form, sizeof(g_w->form));
+  if (!r.ok || r.status != 200) {
+    ESP_LOGW(kTag, "bff: HTTP %d (%s)", r.status, r.ok ? "status" : "transport/size");
+    snprintf(err, err_n, "%s", r.status == 401 || r.status == 403 ? "Co4 verweigert Zugriff" : "Co4 nicht erreichbar");
+    return false;
+  }
+  g_w->body[r.length] = '\0';
+  *len = r.length;
+  return true;
+}
+
+template <int N>
+bool bff_block(const char* zone, const char* bearer, const Co4BffWindow& win, Co4Block<N>* b, char* err,
+               size_t err_n) {
+  char path[160];
+  if (!co4_bff_stats_path(path, sizeof(path), zone, win.start_ms, win.end_ms, win.period)) {
+    snprintf(err, err_n, "Zone ohne Co4-ID");
+    return false;
+  }
+  size_t len = 0;
+  if (!bff_get(path, bearer, &len, err, err_n)) return false;
+  bool partial = false;
+  Co4BffRc rc = co4_bff_parse_stats(g_w->body, len, &b->v[0][0], N, &b->n, &partial, err, err_n);
+  b->res = win.res;
+  b->t0_ms = win.start_ms;
+  b->step_ms = win.step_ms;
+  snprintf(b->unit, sizeof(b->unit), "kWh");
+  return rc == Co4BffRc::Ok;
+}
+
+bool bff_fetch(const char* zone, const char* bearer, int64_t now_ms, Co4Data* out, char* err, size_t err_n) {
+  if (bearer == nullptr) return false;
+  Co4BffWindow win[3];
+  co4_bff_windows(now_ms, win);
+  if (!bff_block(zone, bearer, win[0], &out->day, err, err_n)) return false;
+  for (int s = 0; s < kCo4SeriesN; ++s) co4_bff_energy_to_power(out->day.v[s], out->day.n, out->day.step_ms);
+  snprintf(out->day.unit, sizeof(out->day.unit), "kW");
+  if (!bff_block(zone, bearer, win[1], &out->days, err, err_n)) return false;
+  if (!bff_block(zone, bearer, win[2], &out->months, err, err_n)) return false;
+  out->example = false;
+  out->fetched_ms = now_ms;
+  return true;
+}
+const Co4Source kBffLive = {"Co4", false, bff_fetch};
+
 void do_data() {
   Co4View v;
   co4_get(&v);
@@ -344,7 +402,7 @@ void do_data() {
   if (!v.zone_set && !demo) return;
   if (!demo && v.state != Co4State::LoggedIn) return;
   edit(Co4Event::Data, [](Co4View& w) { w.fetch = Co4Fetch::Loading; });
-  const Co4Source& src = v.mode == Co4Mode::Live ? co4_live_source() : co4_fixture_source();
+  const Co4Source& src = v.mode == Co4Mode::Live ? kBffLive : co4_fixture_source();
   const char* bearer = nullptr;
   char err[48] = "";
   bool ok = false;
