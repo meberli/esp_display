@@ -100,6 +100,28 @@ void block_init(Co4Res res, int64_t t0, int64_t step, int n, const char* unit, f
   for (int i = 0; i < kCo4SeriesN * cap; ++i) v[i] = NAN;
 }
 
+// Fixture site block from a zone block: f times the zone, a battery that charges
+// bat of the feed-in and gives it back in the evening (synthetic).
+template <int N>
+void site_scale(const Co4Block<N>& z, Co4Block<N>* s, float f, float bat) {
+  *s = z;
+  float stored = 0;
+  for (int i = 0; i < z.n; ++i) {
+    for (int k = 0; k < kCo4BatLaden; ++k)
+      if (!isnan(z.v[k][i])) s->v[k][i] = z.v[k][i] * f;
+    if (isnan(z.v[kCo4Einspeisung][i])) continue;
+    float ch = s->v[kCo4Einspeisung][i] * bat;
+    s->v[kCo4BatLaden][i] = ch;
+    s->v[kCo4Einspeisung][i] -= ch;
+    stored += ch;
+    float out = z.res == Co4Res::Min15 ? (s->v[kCo4Pv][i] < 0.05f * f ? stored * 0.25f : 0) : ch * 0.9f;
+    if (out > s->v[kCo4Bezug][i]) out = s->v[kCo4Bezug][i];
+    s->v[kCo4BatEntladen][i] = out;
+    s->v[kCo4Bezug][i] -= out;
+    stored -= out;
+  }
+}
+
 bool fixture_fetch(const char* zone_id, const char* bearer, int64_t now_ms, Co4Data* out, char* err, size_t err_n) {
   (void)zone_id;
   (void)bearer;
@@ -170,6 +192,14 @@ void co4_fixture_fill(int64_t now_ms, Co4Data* out) {
     m.v[kCo4Einspeisung][i] = pv - eig;
   }
 
+  // Whole site (Beispiel: 6 zones, battery present).
+  Co4SiteData& s = out->site;
+  s.state = Co4SiteState::Ok;
+  s.partial = false;
+  s.err[0] = '\0';
+  site_scale(d, &s.day, 6.2f, 0.25f);
+  site_scale(m, &s.days, 6.2f, 0.25f);
+
   // This year: energy per month, up to this month.
   Co4Totals& yr = out->months;
   struct tm jan = first;
@@ -187,6 +217,7 @@ void co4_fixture_fill(int64_t now_ms, Co4Data* out) {
     yr.v[kCo4Bezug][i] = (load - eig) * share;
     yr.v[kCo4Einspeisung][i] = (pv - eig) * share;
   }
+  site_scale(yr, &s.months, 6.2f, 0.25f);
 }
 
 // --- Zones ---------------------------------------------------------------------

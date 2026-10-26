@@ -239,11 +239,68 @@ static void test_bff() {
   CHECK(co4_bff_parse_stats("{", 1, &c.v[0][0], 96, &c.n, &partial, err, sizeof(err)) == Co4BffRc::Error);
 
   Co4ZoneList zl;
-  CHECK(co4_bff_parse_zones(kZonesJson, strlen(kZonesJson), &zl, err, sizeof(err)));
+  CHECK(co4_bff_parse_zones(kZonesJson, strlen(kZonesJson), "900", &zl, err, sizeof(err)));
   CHECK(zl.n == 2);
   CHECK(strcmp(zl.z[0].id, "1001") == 0 && strcmp(zl.z[0].name, "Wohnung 1 B\xC3\xBCro") == 0);
   CHECK(strcmp(zl.z[1].id, "1002") == 0 && strcmp(zl.z[1].name, "1002") == 0);
-  CHECK(!co4_bff_parse_zones(er, strlen(er), &zl, err, sizeof(err)));
+  CHECK(strcmp(zl.z[0].site, "900") == 0 && strcmp(zl.z[1].site, "900") == 0);
+  CHECK(!co4_bff_parse_zones(er, strlen(er), "900", &zl, err, sizeof(err)));
+}
+
+// Placeholder site answer (shape as zevGetSiteEnergyStats), no real data.
+static const char kSiteJson[] =
+    "{\"data\":{\"energyStats\":{\"start\":1000,\"end\":[2000,3000,4000],"
+    "\"gridProduction\":[1.5,null,2],\"feedIn\":[0,3,1],\"selfConsumption\":[4,5,6],"
+    "\"pvProduction\":[4,8,7],\"pvConsumption\":[1,1,1],\"consumption\":[9,9,9],"
+    "\"batteryProduction\":[0,0,0.5],\"batteryConsumption\":[0.25,0,0],\"batteryFromLocalPv\":[0,0,0],"
+    "\"sources\":[{\"category\":\"GRID\",\"production\":[1],\"type\":\"x\"}],\"partialSources\":true}}}";
+
+static void test_site() {
+  char path[200];
+  CHECK(co4_bff_site_stats_path(path, sizeof(path), "900", 1000, 2000, "1D"));
+  CHECK(strstr(path, "zevGetSiteEnergyStats?") == path && strstr(path, "siteNiid=900") && strstr(path, "period=1D"));
+  CHECK(!co4_bff_site_stats_path(path, sizeof(path), "9a", 1000, 2000, "1D"));
+  CHECK(co4_bff_zone_path(path, sizeof(path), "1001") && strcmp(path, "zevGetZone?niid=1001") == 0);
+  CHECK(!co4_bff_zone_path(path, sizeof(path), ""));
+
+  static Co4Curve c;
+  char err[48];
+  bool partial = false;
+  CHECK(co4_bff_parse_site_stats(kSiteJson, strlen(kSiteJson), &c.v[0][0], 96, &c.n, &partial, err, sizeof(err)) ==
+        Co4BffRc::Ok);
+  CHECK(c.n == 3 && partial);
+  CHECK(c.v[kCo4Bezug][0] == 1.5f && isnan(c.v[kCo4Bezug][1]) && c.v[kCo4Bezug][2] == 2.f);
+  CHECK(c.v[kCo4Einspeisung][1] == 3.f && c.v[kCo4Pv][1] == 8.f && c.v[kCo4Eigen][2] == 6.f);
+  CHECK(c.v[kCo4BatLaden][0] == 0.25f && c.v[kCo4BatEntladen][2] == 0.5f);
+  // no battery arrays -> battery NAN (block hidden), Bezug untouched
+  const char nb[] = "{\"data\":{\"energyStats\":{\"start\":1,\"end\":[2],\"gridProduction\":[3],\"feedIn\":[1]}}}";
+  CHECK(co4_bff_parse_site_stats(nb, strlen(nb), &c.v[0][0], 96, &c.n, &partial, err, sizeof(err)) == Co4BffRc::Ok);
+  CHECK(c.n == 1 && c.v[kCo4Bezug][0] == 3.f && isnan(c.v[kCo4BatLaden][0]) && isnan(c.v[kCo4BatEntladen][0]));
+  const char em[] = "{\"data\":{\"energyStats\":{\"start\":1,\"end\":[]}}}";
+  CHECK(co4_bff_parse_site_stats(em, strlen(em), &c.v[0][0], 96, &c.n, &partial, err, sizeof(err)) == Co4BffRc::Ok);
+  CHECK(c.n == 0);
+  const char nl[] = "{\"data\":{\"energyStats\":null}}";
+  CHECK(co4_bff_parse_site_stats(nl, strlen(nl), &c.v[0][0], 96, &c.n, &partial, err, sizeof(err)) == Co4BffRc::Error);
+  const char er[] = "{\"errors\":[{\"message\":\"denied\"}],\"data\":null}";
+  CHECK(co4_bff_parse_site_stats(er, strlen(er), &c.v[0][0], 96, &c.n, &partial, err, sizeof(err)) == Co4BffRc::Error);
+  CHECK(co4_bff_parse_site_stats("{", 1, &c.v[0][0], 96, &c.n, &partial, err, sizeof(err)) == Co4BffRc::Error);
+
+  char site[20];
+  const char zj[] = "{\"data\":{\"zone\":{\"niid\":\"1001\",\"site\":{\"niid\":\"900\"},\"contract\":{\"x\":1}}}}";
+  CHECK(co4_bff_parse_zone_site(zj, strlen(zj), site, sizeof(site), err, sizeof(err)) && strcmp(site, "900") == 0);
+  const char zn[] = "{\"data\":{\"zone\":{\"niid\":1001,\"site\":{\"niid\":900}}}}";
+  CHECK(co4_bff_parse_zone_site(zn, strlen(zn), site, sizeof(site), err, sizeof(err)) && strcmp(site, "900") == 0);
+  const char z0[] = "{\"data\":{\"zone\":null}}";
+  CHECK(!co4_bff_parse_zone_site(z0, strlen(z0), site, sizeof(site), err, sizeof(err)));
+
+  // fixture: site Ok, battery present, site Bezug larger than zone Bezug
+  static Co4Data d;
+  co4_fixture_fill(1767225600000LL + 12 * 3600000LL, &d);
+  CHECK(d.site.state == Co4SiteState::Ok && d.site.day.n > 0 && d.site.days.n > 0 && d.site.months.n > 0);
+  bool bat = false;
+  for (int i = 0; i < d.site.days.n; ++i) bat |= !isnan(d.site.days.v[kCo4BatLaden][i]);
+  CHECK(bat);
+  CHECK(isnan(d.days.v[kCo4BatLaden][0]));
 }
 
 int main() {
@@ -257,6 +314,7 @@ int main() {
   test_form();
   test_refresh_at();
   test_bff();
+  test_site();
   printf(fails ? "%d FAILED\n" : "all Co4 tests passed\n", fails);
   return fails ? 1 : 0;
 }

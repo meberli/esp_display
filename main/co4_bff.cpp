@@ -67,6 +67,20 @@ bool co4_bff_zones_path(char* out, size_t n, const char* site_niid) {
   return w > 0 && static_cast<size_t>(w) < n;
 }
 
+bool co4_bff_site_stats_path(char* out, size_t n, const char* site_niid, int64_t start_ms, int64_t end_ms,
+                             const char* period) {
+  if (!co4_bff_niid_ok(site_niid) || period == nullptr || end_ms <= start_ms) return false;
+  int w = snprintf(out, n, "zevGetSiteEnergyStats?siteNiid=%s&start=%" PRId64 "&end=%" PRId64 "&period=%s",
+                   site_niid, start_ms, end_ms, period);
+  return w > 0 && static_cast<size_t>(w) < n;
+}
+
+bool co4_bff_zone_path(char* out, size_t n, const char* zone_niid) {
+  if (!co4_bff_niid_ok(zone_niid)) return false;
+  int w = snprintf(out, n, "zevGetZone?niid=%s", zone_niid);
+  return w > 0 && static_cast<size_t>(w) < n;
+}
+
 void co4_bff_windows(int64_t now_ms, Co4BffWindow out[3]) {
   time_t t = static_cast<time_t>(now_ms / 1000);
   struct tm lt;
@@ -135,6 +149,7 @@ Co4BffRc co4_bff_parse_stats(const char* json, size_t len, float* v, int cap, ui
     int series = -1;
     if (strcmp(type, "GRID") == 0) series = kCo4Bezug;
     else if (strcmp(type, "PV") == 0) series = kCo4Eigen;
+    else if (strcmp(type, "BATTERY") == 0) series = kCo4BatEntladen;
     if (series < 0) continue;
     float* dst = v + series * cap;
     int i = 0;
@@ -147,7 +162,8 @@ Co4BffRc co4_bff_parse_stats(const char* json, size_t len, float* v, int cap, ui
   return Co4BffRc::Ok;
 }
 
-bool co4_bff_parse_zones(const char* json, size_t len, Co4ZoneList* out, char* err, size_t err_n) {
+bool co4_bff_parse_zones(const char* json, size_t len, const char* site_niid, Co4ZoneList* out, char* err,
+                         size_t err_n) {
   memset(out, 0, sizeof(*out));
   if (err_n > 0) err[0] = '\0';
   StaticJsonDocument<512> filter;
@@ -182,6 +198,7 @@ bool co4_bff_parse_zones(const char* json, size_t len, Co4ZoneList* out, char* e
     Co4Zone& dst = out->z[out->n++];
     snprintf(dst.id, sizeof(dst.id), "%s", id);
     co4_copy_utf8(dst.name, sizeof(dst.name), name[0] != '\0' ? name : id);
+    snprintf(dst.site, sizeof(dst.site), "%s", co4_bff_niid_ok(site_niid) ? site_niid : "");
   }
   return true;
 }
@@ -192,4 +209,83 @@ void co4_bff_energy_to_power(float* v, int n, int64_t step_ms) {
   for (int i = 0; i < n; ++i) {
     if (!isnan(v[i])) v[i] *= f;
   }
+}
+
+namespace {
+bool niid_text(JsonVariantConst ni, char* out, size_t n) {
+  if (ni.is<int64_t>()) snprintf(out, n, "%" PRId64, ni.as<int64_t>());
+  else snprintf(out, n, "%s", ni | "");
+  return co4_bff_niid_ok(out);
+}
+}  // namespace
+
+Co4BffRc co4_bff_parse_site_stats(const char* json, size_t len, float* v, int cap, uint16_t* n, bool* partial,
+                                  char* err, size_t err_n) {
+  if (err_n > 0) err[0] = '\0';
+  *n = 0;
+  *partial = false;
+  for (int i = 0; i < kCo4SeriesN * cap; ++i) v[i] = NAN;
+  static const struct {
+    const char* key;
+    Co4Series s;
+  } kMap[] = {{"gridProduction", kCo4Bezug},          {"feedIn", kCo4Einspeisung},
+              {"pvProduction", kCo4Pv},               {"selfConsumption", kCo4Eigen},
+              {"batteryConsumption", kCo4BatLaden},   {"batteryProduction", kCo4BatEntladen}};
+  StaticJsonDocument<512> filter;
+  JsonObject es = filter["data"]["energyStats"].to<JsonObject>();
+  es["end"] = true;
+  es["partialSources"] = true;
+  for (const auto& m : kMap) es[m.key] = true;  // sources, consumption, pv/batteryFromLocalPv: not read
+  filter["errors"][0]["message"] = true;
+  filter["error"] = true;
+  Doc doc(kDocCap);
+  if (deserializeJson(doc, json, len, DeserializationOption::Filter(filter))) {
+    snprintf(err, err_n, "Antwort unlesbar");
+    return Co4BffRc::Error;
+  }
+  if (error_answer(doc, err, err_n)) return Co4BffRc::Error;
+  JsonObjectConst st = doc["data"]["energyStats"].as<JsonObjectConst>();
+  if (st.isNull()) {
+    snprintf(err, err_n, "Site nicht lesbar");
+    return Co4BffRc::Error;
+  }
+  *partial = st["partialSources"] | false;
+  JsonArrayConst ends = st["end"].as<JsonArrayConst>();
+  int cnt = ends.isNull() ? 0 : static_cast<int>(ends.size());
+  if (cnt > cap) cnt = cap;
+  *n = static_cast<uint16_t>(cnt);
+  for (const auto& m : kMap) {
+    JsonArrayConst a = st[m.key].as<JsonArrayConst>();
+    if (a.isNull()) continue;  // undefined: site has no such metering points -> hidden
+    float* dst = v + m.s * cap;
+    int i = 0;
+    for (JsonVariantConst x : a) {
+      if (i >= cnt) break;
+      if (x.is<float>()) dst[i] = x.as<float>();
+      ++i;
+    }
+  }
+  return Co4BffRc::Ok;
+}
+
+bool co4_bff_parse_zone_site(const char* json, size_t len, char* site, size_t site_n, char* err, size_t err_n) {
+  if (site_n > 0) site[0] = '\0';
+  if (err_n > 0) err[0] = '\0';
+  StaticJsonDocument<192> filter;
+  filter["data"]["zone"]["site"]["niid"] = true;  // nothing else of the zone (contract, accounts) is read
+  filter["errors"][0]["message"] = true;
+  filter["error"] = true;
+  StaticJsonDocument<256> doc;
+  if (deserializeJson(doc, json, len, DeserializationOption::Filter(filter))) {
+    snprintf(err, err_n, "Antwort unlesbar");
+    return false;
+  }
+  if (error_answer(doc, err, err_n)) return false;
+  char tmp[24];
+  if (!niid_text(doc["data"]["zone"]["site"]["niid"], tmp, sizeof(tmp)) || strlen(tmp) >= site_n) {
+    snprintf(err, err_n, "Zone ohne Site");
+    return false;
+  }
+  snprintf(site, site_n, "%s", tmp);
+  return true;
 }

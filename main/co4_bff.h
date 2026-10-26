@@ -13,6 +13,14 @@
 //      GET {BFF}/operations/zevGetConsumptionZones?niid=…
 //      -> {"data":{"zones":[{"id":int,"niid":BigInt,"zoneType":"PRIVATE|SHARED|FACILITY",
 //          "details":{"name":[{"value":"…"}]},…}]}}
+//  - zevGetSiteEnergyStats(siteNiid: BigInt!, start, end: Timestamp!, period: String)
+//      GET {BFF}/operations/zevGetSiteEnergyStats?siteNiid=…&start=…&end=…&period=…
+//      -> {"data":{"energyStats":{"start","end":[…],"gridProduction","feedIn","selfConsumption",
+//          "pvProduction","pvConsumption","consumption","batteryProduction","batteryConsumption",
+//          "batteryFromLocalPv": [x|null…] each optional (undefined if the site has no such
+//          metering points),"sources":[…],"partialSources":bool}}}
+//      energyStats is null if the site is unknown / not readable (zev_getSite null).
+//  - zevGetZone(niid: BigInt!) -> {"data":{"zone":{…,"site":{"niid":…,…}}}}: the site of a zone.
 // Timestamps are Unix milliseconds (UTC). period: "<n>S" seconds, "<n>M" months,
 // the ZEV pilet also uses "1D". Blocks are aligned on start.
 #include <stddef.h>
@@ -31,6 +39,9 @@ bool co4_bff_niid_ok(const char* s);
 bool co4_bff_stats_path(char* out, size_t n, const char* zone_niid, int64_t start_ms, int64_t end_ms,
                         const char* period);
 bool co4_bff_zones_path(char* out, size_t n, const char* site_niid);
+bool co4_bff_site_stats_path(char* out, size_t n, const char* site_niid, int64_t start_ms, int64_t end_ms,
+                             const char* period);
+bool co4_bff_zone_path(char* out, size_t n, const char* zone_niid);
 
 // The three windows the dashboard needs, in local time (localtime_r/mktime):
 // today 15 min (end = now rounded up to the next 15 min), this month per day
@@ -44,7 +55,8 @@ void co4_bff_windows(int64_t now_ms, Co4BffWindow out[3]);
 
 // Parses a zevGetZoneEnergyStats answer into v[kCo4SeriesN][cap] (energy per
 // block as delivered, unit see co4_bff.cpp). GRID -> kCo4Bezug, PV -> kCo4Eigen
-// (PV energy from the ZEV allocated to the zone); BATTERY and the site-only
+// (PV energy from the ZEV allocated to the zone), BATTERY -> kCo4BatEntladen
+// (energy the battery delivered to the zone, shown separately); the site-only
 // series (Einspeisung, PV-Produktion) stay NAN. Values beyond cap are dropped.
 Co4BffRc co4_bff_parse_stats(const char* json, size_t len, float* v, int cap, uint16_t* n, bool* partial,
                              char* err, size_t err_n);
@@ -52,7 +64,19 @@ Co4BffRc co4_bff_parse_stats(const char* json, size_t len, float* v, int cap, ui
 // Parses a zevGetConsumptionZones answer. Zone id = niid (decimal), name = the
 // system object name. Only these fields are read (filter): occupations, e-mail
 // addresses and accounts in the answer are never stored.
-bool co4_bff_parse_zones(const char* json, size_t len, Co4ZoneList* out, char* err, size_t err_n);
+// site_niid (the site the list was requested for) is stored with every zone.
+bool co4_bff_parse_zones(const char* json, size_t len, const char* site_niid, Co4ZoneList* out, char* err,
+                         size_t err_n);
+
+// Parses a zevGetSiteEnergyStats answer into v[kCo4SeriesN][cap]: Bezug =
+// gridProduction, Einspeisung = feedIn, Pv = pvProduction, Eigen =
+// selfConsumption, BatLaden = batteryConsumption, BatEntladen =
+// batteryProduction. Missing arrays / null values stay NAN. Ok or Error.
+Co4BffRc co4_bff_parse_site_stats(const char* json, size_t len, float* v, int cap, uint16_t* n, bool* partial,
+                                  char* err, size_t err_n);
+
+// zevGetZone answer -> site niid (decimal). false if missing.
+bool co4_bff_parse_zone_site(const char* json, size_t len, char* site, size_t site_n, char* err, size_t err_n);
 
 // kWh per block -> mean kW over the block.
 void co4_bff_energy_to_power(float* v, int n, int64_t step_ms);

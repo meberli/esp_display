@@ -30,7 +30,7 @@
 namespace {
 
 const char* const kTag = "co4";
-constexpr size_t kBodyCap = 16 * 1024;  // discovery documents are ~6-10 KB
+constexpr size_t kBodyCap = 32 * 1024;  // discovery ~6-10 KB, site day @15 min ~11 KB
 constexpr size_t kFormCap = 3 * 1024;
 constexpr size_t kAccessCap = 2560;
 constexpr size_t kRefreshCap = 2048;
@@ -71,6 +71,7 @@ Co4Data* g_data = nullptr;       // PSRAM, guarded by g_mu
 // Inputs from the UI, guarded by g_mu.
 char g_pick_id[40];
 char g_pick_name[48];
+char g_pick_site[20];
 Co4Mode g_pick_mode = Co4Mode::Fixture;
 
 bool g_have_oidc = false;
@@ -322,16 +323,18 @@ void do_zones() {
 }
 
 void do_zone_pick() {
-  char id[40], name[48];
+  char id[40], name[48], site[20];
   xSemaphoreTake(g_mu, portMAX_DELAY);
   snprintf(id, sizeof(id), "%s", g_pick_id);
   snprintf(name, sizeof(name), "%s", g_pick_name);
+  snprintf(site, sizeof(site), "%s", g_pick_site);
   xSemaphoreGive(g_mu);
-  bool saved = settings_save_co4_zone(id, name);
+  bool saved = settings_save_co4_zone(id, name, site);
   edit(Co4Event::State, [&](Co4View& v) {
     v.zone_set = saved && id[0] != '\0';
     snprintf(v.zone_id, sizeof(v.zone_id), "%s", v.zone_set ? id : "");
     snprintf(v.zone_name, sizeof(v.zone_name), "%s", v.zone_set ? name : "");
+    snprintf(v.site_niid, sizeof(v.site_niid), "%s", v.zone_set ? site : "");
     v.have_data = false;
     v.fetch = Co4Fetch::Idle;
   });
@@ -380,6 +383,65 @@ bool bff_block(const char* zone, const char* bearer, const Co4BffWindow& win, Co
   return rc == Co4BffRc::Ok;
 }
 
+// Site niid of the chosen zone: from the zone choice (NVS co4_site) or, if that
+// is empty, once from zevGetZone (zone.site.niid) and then stored.
+bool site_niid(const char* zone, const char* bearer, char* site, size_t n) {
+  xSemaphoreTake(g_mu, portMAX_DELAY);
+  snprintf(site, n, "%s", g_view->site_niid);
+  xSemaphoreGive(g_mu);
+  if (co4_bff_niid_ok(site)) return true;
+  char path[64], err[48];
+  size_t len = 0;
+  if (!co4_bff_zone_path(path, sizeof(path), zone) || !bff_get(path, bearer, &len, err, sizeof(err))) return false;
+  if (!co4_bff_parse_zone_site(g_w->body, len, site, n, err, sizeof(err))) {
+    ESP_LOGW(kTag, "zone site: %s", err);
+    return false;
+  }
+  settings_save_co4_site(site);
+  xSemaphoreTake(g_mu, portMAX_DELAY);
+  snprintf(g_view->site_niid, sizeof(g_view->site_niid), "%s", site);
+  xSemaphoreGive(g_mu);
+  return true;
+}
+
+template <int N>
+bool site_block(const char* site, const char* bearer, const Co4BffWindow& win, Co4Block<N>* b, bool* partial,
+                char* err, size_t err_n) {
+  char path[160];
+  size_t len = 0;
+  b->n = 0;
+  if (!co4_bff_site_stats_path(path, sizeof(path), site, win.start_ms, win.end_ms, win.period)) return false;
+  if (!bff_get(path, bearer, &len, err, err_n)) return false;
+  bool p = false;
+  Co4BffRc rc = co4_bff_parse_site_stats(g_w->body, len, &b->v[0][0], N, &b->n, &p, err, err_n);
+  *partial = *partial || p;
+  b->res = win.res;
+  b->t0_ms = win.start_ms;
+  b->step_ms = win.step_ms;
+  snprintf(b->unit, sizeof(b->unit), "kWh");
+  return rc == Co4BffRc::Ok;
+}
+
+// Whole site after the zone. Failures only mark the site block (zone stays).
+// TODO(Co4): zev resolves siteEnergyStats as a subscription ("can take a while");
+// the BFF exposes it as a query. Whether 20 s per window (bff_get) suffice is open.
+void site_fetch(const char* zone, const char* bearer, const Co4BffWindow win[3], Co4SiteData* s) {
+  s->state = Co4SiteState::None;
+  s->partial = false;
+  s->err[0] = '\0';
+  s->day.n = s->days.n = s->months.n = 0;
+  char site[20];
+  if (!site_niid(zone, bearer, site, sizeof(site))) return;
+  bool ok = site_block(site, bearer, win[0], &s->day, &s->partial, s->err, sizeof(s->err)) &&
+            site_block(site, bearer, win[1], &s->days, &s->partial, s->err, sizeof(s->err)) &&
+            site_block(site, bearer, win[2], &s->months, &s->partial, s->err, sizeof(s->err));
+  if (ok) {
+    for (int k = 0; k < kCo4SeriesN; ++k) co4_bff_energy_to_power(s->day.v[k], s->day.n, s->day.step_ms);
+    snprintf(s->day.unit, sizeof(s->day.unit), "kW");
+  }
+  s->state = ok ? Co4SiteState::Ok : Co4SiteState::Error;
+}
+
 bool bff_fetch(const char* zone, const char* bearer, int64_t now_ms, Co4Data* out, char* err, size_t err_n) {
   if (bearer == nullptr) return false;
   Co4BffWindow win[3];
@@ -389,6 +451,7 @@ bool bff_fetch(const char* zone, const char* bearer, int64_t now_ms, Co4Data* ou
   snprintf(out->day.unit, sizeof(out->day.unit), "kW");
   if (!bff_block(zone, bearer, win[1], &out->days, err, err_n)) return false;
   if (!bff_block(zone, bearer, win[2], &out->months, err, err_n)) return false;
+  site_fetch(zone, bearer, win, &out->site);
   out->example = false;
   out->fetched_ms = now_ms;
   return true;
@@ -519,6 +582,7 @@ void co4_start() {
   g_view->token_set = tok;
   g_view->zone_set = settings_load_co4_zone(g_view->zone_id, sizeof(g_view->zone_id), g_view->zone_name,
                                             sizeof(g_view->zone_name));
+  if (g_view->zone_set) settings_load_co4_site(g_view->site_niid, sizeof(g_view->site_niid));
   g_next_data = now_ms() + 5000;  // let Wi-Fi and SNTP come up
   xTaskCreatePinnedToCoreWithCaps(task, "co4", 10 * 1024, nullptr, 3, &g_task, 0, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 }
@@ -558,9 +622,10 @@ void co4_logout() { cmd(kCmdLogout); }
 void co4_zones_load() { cmd(kCmdZones); }
 void co4_refresh_now() { cmd(kCmdRefresh); }
 
-void co4_zone_choose(const char* id, const char* name) {
+void co4_zone_choose(const char* id, const char* name, const char* site) {
   if (g_mu == nullptr) return;
   xSemaphoreTake(g_mu, portMAX_DELAY);
+  snprintf(g_pick_site, sizeof(g_pick_site), "%s", co4_bff_niid_ok(site) ? site : "");
   co4_copy_utf8(g_pick_id, sizeof(g_pick_id), id != nullptr ? id : "");
   co4_copy_utf8(g_pick_name, sizeof(g_pick_name), name != nullptr ? name : "");
   xSemaphoreGive(g_mu);
@@ -581,8 +646,9 @@ void co4_diag(char* out, size_t n) {
   static const char* const kFetch[] = {"idle", "loading", "ok", "offline"};
   Co4View v;
   co4_get(&v);
-  snprintf(out, n, "CO4 state=%s token=%s zone=%s src=%s fetch=%s data=%s heap_int=%u psram=%u",
+  snprintf(out, n, "CO4 state=%s token=%s zone=%s site=%s src=%s fetch=%s data=%s heap_int=%u psram=%u",
            kState[static_cast<int>(v.state) % 5], v.token_set ? "set" : "unset", v.zone_set ? "set" : "unset",
+           v.site_niid[0] ? "set" : "unset",
            kMode[static_cast<int>(v.mode) % 3], kFetch[static_cast<int>(v.fetch) % 4], v.have_data ? "yes" : "no",
            static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)),
            static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)));

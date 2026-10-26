@@ -22,7 +22,7 @@ lv_obj_t* c4_empty_text[2] = {};
 lv_obj_t* c4_empty_btn[2] = {};
 lv_obj_t* c4_empty_btn_lbl[2] = {};
 lv_obj_t* c4_chart = nullptr;
-lv_chart_series_t* c4_ser[3] = {};  // PV, Bezug, Einspeisung
+lv_chart_series_t* c4_ser[4] = {};  // PV, Bezug, Einspeisung, Batterie (only if delivered)
 lv_obj_t* c4_sum = nullptr;
 lv_obj_t* c4_peak = nullptr;
 lv_obj_t* c4_arc[2] = {};
@@ -56,12 +56,26 @@ lv_obj_t* c4z_msg = nullptr;
 lv_obj_t* c4z_btn[2] = {};
 int c4z_shown = -1;
 
+// Whole-site block (Heute: today, Verlauf: month + year). Battery column only
+// when the site delivers battery values; never added to Bezug.
+struct C4SiteTbl {
+  int rows;
+  lv_obj_t* hdr_bat;
+  lv_obj_t* msg;
+  lv_obj_t* name[2];
+  lv_obj_t* bz[2];
+  lv_obj_t* es[2];
+  lv_obj_t* bat[2];
+};
+C4SiteTbl c4_st[2] = {};
+
+constexpr uint32_t kC4Bat = 0x9C8FD0;  // battery: muted violet, both designs
 constexpr int kC4ChartW = 396;
-constexpr int kC4ChartH = 120;
-constexpr int kC4DayBase = 112;  // Verlauf: day bars baseline inside card 1
-constexpr int kC4DayH = 72;
-constexpr int kC4MonBase = 104;
-constexpr int kC4MonH = 64;
+constexpr int kC4ChartH = 100;
+constexpr int kC4DayBase = 98;  // Verlauf: day bars baseline inside card 1 (+40)
+constexpr int kC4DayH = 64;
+constexpr int kC4MonBase = 70;
+constexpr int kC4MonH = 44;
 
 void open_co4set();
 void co4_open_login();
@@ -172,6 +186,86 @@ lv_obj_t* c4_make_badge(lv_obj_t* card) {
   return p;
 }
 
+void c4_site_build(lv_obj_t* c, C4SiteTbl* t, int rows, const char* const* names) {
+  t->rows = rows;
+  const lv_font_t* vf = rows == 1 ? &font_inter_sb16 : &font_inter_14;
+  en_lbl(c, &font_inter_14, kText, 18, 4, "ZEV gesamt");
+  en_lbl(c, &font_inter_14, kAmber, 120, 4, "Bezug");
+  en_lbl(c, &font_inter_14, kAccent, 214, 4, "Einspeisung");
+  t->hdr_bat = en_lbl(c, &font_inter_14, kC4Bat, 316, 4, "Batterie");
+  for (int r = 0; r < rows; ++r) {
+    const int y = rows == 1 ? 28 : 22 + r * 17;
+    t->name[r] = en_lbl(c, &font_inter_14, kTextDim, 18, rows == 1 ? y + 2 : y, names[r]);
+    t->bz[r] = en_lbl(c, vf, kText, 120, y, "");
+    t->es[r] = en_lbl(c, vf, kText, 214, y, "");
+    t->bat[r] = en_lbl(c, vf, kC4Bat, 316, y, "");
+  }
+  t->msg = en_lbl(c, &font_inter_14, kTextDim, 120, rows == 1 ? 30 : 32, "");
+  lv_obj_set_width(t->msg, 280);
+  lv_label_set_long_mode(t->msg, LV_LABEL_LONG_DOT);
+}
+
+// Sum of v[from, to), NAN skipped; *has = at least one value.
+float c4_vsum(const float* v, int from, int to, bool* has) {
+  float s = 0;
+  for (int i = from; i < to; ++i)
+    if (!isnan(v[i])) {
+      s += v[i];
+      *has = true;
+    }
+  return s;
+}
+
+// ranges: per row the block and [from, to) of the energy totals.
+void c4_site_show(C4SiteTbl* t, const Co4SiteData& sd, const Co4Totals* const* blk, const int* from, const int* to) {
+  const char* msg = nullptr;
+  if (sd.state == Co4SiteState::None) msg = "Site noch nicht bekannt";
+  else if (sd.state == Co4SiteState::Error) msg = sd.err[0] ? sd.err : "Site nicht verf\xC3\xBCgbar";
+  bool any_bat = false;
+  for (int r = 0; r < t->rows && msg == nullptr; ++r) {
+    const Co4Totals& b = *blk[r];
+    const int a = from[r] < 0 ? 0 : from[r], e = to[r] > b.n ? b.n : to[r];
+    bool hb = false, he = false, hl = false, hx = false;
+    float bz = c4_vsum(b.v[kCo4Bezug], a, e, &hb);
+    float es = c4_vsum(b.v[kCo4Einspeisung], a, e, &he);
+    float bl = c4_vsum(b.v[kCo4BatLaden], a, e, &hl);
+    float bx = c4_vsum(b.v[kCo4BatEntladen], a, e, &hx);
+    char x[16];
+    co4_fmt_kwh(x, sizeof(x), bz);
+    lv_label_set_text(t->bz[r], hb ? x : "\xE2\x80\x93");
+    co4_fmt_kwh(x, sizeof(x), es);
+    lv_label_set_text(t->es[r], he ? x : "\xE2\x80\x93");
+    if (hl || hx) {
+      any_bat = true;
+      char bt[24];
+      if (bl >= 1000 || bx >= 1000)
+        snprintf(bt, sizeof(bt), "+%.1f/-%.1f MWh", static_cast<double>(bl / 1000), static_cast<double>(bx / 1000));
+      else
+        snprintf(bt, sizeof(bt), "+%.0f/-%.0f kWh", static_cast<double>(bl), static_cast<double>(bx));
+      lv_label_set_text(t->bat[r], bt);
+    }
+  }
+  if (msg != nullptr) {
+    show(t->msg);
+    lv_label_set_text(t->msg, msg);
+  } else {
+    hide(t->msg);
+  }
+  for (int r = 0; r < t->rows; ++r) {
+    if (msg != nullptr) {
+      hide(t->bz[r]);
+      hide(t->es[r]);
+    } else {
+      show(t->bz[r]);
+      show(t->es[r]);
+    }
+    if (any_bat) show(t->bat[r]);
+    else hide(t->bat[r]);
+  }
+  if (any_bat) show(t->hdr_bat);
+  else hide(t->hdr_bat);
+}
+
 void build_co4_screens(lv_obj_t* screen) {
   co4_v = static_cast<Co4View*>(heap_caps_calloc(1, sizeof(Co4View), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
   co4_d = static_cast<Co4Data*>(heap_caps_calloc(1, sizeof(Co4Data), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
@@ -179,7 +273,7 @@ void build_co4_screens(lv_obj_t* screen) {
   // --- Heute
   lv_obj_t* r = co4_root[0] = make_screen_root(screen, "Co4 Energie");
   c4_build_common(r, 0);
-  lv_obj_t* c = en_card(c4_body[0], 56, 220);
+  lv_obj_t* c = en_card(c4_body[0], 56, 196);
   en_lbl(c, &font_inter_sb16, kText, 18, 12, "Heute");
   c4_badge[0] = c4_make_badge(c);
   c4_sum = en_lbl(c, &font_inter_14, kTextDim, 18, 36, "");
@@ -200,43 +294,46 @@ void build_co4_screens(lv_obj_t* screen) {
   lv_obj_set_style_line_width(c4_chart, 2, LV_PART_ITEMS);
   lv_obj_set_style_size(c4_chart, 0, LV_PART_INDICATOR);
   lv_obj_clear_flag(c4_chart, LV_OBJ_FLAG_CLICKABLE);
-  const uint32_t sc[3] = {kGreen, kAmber, kAccent};
-  for (int i = 0; i < 3; ++i) {
+  const uint32_t sc[4] = {kGreen, kAmber, kAccent, kC4Bat};
+  for (int i = 0; i < 4; ++i) {
     c4_ser[i] = lv_chart_add_series(c4_chart, lv_color_hex(sc[i]), LV_CHART_AXIS_PRIMARY_Y);
     lv_chart_set_all_value(c4_chart, c4_ser[i], LV_CHART_POINT_NONE);
   }
   for (int h = 0; h <= 24; h += 6) {
     char t[4];
     snprintf(t, sizeof(t), "%d", h);
-    lv_obj_t* l = en_lbl(c, &font_inter_14, kTextDim, 0, 184, "");
+    lv_obj_t* l = en_lbl(c, &font_inter_14, kTextDim, 0, 164, "");
     lv_label_set_text(l, t);
     lv_obj_set_x(l, h == 24 ? 396 : 18 + h * kC4ChartW / 24);
   }
   c4_peak = en_lbl(c, &font_inter_14, kTextDim, 0, 12, "");
   lv_obj_set_width(c4_peak, 150);
   lv_obj_set_x(c4_peak, 90);
-  c = en_card(c4_body[0], 286, 158);
+  c = en_card(c4_body[0], 260, 112);
   const char* at[2] = {"Autarkie", "Eigenverbrauch"};
   for (int i = 0; i < 2; ++i) {
     const int x0 = 16 + i * 216;
-    en_lbl(c, &font_inter_sb16, kText, x0, 12, at[i]);
-    c4_arc[i] = mx_donut(c, x0, 44, 96);
-    lv_obj_set_style_arc_width(c4_arc[i], 14, LV_PART_MAIN);
-    lv_obj_set_style_arc_width(c4_arc[i], 14, LV_PART_INDICATOR);
+    en_lbl(c, &font_inter_sb16, kText, x0, 8, at[i]);
+    c4_arc[i] = mx_donut(c, x0, 30, 76);
+    lv_obj_set_style_arc_width(c4_arc[i], 11, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(c4_arc[i], 11, LV_PART_INDICATOR);
     lv_obj_set_style_arc_color(c4_arc[i], lv_color_hex(i == 0 ? kGreen : kAccent), LV_PART_INDICATOR);
     c4_pct[i] = make_label(c, &font_inter_sb16, lv_color_hex(kText));
-    lv_obj_set_width(c4_pct[i], 80);
+    lv_obj_set_width(c4_pct[i], 66);
     lv_obj_set_style_text_align(c4_pct[i], LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_pos(c4_pct[i], x0 + 8, 82);
-    c4_arc_sub[i] = en_lbl(c, &font_inter_14, kTextDim, x0 + 106, 62, "");
-    lv_obj_set_width(c4_arc_sub[i], 94);
+    lv_obj_set_pos(c4_pct[i], x0 + 5, 58);
+    c4_arc_sub[i] = en_lbl(c, &font_inter_14, kTextDim, x0 + 88, 36, "");
+    lv_obj_set_width(c4_arc_sub[i], 112);
     lv_label_set_long_mode(c4_arc_sub[i], LV_LABEL_LONG_WRAP);
   }
+  c = en_card(c4_body[0], 380, 60);
+  static const char* const kHeute[1] = {"Heute"};
+  c4_site_build(c, &c4_st[0], 1, kHeute);
   c4_dots(r, 0);
   // --- Verlauf
   r = co4_root[1] = make_screen_root(screen, "Co4 Verlauf");
   c4_build_common(r, 1);
-  c = en_card(c4_body[1], 56, 200);
+  c = en_card(c4_body[1], 56, 182);
   en_lbl(c, &font_inter_sb16, kText, 18, 12, "Dieser Monat");
   c4_badge[1] = c4_make_badge(c);
   c4_mtot = en_lbl(c, &font_inter_14, kTextDim, 18, 36, "");
@@ -253,7 +350,7 @@ void build_co4_screens(lv_obj_t* screen) {
     c4_dlbl[i] = en_lbl(c, &font_inter_14, kTextDim, 20 + (dl[i] - 1) * 13, kC4DayBase + 46, "");
     lv_label_set_text_fmt(c4_dlbl[i], "%d", dl[i]);
   }
-  c = en_card(c4_body[1], 266, 178);
+  c = en_card(c4_body[1], 246, 130);
   en_lbl(c, &font_inter_sb16, kText, 18, 12, "Dieses Jahr");
   c4_ytot = en_lbl(c, &font_inter_14, kTextDim, 18, 36, "");
   lv_obj_set_width(c4_ytot, 396);
@@ -268,6 +365,9 @@ void build_co4_screens(lv_obj_t* screen) {
   make_bar(c, 18, kC4MonBase + 30, 396, 1, kBorder, LV_OPA_COVER);
   en_lbl(c, &font_inter_14, kGreen, 290, 12, "PV");
   en_lbl(c, &font_inter_14, kAmber, 330, 12, "Bezug");
+  c = en_card(c4_body[1], 384, 60);
+  static const char* const kMY[2] = {"Monat", "Jahr"};
+  c4_site_build(c, &c4_st[1], 2, kMY);
   c4_dots(r, 1);
 }
 
@@ -304,9 +404,9 @@ void co4_refresh_heute(int64_t now_ms) {
       if (day.v[s][i] > vmax) vmax = day.v[s][i];
   const int top = vmax > 0 ? static_cast<int>(vmax * 100.0f * 1.1f) + 1 : 100;
   lv_chart_set_range(c4_chart, LV_CHART_AXIS_PRIMARY_Y, 0, top);
-  const Co4Series map[3] = {kCo4Pv, kCo4Bezug, kCo4Einspeisung};
+  const Co4Series map[4] = {kCo4Pv, kCo4Bezug, kCo4Einspeisung, kCo4BatEntladen};
   int peak_i = -1;
-  for (int k = 0; k < 3; ++k) {
+  for (int k = 0; k < 4; ++k) {
     for (int i = 0; i < kCo4MaxPoints; ++i) {
       float x = i < day.n ? day.v[map[k]][i] : NAN;
       c4_ser[k]->y_points[i] = x == x ? static_cast<lv_coord_t>(x * 100.0f + 0.5f) : LV_CHART_POINT_NONE;
@@ -348,6 +448,11 @@ void co4_refresh_heute(int64_t now_ms) {
   lv_label_set_text(c4_arc_sub[0], ok ? "vom Verbrauch aus PV" : "");
   if (ok) lv_label_set_text_fmt(c4_arc_sub[1], "der PV selbst genutzt\n%s", e1);
   else lv_label_set_text(c4_arc_sub[1], "");
+  const Co4SiteData& sd = co4_d->site;
+  const Co4Totals* sb[1] = {&sd.days};
+  int si = co4_index(sd.days.t0_ms, sd.days.step_ms, sd.days.n, now_ms);
+  const int sf[1] = {si < 0 ? 0 : si}, st[1] = {si < 0 ? 0 : si + 1};
+  c4_site_show(&c4_st[0], sd, sb, sf, st);
 }
 
 void co4_refresh_verlauf(int64_t now_ms) {
@@ -402,6 +507,10 @@ void co4_refresh_verlauf(int64_t now_ms) {
   } else {
     lv_label_set_text(c4_ytot, "Noch keine Jahreswerte");
   }
+  const Co4SiteData& sd = co4_d->site;
+  const Co4Totals* sb[2] = {&sd.days, &sd.months};
+  const int sf[2] = {0, 0}, st[2] = {sd.days.n, sd.months.n};
+  c4_site_show(&c4_st[1], sd, sb, sf, st);
   (void)now_ms;
 }
 
@@ -695,7 +804,7 @@ void on_c4z_row(lv_event_t* e) {
   int i = static_cast<int>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e)));
   if (i < 0 || i >= co4_z->n) return;
   console_printf("Co4 zone %d chosen\n", i);  // id/name are not logged
-  co4_zone_choose(co4_z->z[i].id, co4_z->z[i].name);
+  co4_zone_choose(co4_z->z[i].id, co4_z->z[i].name, co4_z->z[i].site);
   open_co4set();
 }
 

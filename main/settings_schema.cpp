@@ -84,6 +84,7 @@ const KeySpec kSchema[] = {
     {"co4_rt", KeyType::Str, 1, 2047, kKeyInternal, 0},
     {"co4_zone", KeyType::Str, 1, 39, 0, 0},
     {"co4_zname", KeyType::Str, 1, 47, 0, 0},
+    {"co4_site", KeyType::Str, 1, 19, 0, 0},
 };
 
 bool printable(const char* v) {

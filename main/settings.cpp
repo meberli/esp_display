@@ -1037,15 +1037,35 @@ bool settings_load_co4_zone(char* id, size_t idn, char* name, size_t nn) {
   return ok;
 }
 
-bool settings_save_co4_zone(const char* id, const char* name) {
+bool settings_save_co4_zone(const char* id, const char* name, const char* site) {
   Tx tx;
   if (id == nullptr || id[0] == '\0') {
     tx.erase("co4_zone");
     tx.erase("co4_zname");
+    tx.erase("co4_site");
   } else {
     tx.str("co4_zone", id);
     if (name != nullptr && name[0] != '\0') tx.str("co4_zname", name);
     else tx.erase("co4_zname");
+    if (site != nullptr && site[0] != '\0') tx.str("co4_site", site);
+    else tx.erase("co4_site");
   }
+  return tx.commit();
+}
+
+bool settings_load_co4_site(char* site, size_t n) {
+  if (n > 0) site[0] = '\0';
+  nvs_handle_t h;
+  if (nvs_open(kNs, NVS_READONLY, &h) != ESP_OK) return false;
+  bool ok = get_str(h, "co4_site", site, n) && site[0] != '\0';
+  nvs_close(h);
+  if (!ok && n > 0) site[0] = '\0';
+  return ok;
+}
+
+bool settings_save_co4_site(const char* site) {
+  Tx tx;
+  if (site == nullptr || site[0] == '\0') tx.erase("co4_site");
+  else tx.str("co4_site", site);
   return tx.commit();
 }

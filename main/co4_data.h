@@ -9,7 +9,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
-enum Co4Series : uint8_t { kCo4Bezug, kCo4Einspeisung, kCo4Pv, kCo4Eigen, kCo4SeriesN };
+// Battery: kCo4BatLaden = charged into the battery, kCo4BatEntladen = delivered
+// by the battery. Shown only when the source delivers them (else NAN), never
+// added to Bezug / Eigenverbrauch.
+enum Co4Series : uint8_t { kCo4Bezug, kCo4Einspeisung, kCo4Pv, kCo4Eigen, kCo4BatLaden, kCo4BatEntladen, kCo4SeriesN };
 
 enum class Co4Res : uint8_t { Min15, Hour, Day, Month };
 
@@ -30,12 +33,27 @@ struct Co4Block {
 using Co4Curve = Co4Block<kCo4MaxPoints>;
 using Co4Totals = Co4Block<kCo4MaxBars>;
 
+// Whole ZEV site (zevGetSiteEnergyStats): Bezug = gridProduction, Einspeisung =
+// feedIn, Pv = pvProduction, Eigen = selfConsumption, battery from
+// batteryConsumption / batteryProduction. Fetched after the zone; a site
+// problem never hides the zone data.
+enum class Co4SiteState : uint8_t { None, Ok, Error };  // None: no site niid known (yet)
+struct Co4SiteData {
+  Co4SiteState state;
+  bool partial;   // partialSources: trailing blocks may still be null
+  char err[48];
+  Co4Curve day;   // today, 15 min power
+  Co4Totals days;
+  Co4Totals months;
+};
+
 struct Co4Data {
   bool example;        // fixture / example data: the UI shows "Beispieldaten"
   int64_t fetched_ms;  // when the source produced it
   Co4Curve day;        // today, 15 min power
   Co4Totals days;      // this month, energy per day
   Co4Totals months;    // this year, energy per month
+  Co4SiteData site;    // whole site
 };
 
 // Autarkie = Eigenverbrauch / (Eigenverbrauch + Bezug),
@@ -71,6 +89,7 @@ constexpr int kCo4MaxZones = 12;
 struct Co4Zone {
   char id[40];
   char name[48];
+  char site[20];  // niid of the ZEV site the zone belongs to, "" if unknown
 };
 struct Co4ZoneList {
   int n;

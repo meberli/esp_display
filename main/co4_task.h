@@ -34,6 +34,7 @@ struct Co4View {
   bool zone_set;
   char zone_id[40];
   char zone_name[48];
+  char site_niid[20];  // ZEV site of the zone ("" unknown), not secret but not shown
   Co4ZonesState zones_state;
   char zones_err[48];
   Co4Fetch fetch;
@@ -55,7 +56,7 @@ void co4_login();
 void co4_login_cancel();
 void co4_logout();
 void co4_zones_load();
-void co4_zone_choose(const char* id, const char* name);
+void co4_zone_choose(const char* id, const char* name, const char* site);
 void co4_refresh_now();
 void co4_set_mode(Co4Mode m);
 // One-line DIAG summary: never contains a token, only set/unset.

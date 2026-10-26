@@ -257,8 +257,11 @@ struct SettingsRequest {
 };
 
 // Co4 Energie. Offline refresh token: secret, NVS key "co4_rt", never exported,
-// logged or shown ("" erases). Zone: "co4_zone" (id) and "co4_zname" (name).
+// logged or shown ("" erases). Zone: "co4_zone" (id), "co4_zname" (name) and
+// "co4_site" (niid of the zone's ZEV site, saved with the zone or derived later).
 bool settings_load_co4_token(char* out, size_t n);
 bool settings_save_co4_token(const char* rt);
 bool settings_load_co4_zone(char* id, size_t idn, char* name, size_t nn);
-bool settings_save_co4_zone(const char* id, const char* name);  // id "" or nullptr erases both
+bool settings_save_co4_zone(const char* id, const char* name, const char* site);  // id "" or nullptr erases all
+bool settings_load_co4_site(char* site, size_t n);
+bool settings_save_co4_site(const char* site);  // "" erases
