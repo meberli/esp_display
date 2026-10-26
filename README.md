@@ -1,6 +1,6 @@
-# esp_display – Loxone-Wandpanel für Guition ESP32-4848S040C
+# esp_display – Loxone-Wandpanel für Guition ESP32-4848S040C und SenseCAP Indicator D1
 
-Native ESP-IDF-Firmware (6.1, LVGL 8.4) für das 4-Zoll-Touchpanel Guition ESP32-4848S040C (480×480) in der 86-mm-Unterputzdose. Das Panel steuert Licht, Storen und Schalter über einen lokalen Loxone Miniserver. Dazu zeigt es Wetter mit MeteoSchweiz-Warnungen, Webcams, ÖV-Abfahrten, Kalender, Abfuhrtermine und Erinnerungen an – im dunklen Glas-Look („Dark Glass“).
+Native ESP-IDF-Firmware (6.1, LVGL 8.4) für 4-Zoll-Touchpanels mit 480×480 Pixeln: das Guition ESP32-4848S040C in der 86-mm-Unterputzdose und den Seeed SenseCAP Indicator D1. Das Panel steuert Licht, Storen und Schalter über einen lokalen Loxone Miniserver. Dazu zeigt es Wetter mit MeteoSchweiz-Warnungen, Webcams, ÖV-Abfahrten, Kalender, Abfuhrtermine und Erinnerungen an – im dunklen Glas-Look („Dark Glass“, Standard) oder im Design „Co4“.
 
 ## Screenshots
 
@@ -17,6 +17,8 @@ Echte Screenshots vom Panel (über den Test-Harness aufgenommen). Netzwerk- und 
 ## Features
 
 - **Loxone-Steuerung** – Favoriten, Licht, Storen (Auf/Ab, Position) und Schalter aus `LoxAPP3.json`, live gelesen beim Öffnen einer Seite. HTTP mit Basic Auth gegen den lokalen Miniserver; Token-Auth ist als Schnittstelle (`LoxoneAuthorizer`) vorbereitet.
+- **Design wählbar** – „Dark Glass“ (Standard, Schrift Inter) oder „Co4“ (Petrol/Grün, Schrift Montserrat, Co4-Logo). Umschalten unter Einstellungen → Bildschirm → Design; nach der Bestätigung speichert das Panel die Wahl und startet neu.
+- **Loxone asynchron und offline** – die Struktur (`LoxAPP3.json`) lädt ein eigener Task (`lox`), die UI bleibt bedienbar. Die zuletzt geladene Struktur liegt als Cache in NVS (max. 4 KB); ist der Miniserver beim Start nicht erreichbar, zeigt das Panel die Kacheln aus dem Cache. Fehlversuche wiederholt es mit Backoff (10 s, 30 s, 2 min, dann alle 5 min).
 - **Relais** – das eingebaute Relais (GPIO40) als lokale Kachel unter „Schalter“, beim Boot aus.
 - **Wetter** – Open-Meteo (HTTPS, ohne Key): aktuell, Heute/Morgen, Tagesansicht mit Stundenverlauf. Ort frei wählbar (Geocoding).
 - **MeteoSchweiz** – Unwetterwarnungen (Badge auf Home, Details in der Regenansicht) und Niederschlagsprognose für die nächsten 2 Stunden in 10-min-Schritten (radarbasiert), über die PLZ (inoffizielle Schnittstelle, siehe unten).
@@ -29,9 +31,19 @@ Echte Screenshots vom Panel (über den Test-Harness aufgenommen). Netzwerk- und 
 - **OTA** – Update vom GitHub-Release (oder eigener URL) direkt am Panel, zwei OTA-Slots, Einstellungen bleiben erhalten.
 - **Backup** – Web-Wartung im Browser: Einstellungen als JSON sichern (wahlweise ohne Geheimnisse), wiederherstellen, Firmware hochladen.
 - **Status** – WLAN-Signal, IP, Laufzeit, RAM/PSRAM, Firmware-Version und Slot, NTP-Status.
-- **WLAN-Setup am Gerät** – Netzsuche mit Signalbalken und Passworteingabe über die Bildschirmtastatur. Ein neues Netz wird erst nach erfolgreicher Verbindung (IP erhalten) gespeichert; schlägt es fehl (z. B. Passwort falsch, Netz nicht gefunden), kehrt das Panel nach höchstens 20 s automatisch zum bisherigen Netz zurück. Ist beim Start kein WLAN eingerichtet oder das gespeicherte Netz 30 s lang nicht erreichbar, öffnet sich die WLAN-Auswahl; das gespeicherte Netz wird im Hintergrund weiter versucht, bleibt gespeichert, und die Auswahl schliesst sich, sobald es wieder da ist.
+- **WLAN-Setup am Gerät** – Netzsuche mit Signalbalken und Passworteingabe über die Bildschirmtastatur. Ein neues Netz wird erst nach erfolgreicher Verbindung (IP erhalten) gespeichert; schlägt es fehl (z. B. Passwort falsch, Netz nicht gefunden), kehrt das Panel nach höchstens 20 s automatisch zum bisherigen Netz zurück. Ist beim Start kein WLAN eingerichtet oder das gespeicherte Netz 30 s lang nicht erreichbar, öffnet sich die WLAN-Auswahl; das gespeicherte Netz wird im Hintergrund weiter versucht, bleibt gespeichert, und die Auswahl schliesst sich, sobald es wieder da ist. Die Netzsuche lässt sich mit „Abbrechen“ stoppen; nach einem Fehler verbindet „Nochmals versuchen“ neu mit den gespeicherten Zugangsdaten.
+- **CO4EN-Sender (ESP-NOW, Playground)** – unter Einstellungen → Playground ein Test-Sender für das CO4EN-Protokoll v0.7 (Pairing, z. B. whatwatt-Werte weiterleiten). ESP-NOW startet erst, wenn der Playground benutzt wird. Der Sender folgt dem Kanal des Gateways: er findet ihn über dessen BEACON (kurze WLAN-Trennung und Kanalsuche), bindet das WLAN per BSSID an einen Access Point desselben Netzes auf dem Gateway-Kanal und sucht mit Backoff neu, wenn der Gateway verloren geht. Gibt es auf dem Gateway-Kanal keinen Access Point, zeigt das Panel die Warnung „Kein Access Point auf Gateway-Kanal N“. Es werden keine Annahmen über Netzname oder Hersteller getroffen.
 
 ## Hardware
+
+Unterstützt werden zwei Boards; das Ziel wählt man beim Build (`PANEL_BOARD`, siehe unten). Ein OTA-Image wird nur installiert, wenn es zum laufenden Board passt (Projektname im Image: `loxone_panel` bzw. `loxone_panel_sensecap_d1`).
+
+| Board | Flash | Partitionstabelle | App-Slots (ota_0 / ota_1) |
+|---|---|---|---|
+| Guition ESP32-4848S040C | 16 MB | `partitions.csv` | 0x20000 / 0x620000, je 0x600000 (6 MB) |
+| SenseCAP Indicator D1 | 8 MB | `partitions_sensecap.csv` | 0x20000 / 0x380000, je 0x360000 (3,375 MB) |
+
+### Guition ESP32-4848S040C
 
 | | |
 |---|---|
@@ -68,6 +80,19 @@ Die Gehäuse-Etikette (SKU 10103003, Barcode C3713-1) taucht in Guitions Unterla
 - Pins übereinstimmend aus Arduino_GFX, ha5dzs, NorthernMan54, ESPHome und HomeDing (Links unter „Quellen“).
 
 </details>
+
+### SenseCAP Indicator D1
+
+| | |
+|---|---|
+| MCU | ESP32-S3, 8 MB Octal-PSRAM, 8 MB Flash (DIO) |
+| Display | 4" 480×480 RGB, Controller **ST7701S** (SPI-Init über PCA9535-Expander) |
+| Touch | **FT6336U** an I2C (GPIO39/40), Expander PCA9535 am selben Bus |
+| Backlight | GPIO45, LEDC-PWM |
+| Relais | keins (Kachel entfällt) |
+| RP2040 | Coprozessor, wird von dieser Firmware nicht angesprochen |
+
+Pins und Werte aus Seeeds BSP (`SenseCAP_Indicator_ESP32`), siehe `main/board_pins_sensecap_d1.h`.
 
 ## Architektur
 
@@ -116,12 +141,23 @@ Wichtige Dateien in `main/`:
 
 Voraussetzung: **ESP-IDF 6.1** (v6.x). LVGL 8.4 kommt aus der Component Registry (`main/idf_component.yml`, fixiert in `dependencies.lock`), ArduinoJson liegt unter `components/`. Kein Arduino-Core.
 
+Guition (Standard, Ausgabe `build/loxone_panel.bin`):
+
 ```powershell
 . $HOME\esp\v6.1\esp-idf\export.ps1      # Linux/macOS: . ~/esp/esp-idf/export.sh
 idf.py set-target esp32s3                 # einmalig
 idf.py build
 idf.py -p COM14 flash monitor             # Port anpassen!
 ```
+
+SenseCAP Indicator D1 (eigenes Build-Verzeichnis, `sdkconfig.defaults.sensecap` wird angehängt, Ausgabe `build-d1/loxone_panel_sensecap_d1.bin`):
+
+```powershell
+idf.py -B build-d1 -DSDKCONFIG=build-d1/sdkconfig -DPANEL_BOARD=sensecap_d1 set-target esp32s3
+idf.py -B build-d1 -DSDKCONFIG=build-d1/sdkconfig -DPANEL_BOARD=sensecap_d1 build
+```
+
+Die Apps sind signiert (Secure Boot v2 App-Signatur, RSA-3072). Lokal braucht der Build einen Schlüssel unter `secure/signing_key.pem` (gitignored); für reine Compile-Tests genügt ein Wegwerf-Schlüssel (`espsecure generate-signing-key --version 2 --scheme rsa3072 secure/signing_key.pem`). Ein so gebautes Image wird von Panels mit Release-Firmware per OTA nicht akzeptiert. Prüfen: `espsecure verify-signature --version 2 --keyfile tools/esp_display_signing_pub.pem <bin>`.
 
 > **Immer den Port explizit mit `-p` angeben.** Ohne `-p` sucht `idf.py` selbst und erwischt unter Umständen ein anderes Gerät (z. B. einen 3D-Drucker).
 
@@ -148,7 +184,7 @@ cp main/panel_config.example.h main/panel_config.h
 ```c
 #define WIFI_SSID "your-ssid"
 #define WIFI_PASSWORD "your-wifi-password"
-#define LOXONE_HOST "192.168.1.77"   // nur Host/IP, ohne http:// und Pfad
+#define LOXONE_HOST "miniserver-ip"  // nur Host/IP, ohne http:// und Pfad
 #define LOXONE_PORT 80
 #define LOXONE_USER "your-user"
 #define LOXONE_PASSWORD "your-password"
@@ -157,7 +193,7 @@ cp main/panel_config.example.h main/panel_config.h
 
 Beim ersten Start einer lokal gebauten Firmware werden diese Werte nach NVS übernommen (`settings_seed_from_build`). Danach lebt alles in NVS – auch über OTA-Updates mit Release-Images, die keine Geheimnisse enthalten. Ohne Konfiguration zeigt das Panel „nicht konfiguriert“ statt eines falschen Online-Zustands. Projektoptionen: `idf.py menuconfig` → „Loxone panel“.
 
-Partitionen (`partitions.csv`): NVS, PHY, zwei OTA-App-Slots, `coredump` (Auswertung mit `idf.py coredump-info`).
+Partitionen (`partitions.csv` bzw. `partitions_sensecap.csv`): NVS, otadata, PHY, zwei OTA-App-Slots, `coredump` (Auswertung mit `idf.py coredump-info`).
 
 ## Einstellungen am Panel
 
@@ -165,12 +201,13 @@ Partitionen (`partitions.csv`): NVS, PHY, zwei OTA-App-Slots, `coredump` (Auswer
 |---|---|
 | WLAN | Netzsuche, Passwort, Fallback auf alte Zugangsdaten bei Fehler |
 | Wetter-Ort | Suche über Open-Meteo-Geocoding (Standard Buchs SG) |
-| Bildschirm | Timeout, Bildschirmschoner (Schwarz / Digital / Analog), Hinweis an/aus |
+| Bildschirm | Timeout, Bildschirmschoner (Schwarz / Digital / Analog), Hinweis an/aus, Design (Dark Glass / Co4, mit Neustart) |
 | Uhrzeit | NTP-Server (Presets oder eigener), Zeitzone |
 | Kameras | Windy-Webcams hinzufügen/löschen, eigener API-Key (maskiert) |
 | ÖV | Haltestelle suchen |
 | Kalender | iCal-URL (Familie), Abfuhrkalender |
 | Erinnerungen | an/aus je Quelle, Vorlaufzeit |
+| Playground | CO4EN-Test-Sender (ESP-NOW): Pairing, Status, whatwatt-Weiterleitung |
 | Wartung | Status, Web-Wartung, OTA-Update, Update-URL |
 
 Alle Werte liegen in NVS (Namespace `panel`). Geheimnisse (WLAN-Passwort, Miniserver-Passwort, API-Key, iCal-URL) werden am Display maskiert und im Log nie ausgegeben.
@@ -193,7 +230,10 @@ Releases entstehen per Tag-Workflow (`.github/workflows/release.yml`):
 1. `version.txt` erhöhen (setzt `PROJECT_VER`), committen.
 2. Tag pushen: `git tag v0.7.2 && git push origin v0.7.2`.
 3. GitHub Actions baut im Container `espressif/idf:v6.1` aus einem **sauberen Checkout** – ohne `sdkconfig.defaults.local` und ohne `panel_config.h`. Der Workflow bricht ab, falls eine dieser Dateien im Repo liegt, und prüft, dass Windy-Key und iCal-URL im `sdkconfig` leer sind.
-4. Das Release erhält `loxone_panel.bin` und `loxone_panel.bin.sha256`.
+4. Beide Apps werden mit dem Secret `APP_SIGNING_KEY` signiert, die Signatur geprüft und `tools/check_secrets.py` laufen gelassen.
+5. Das Release erhält `loxone_panel.bin`, `loxone_panel_sensecap_d1.bin` und je eine `.sha256`.
+
+Releases entstehen **nur** über einen `v*`-Tag; Pushes und Pull Requests laufen nur durch CI (Host-Tests und Build mit Wegwerf-Schlüssel).
 
 Zusätzlicher Geheimnis-Check gegen das fertige Binary (gibt nur Namen und Längen aus, nie Werte):
 
@@ -201,7 +241,18 @@ Zusätzlicher Geheimnis-Check gegen das fertige Binary (gibt nur Namen und Läng
 python tools/check_secrets.py loxone_panel.bin   # erwartet: 0 secret value(s) found
 ```
 
-Das Panel lädt standardmäßig `https://github.com/meberli/esp_display/releases/latest/download/loxone_panel.bin` (änderbar unter Wartung → Update-URL) oder nimmt ein Upload über die Web-Wartung an.
+Das Panel lädt standardmässig `https://github.com/meberli/esp_display/releases/latest/download/loxone_panel.bin` (änderbar unter Wartung → Update-URL) oder nimmt ein Upload über die Web-Wartung an. Auf dem SenseCAP D1 die Update-URL auf `…/loxone_panel_sensecap_d1.bin` stellen – ein Image für das andere Board wird abgelehnt.
+
+### Test-Image (manuell)
+
+Für Tests ohne Release gibt es den Workflow „Test image“ (`.github/workflows/test-image.yml`):
+
+1. GitHub → **Actions** → **Test image** → **Run workflow**.
+2. `ref` (Branch oder Commit, Standard `cursor/esp-idf-migration`) und `target` (`sensecap_d1`, `guition` oder `both`) wählen.
+3. Der Build läuft wie beim Release (sauberer Checkout, signiert mit `APP_SIGNING_KEY`, Signatur- und Geheimnis-Check). Die Version heisst `<version.txt>-test.<kurz-sha>`; sie gilt als älter als das gleichnamige Release, das nächste Release wird also wieder als Update angeboten.
+4. Artefakt `test-image-<target>-<version>` (7 Tage aufbewahrt): nur die signierte App-`.bin` je Board, `sha256.txt` und `info.txt` (Ref, Commit, Version, Board, App-Slot-Offsets). Kein Bootloader, keine Partitionstabelle, kein otadata – das Image ist für OTA bzw. Upload über die Web-Wartung gedacht.
+
+Es entsteht weder Tag noch Release.
 
 ## Test-Harness & Tools
 
@@ -230,11 +281,11 @@ idf.py -B build-test -DSDKCONFIG="build-test/sdkconfig" -p COM14 flash
 | `energy_test.py COM14 <IP>` | Energie (whatwatt Go): Live-Daten, Strom/Wasser-Seiten, Home-Kachel, veraltet-Erkennung, Screenshots `v12_*` |
 | `serial_log.py` | serielles Log |
 | `check_secrets.py` | Binary auf Geheimnisse prüfen |
-| `test_ical.cpp`, `test_weather_derive.cpp`, `test_energy.cpp` | Host-Unit-Tests (`g++ -std=c++17 -I main …`, siehe CI) |
+| `test_*.cpp` (u. a. iCal, Energie, OTA-Version/-Board, Loxone-Cache, Retry-Logik, CO4EN-Parser) | Host-Unit-Tests (`g++ -std=c++17 -I main …`, siehe CI) |
 
 Beispiel: `python tools/diag_log.py --port COM14 --noreset --secs 120`.
 
-Die normale Firmware hat zusätzlich Diagnosebefehle auf der Konsole: `DIAGTAP`, `DIAGSWIPE`, `DIAGRAW` (Touch auf Treiberebene einspeisen), `DIAGGT` (GT911-Register), `DIAGSTATS` (CPU-Last je Task).
+Die normale Firmware hat zusätzlich Diagnosebefehle auf der Konsole (115200 Baud). Nur lesend, auch im Release: `DIAGHEALTH`, `DIAGENERGY`, `DIAGSTATS` (CPU-Last je Task), `DIAGSTACK` (Stack-Reserve), `DIAGHW`, `DIAGFB`, `DIAGGT` (GT911-Register), `DIAGCO4EN` (CO4EN-Sender: Zustand, Kanal, Gateway-Beacon, Pinning) und `SCANWIFI` (alle Access Points des verbundenen WLANs mit Kanal, RSSI und Auth, dazu der verbundene AP und der Gateway-Kanal). Nur mit `CONFIG_PANEL_DIAG_INJECT`: `DIAGTAP`, `DIAGSWIPE`, `DIAGRAW` (Touch auf Treiberebene einspeisen).
 
 ## Energie (whatwatt Go)
 
@@ -251,7 +302,7 @@ Das Panel fragt `http://<Adresse>/api/v1/report` des whatwatt Go im LAN ab (Eins
 - **Windy Webcams** – <https://api.windy.com/webcams>, eigener API-Key nötig (Free Tier). Gemäss Windy-Bedingungen: Link zur Webcam-Seite und „Webcams provided by windy.com“ werden angezeigt, Bild-URLs nicht gespeichert, Bilder nicht hochskaliert.
 - **transport.opendata.ch** – ÖV-Abfahrten, <https://transport.opendata.ch>, Fair-Use (Abfragen sparsam halten).
 - **Loxone** – lokaler Miniserver; nicht mit Loxone Electronics GmbH verbunden.
-- **Schriften & Icons** – Inter 4.0 (SIL OFL 1.1), Material Symbols Rounded (Apache License 2.0).
+- **Schriften & Icons** – Inter 4.0 (SIL Open Font License 1.1, Design „Dark Glass“), Montserrat (SIL Open Font License 1.1, Design „Co4“, Lizenztext `main/fonts/OFL-Montserrat.txt`), Material Symbols Rounded (Apache License 2.0).
 
 ## Quellen (Hardware)
 
