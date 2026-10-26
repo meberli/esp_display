@@ -262,12 +262,14 @@ void scan_wifi() {
     return;
   }
   int n = 0;
+  uint8_t gw_ch = play_gw_chan();  // 0 when not paired (no marks)
+  if (gw_ch != 0) console_printf("SCANWIFI gw_ch=%u\n", gw_ch);
   for (int i = 0; i < num; ++i) {
     if (strcmp(reinterpret_cast<const char*>(recs[i].ssid), reinterpret_cast<const char*>(cur.ssid)) != 0) continue;
     const uint8_t* b = recs[i].bssid;
-    console_printf("SCANWIFI ap bssid=%02X:%02X:%02X:%02X:%02X:%02X ch=%u rssi=%d auth=%d%s\n", b[0], b[1], b[2], b[3], b[4],
+    console_printf("SCANWIFI ap bssid=%02X:%02X:%02X:%02X:%02X:%02X ch=%u rssi=%d auth=%d%s%s\n", b[0], b[1], b[2], b[3], b[4],
                    b[5], (unsigned)recs[i].primary, recs[i].rssi, (int)recs[i].authmode,
-                   memcmp(b, cur.bssid, 6) == 0 ? " connected" : "");
+                   memcmp(b, cur.bssid, 6) == 0 ? " connected" : "", gw_ch != 0 && recs[i].primary == gw_ch ? " gw_ch" : "");
     ++n;
   }
   console_printf("SCANWIFI done %d ap\n", n);
