@@ -2,6 +2,7 @@
 #include "esp_heap_caps.h"
 #include "net.h"
 #include "panel_ui.h"
+#include "retry_logic.h"
 #include "strings_de.h"
 #include "waste_window.h"
 
@@ -216,6 +217,10 @@ lv_obj_t* msg_wifi_btn = nullptr;
 WifiAp ui_aps[kMaxAps];
 int ui_ap_n = 0;
 bool wl_scanning = false;
+ScanGen wl_gen;              // scan generation: "Abbrechen" makes a late result stale
+lv_obj_t* wl_left = nullptr;   // "Abbrechen"
+lv_obj_t* wl_right = nullptr;  // "Nochmals versuchen" (firmware opened the list) / "Neu suchen"
+void wifi_list_leave();        // panel_ui_settings.inc
 GeoPlace ui_places[kMaxPlaces];
 int ui_place_n = 0;
 bool loc_searching = false;
@@ -856,7 +861,10 @@ static void ui_init_impl() {
   lv_obj_add_event_cb(retry_btn, on_retry, LV_EVENT_CLICKED, nullptr);
   watch(retry_btn);
   lv_obj_t* retry_label = make_label(retry_btn, &font_inter_20, lv_color_hex(kText));
-  lv_label_set_text(retry_label, "Try again");
+  lv_label_set_text(retry_label, str::kWifiRetry);
+  lv_obj_set_width(retry_label, 172);
+  lv_label_set_long_mode(retry_label, LV_LABEL_LONG_WRAP);
+  lv_obj_set_style_text_align(retry_label, LV_TEXT_ALIGN_CENTER, 0);
   lv_obj_center(retry_label);
   hide(message);
   hide(home_root);

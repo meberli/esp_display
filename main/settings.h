@@ -240,6 +240,7 @@ struct SettingsRequest {
     SetStation,     // station_idx + station -> NVS
     SetText,        // text_which + text ("" = default) -> NVS
   } kind;
+  uint32_t scan_gen;  // Scan: generation (UI cancel / stale-result check)
   WifiCreds creds;
   char query[48];
   Location location;

@@ -57,7 +57,9 @@ void reconnect() {
   printf("Wi-Fi retry in %d s\n", s);
 }
 // Bit 0: got IP; bit 1: a disconnect happened (waiters re-check the counters).
-constexpr EventBits_t kBitIp = 1, kBitDisc = 2;
+constexpr EventBits_t kBitIp = 1, kBitDisc = 2, kBitScan = 4;  // bit 2: scan done
+// Highest WLAN-scan generation the UI cancelled ("Abbrechen"); read by the net task.
+std::atomic<uint32_t> g_scan_cancel{0};
 EventGroupHandle_t wifi_events() {
   static StaticEventGroup_t buf;
   static EventGroupHandle_t g = xEventGroupCreateStatic(&buf);
@@ -71,7 +73,9 @@ bool is_auth_reason(int r) {
 }
 
 void on_event(void*, esp_event_base_t base, int32_t id, void* data) {
-  if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
+  if (base == WIFI_EVENT && id == WIFI_EVENT_SCAN_DONE) {
+    xEventGroupSetBits(wifi_events(), kBitScan);
+  } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
     if (g_ssid[0] != '\0' && !g_hold) esp_wifi_connect();  // empty SSID: station only for scanning
   } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
     if (g_connected) diag_wifi_disconnect();
@@ -272,7 +276,16 @@ HttpGetResult http_get_raw(const char* url, const char* user, const char* passwo
   }
   size_t total = 0;
   bool overflow = false;
+  // timeout_ms bounds connect and each read; this bounds the whole body (a peer
+  // that trickles data would otherwise restart the read timeout forever).
+  const int64_t deadline = esp_timer_get_time() + static_cast<int64_t>(timeout_ms) * 6000;
   for (;;) {
+    if (timeout_ms > 0 && esp_timer_get_time() > deadline) {
+      snprintf(r.error, sizeof(r.error), "body timeout");
+      esp_http_client_close(c);
+      esp_http_client_cleanup(c);
+      return r;
+    }
     if (total >= cap) {
       char dummy;
       if (esp_http_client_read(c, &dummy, 1) > 0) overflow = true;
@@ -305,7 +318,33 @@ HttpGetResult http_get_raw(const char* url, const char* user, const char* passwo
 
 const char* wifi_ssid() { return g_ssid; }
 
-int wifi_scan(WifiAp* out, int cap) {
+void wifi_scan_cancel(uint32_t gen) {
+  uint32_t c = g_scan_cancel.load();
+  while (gen > c && !g_scan_cancel.compare_exchange_weak(c, gen)) {
+  }
+}
+
+namespace {
+bool scan_cancelled(uint32_t gen) { return gen != 0 && g_scan_cancel.load() >= gen; }
+
+// One non-blocking scan; waits for SCAN_DONE in 100 ms slices so a cancel stops it.
+esp_err_t scan_once(const wifi_scan_config_t& sc, uint32_t gen) {
+  xEventGroupClearBits(wifi_events(), kBitScan);
+  esp_err_t err = esp_wifi_scan_start(&sc, false);
+  if (err != ESP_OK) return err;
+  for (int t = 0; t < 150; ++t) {  // 15 s upper bound (a full active scan takes ~2-4 s)
+    if (xEventGroupWaitBits(wifi_events(), kBitScan, pdTRUE, pdFALSE, pdMS_TO_TICKS(100)) & kBitScan) return ESP_OK;
+    if (scan_cancelled(gen)) break;
+  }
+  esp_wifi_scan_stop();  // also raises SCAN_DONE
+  xEventGroupWaitBits(wifi_events(), kBitScan, pdTRUE, pdFALSE, pdMS_TO_TICKS(500));
+  esp_wifi_clear_ap_list();
+  return scan_cancelled(gen) ? ESP_ERR_INVALID_STATE : ESP_ERR_TIMEOUT;
+}
+}  // namespace
+
+int wifi_scan(WifiAp* out, int cap, uint32_t gen) {
+  if (scan_cancelled(gen)) return -1;
   wifi_scan_config_t sc = {};
   sc.show_hidden = false;
   // A scan fails while the station is (re)connecting, e.g. to an absent saved
@@ -321,17 +360,21 @@ int wifi_scan(WifiAp* out, int cap) {
   esp_err_t err = ESP_FAIL;
   uint16_t num = 0;
   EXT_RAM_BSS_ATTR static wifi_ap_record_t recs[32];
-  for (int i = 0; i < 5; ++i) {
-    err = esp_wifi_scan_start(&sc, true);
+  for (int i = 0; i < 5 && !scan_cancelled(gen); ++i) {
+    err = scan_once(sc, gen);
     num = 32;
     if (err == ESP_OK) err = esp_wifi_scan_get_ap_records(&num, recs);
     if (err == ESP_OK && num > 0) break;
     printf("Wi-Fi scan attempt %d: %s, %u networks\n", i + 1, esp_err_to_name(err), static_cast<unsigned>(num));
-    vTaskDelay(pdMS_TO_TICKS(700));
+    for (int w = 0; w < 7 && !scan_cancelled(gen); ++w) vTaskDelay(pdMS_TO_TICKS(100));
   }
   if (paused) {
     g_scanning = false;
-    if (g_ssid[0] != '\0') esp_wifi_connect();
+    if (g_ssid[0] != '\0' && !g_hold) esp_wifi_connect();
+  }
+  if (scan_cancelled(gen)) {
+    printf("Wi-Fi scan %lu cancelled\n", static_cast<unsigned long>(gen));
+    return -1;
   }
   if (err != ESP_OK) return 0;
   int n = 0;

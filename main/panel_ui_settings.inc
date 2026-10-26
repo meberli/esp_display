@@ -619,7 +619,53 @@ void open_wifi_list() {
   lv_label_set_text(wl_status, "Suche Netzwerke ...");
   SettingsRequest r = {};
   r.kind = SettingsRequest::Scan;
+  r.scan_gen = wl_gen.start();
   queue_settings(r);
+  // Opened by the firmware (saved network unreachable): offer the way back.
+  lv_label_set_text(lv_obj_get_child(wl_right, 0), wifi_setup_note[0] != '\0' ? str::kWifiRetry : str::kWifiRescan);
+}
+
+// Stop a running scan: the net task stops the driver scan (core 0), a late
+// result is dropped by the generation check in ui_wifi_scan_done.
+void wifi_scan_abort() {
+  if (!wl_scanning) return;
+  wifi_scan_cancel(wl_gen.cur);
+  wl_gen.cancel();
+  wl_scanning = false;
+  if (settings_pending && settings_req.kind == SettingsRequest::Scan) settings_pending = false;  // not started yet
+  lv_label_set_text(wl_status, str::kWifiScanCancelled);
+}
+
+// "Abbrechen" / swipe back. Opened by the firmware: back to the error screen
+// (saved credentials untouched, retried in the background; "Nochmals versuchen"
+// and "WLAN" there). Otherwise back to the settings.
+void wifi_list_leave() {
+  wifi_scan_abort();
+  if (wifi_setup_note[0] != '\0') {
+    nav = Nav::Home;
+    ui_show_message(str::kWifiFailedTitle, wifi_setup_note, true);
+    return;
+  }
+  settings_back();
+}
+
+void on_wl_cancel(lv_event_t*) {
+  if (gesture_consumed) return;
+  wifi_list_leave();
+}
+
+void on_wl_right(lv_event_t*) {
+  if (gesture_consumed) return;
+  if (wifi_setup_note[0] == '\0') {
+    wifi_scan_abort();
+    open_wifi_list();
+    return;
+  }
+  // "Nochmals versuchen": reconnect with the saved credentials (main: ui_take_retry).
+  wifi_scan_abort();
+  nav = Nav::Home;
+  ui_show_message(str::kConnectingTitle, str::kConnectingBody, false);
+  retry_pending = true;
 }
 
 void on_wifi_row(lv_event_t* e) {
@@ -966,7 +1012,9 @@ void build_settings_screens(lv_obj_t* screen) {
   lv_obj_set_pos(wl_status, 24, 48);
   lv_obj_set_width(wl_status, 432);
   lv_label_set_long_mode(wl_status, LV_LABEL_LONG_DOT);
-  wl_list = make_list(wl_root, 76, 380);
+  wl_list = make_list(wl_root, 76, 316);
+  wl_left = make_choice(wl_root, kMargin, 400, 214, 56, str::kWifiCancel, on_wl_cancel, 0, "wl:cancel");
+  wl_right = make_choice(wl_root, kMargin + 226, 400, 214, 56, str::kWifiRescan, on_wl_right, 0, "wl:retry");
 
   wp_root = make_screen_root(screen, "WLAN");
   wp_title = lv_obj_get_child(wp_root, 0);

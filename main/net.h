@@ -19,9 +19,12 @@ int wifi_last_reason();  // last WIFI_REASON_* of a disconnect
 // Blocks (event group, no polling) until connected, a disconnect event arrives
 // or ms elapse. Returns wifi_connected(). Network task only.
 bool wifi_wait(uint32_t ms);
-// Blocking scan (call from the network task). Returns the number of APs,
-// strongest first, duplicates merged.
-int wifi_scan(WifiAp* out, int cap);
+// Scan (call from the network task). Returns the number of APs, strongest
+// first, duplicates merged; -1 if generation gen was cancelled meanwhile.
+int wifi_scan(WifiAp* out, int cap, uint32_t gen = 0);
+// UI ("Abbrechen"): cancel scan generation gen (and older). Only stores an atomic;
+// the net task stops the driver scan itself.
+void wifi_scan_cancel(uint32_t gen);
 // SSID of the configured network.
 const char* wifi_ssid();
 

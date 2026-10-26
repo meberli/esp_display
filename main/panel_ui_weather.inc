@@ -625,7 +625,11 @@ void swipe_page(int dir) {
     if (dir < 0) settings_back();
     return;
   }
-  if (nav == Nav::WifiList || nav == Nav::WifiPass || nav == Nav::Location || nav == Nav::Display ||
+  if (nav == Nav::WifiList) {
+    if (dir < 0) wifi_list_leave();
+    return;
+  }
+  if (nav == Nav::WifiPass || nav == Nav::Location || nav == Nav::Display ||
       nav == Nav::Time) {
     if (dir < 0) settings_back();
     return;

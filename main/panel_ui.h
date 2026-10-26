@@ -87,7 +87,7 @@ void ui_set_week(const WeatherDetailDay* days, int count);
 
 // --- Settings (Einstellungen) ---
 bool ui_take_settings(SettingsRequest* out);
-void ui_wifi_scan_done(const WifiAp* aps, int n);
+void ui_wifi_scan_done(const WifiAp* aps, int n, uint32_t gen);
 // current = SSID the panel uses now (the new one, or the old one after a failure).
 void ui_wifi_connect_done(bool ok, const char* ssid, const char* current, int status, const char* old_ssid,
                           bool reverted);

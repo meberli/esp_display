@@ -11,7 +11,11 @@ bool ui_take_settings(SettingsRequest* out) {
   return true;
 }
 
-void ui_wifi_scan_done(const WifiAp* aps, int n) {
+void ui_wifi_scan_done(const WifiAp* aps, int n, uint32_t gen) {
+  if (!wl_gen.accept(gen)) {
+    console_printf("UI: Wi-Fi scan %lu result dropped (cancelled or stale)\n", static_cast<unsigned long>(gen));
+    return;
+  }
   ui_ap_n = n < 0 ? 0 : (n > kMaxAps ? kMaxAps : n);
   memcpy(ui_aps, aps, sizeof(WifiAp) * ui_ap_n);
   wl_scanning = false;
