@@ -137,6 +137,8 @@ lv_point_t wx_curve_pts[kWxSlots];
 lv_obj_t* wx_prev_hint = nullptr;
 lv_obj_t* wx_next_hint = nullptr;
 lv_obj_t* wx_empty = nullptr;
+lv_obj_t* wx_chip[4] = {nullptr, nullptr, nullptr, nullptr};
+lv_obj_t* wx_timeline = nullptr;
 WeatherDetailDay* wx_week = nullptr;  // PSRAM copy
 int wx_count = 0;
 int wx_day = 0;
@@ -382,6 +384,10 @@ lv_coord_t gesture_y0 = 0;
 
 lv_obj_t* make_label(lv_obj_t* parent, const lv_font_t* font, lv_color_t color) {
   lv_obj_t* label = lv_label_create(parent);
+  // lv_label_create() starts with the text "Text". Labels that are only filled
+  // once data arrives (offline, no forecast yet) would show it, and an icon or
+  // digits-only font draws its missing glyphs as placeholder boxes. Start empty.
+  lv_label_set_text_static(label, "");
   lv_obj_set_style_text_font(label, font, 0);
   lv_obj_set_style_text_color(label, color, 0);
   lv_obj_clear_flag(label, LV_OBJ_FLAG_CLICKABLE);

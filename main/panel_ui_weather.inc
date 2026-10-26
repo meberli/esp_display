@@ -1014,12 +1014,18 @@ void build_weather_screen(lv_obj_t* screen) {
   wx_cond = wx_label(wx_root, &font_inter_16, kTextDim, 114, 100);
   lv_obj_set_width(wx_cond, 344);
   lv_label_set_long_mode(wx_cond, LV_LABEL_LONG_DOT);
-  wx_empty = wx_label(wx_root, &font_inter_20, kTextDim, 114, 64);
+  // Empty state (no forecast yet / offline): one centred message, data widgets hidden.
+  wx_empty = make_label(wx_root, &font_inter_20, lv_color_hex(kTextDim));
+  lv_obj_set_width(wx_empty, kScreen - 80);
+  lv_obj_set_style_text_align(wx_empty, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_align(wx_empty, LV_ALIGN_CENTER, 0, -10);
+  hide(wx_empty);
 
   // Info chips: rain, wind, sunrise, sunset.
   static const char* kChipIcon[4] = {ICON_DROP, ICON_AIR, ICON_SUNRISE, ICON_SUNSET};
   for (int i = 0; i < 4; ++i) {
     lv_obj_t* chip = lv_obj_create(wx_root);
+    wx_chip[i] = chip;
     lv_obj_set_pos(chip, 20 + i * 112, 136);
     lv_obj_set_size(chip, 104, 52);
     style_glass(chip, 14);
@@ -1030,6 +1036,7 @@ void build_weather_screen(lv_obj_t* screen) {
   }
 
   lv_obj_t* tl = lv_obj_create(wx_root);
+  wx_timeline = tl;
   lv_obj_set_pos(tl, 20, 200);
   lv_obj_set_size(tl, kScreen - 40, 232);
   style_glass(tl, 22);
@@ -1082,6 +1089,14 @@ void build_weather_screen(lv_obj_t* screen) {
   hide(wx_root);
 }
 
+// Day view data widgets (header icon/temperature/condition, chips, 3-hour timeline).
+void wx_show_data(bool on) {
+  lv_obj_t* objs[] = {wx_icon, wx_temp, wx_cond, wx_chip[0], wx_chip[1], wx_chip[2], wx_chip[3], wx_timeline};
+  for (lv_obj_t* o : objs) {
+    if (on) show(o); else hide(o);
+  }
+}
+
 void refresh_weather_day() {
   if (wx_root == nullptr) {
     return;
@@ -1089,13 +1104,15 @@ void refresh_weather_day() {
   if (wx_count <= 0 || wx_week == nullptr) {
     lv_label_set_text(wx_title, "Wetter");
     lv_label_set_text(wx_page, "");
-    lv_label_set_text(wx_empty, "Noch keine Vorhersage");
+    lv_label_set_text(wx_empty, wifi_connected() ? "Noch keine Vorhersage" : "Keine Verbindung");
+    wx_show_data(false);
     show(wx_empty);
     hide(wx_prev_hint);
     hide(wx_next_hint);
     return;
   }
   hide(wx_empty);
+  wx_show_data(true);
   if (wx_day >= wx_count) wx_day = wx_count - 1;
   const WeatherDetailDay& d = wx_week[wx_day];
   int y = atoi(d.date), m = atoi(d.date + 5), dd = atoi(d.date + 8);
