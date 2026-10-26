@@ -30,6 +30,15 @@ constexpr const char* kStatusConnecting = "WLAN wird verbunden";
 constexpr const char* kStatusConnected = "WLAN verbunden";
 constexpr const char* kStatusDisconnected = "WLAN getrennt";
 constexpr const char* kStatusRelayOff = "Relais aus";
+constexpr const char* kStatusLoxCached = "Loxone offline – gespeicherte Steuerung";
+constexpr const char* kStatusLoxOffline = "Loxone nicht erreichbar – neuer Versuch läuft";
+constexpr const char* kStatusLoxOnline = "Loxone verbunden";
+constexpr const char* kLoxOfflineCmd = "Loxone offline";
+constexpr const char* kWifiCancel = "Abbrechen";
+constexpr const char* kWifiRetry = "Nochmals versuchen";
+constexpr const char* kWifiRescan = "Neu suchen";
+constexpr const char* kWifiScanCancelled = "Suche abgebrochen";
+constexpr const char* kWifiFailedTitle = "WLAN nicht erreichbar";
 constexpr const char* kStatusNoTouch = "Touch-Controller nicht gefunden";
 
 // Loxone request errors (shown on a tile after a failed command)

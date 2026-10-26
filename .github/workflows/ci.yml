@@ -21,6 +21,8 @@ jobs:
           set -e
           g++ -std=c++17 -Wall -I main tools/test_ical.cpp main/ical.cpp -o /tmp/ti && TZ=Europe/Zurich /tmp/ti
           g++ -std=c++17 -Wall -I main -DOTA_VER_HOST tools/test_ota_ver.cpp -o /tmp/to && /tmp/to
+          g++ -std=c++17 -Wall -I main tools/test_retry_logic.cpp -o /tmp/trl && /tmp/trl
+          g++ -std=c++17 -Wall -I main -DLOX_CACHE_HOST tools/test_lox_cache.cpp main/loxone_cache.cpp -o /tmp/tlc && /tmp/tlc
           g++ -std=c++17 -Wall -I main tools/test_ota_board.cpp main/ota_board.cpp -o /tmp/tob && /tmp/tob
           g++ -std=c++17 -Wall -Itools/host_stub -Imain tools/test_settings_schema.cpp main/settings_schema.cpp -o /tmp/ts && /tmp/ts
           g++ -std=c++17 -Wall -I main -I components/ArduinoJson/src tools/test_waste_api.cpp main/waste_api.cpp main/ical.cpp -o /tmp/twa && TZ=Europe/Zurich /tmp/twa
