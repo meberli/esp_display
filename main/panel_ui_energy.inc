@@ -673,7 +673,11 @@ void energy_enter(int page) {
 
 void energy_swipe(int dir) {
   int next = en_page + dir;
-  if (next < 0 || next > 2) return;
+  if (next > 2) {
+    co4_enter(0);  // after Wasser: Co4 Energie
+    return;
+  }
+  if (next < 0) return;
   energy_enter(next);
 }
 

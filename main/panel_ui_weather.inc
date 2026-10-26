@@ -596,8 +596,16 @@ void swipe_page(int dir) {
     energy_swipe(dir);
     return;
   }
-  if (nav == Nav::EnSet) {
+  if (nav == Nav::EnSet || nav == Nav::Co4Set) {
     if (dir < 0) settings_back();
+    return;
+  }
+  if (nav == Nav::Co4) {
+    co4_swipe(dir);
+    return;
+  }
+  if (nav == Nav::Co4Login || nav == Nav::Co4Zones) {
+    if (dir < 0) open_co4set();
     return;
   }
   if (nav == Nav::Rain) {

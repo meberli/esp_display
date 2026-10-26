@@ -141,6 +141,7 @@ void info_hide_all() {
   hide(maint_root);
   hide(remset_root);
   play_hide();
+  co4_hide_all();
 }
 
 void info_hide_views() {
@@ -150,6 +151,7 @@ void info_hide_views() {
   hide(en_root[0]);
   hide(en_root[1]);
   hide(en_root[2]);
+  co4_hide_views();
 }
 
 void enter_view(Nav n, lv_obj_t* root) {
@@ -1323,6 +1325,7 @@ void info_tick() {
   rem_tick(false);
   if (scr_off) return;
   if (nav == Nav::Maint) maint_refresh();
+  co4_tick();
   if (nav == Nav::Energy) energy_refresh();
   if (nav == Nav::EnSet && lv_tick_get() % 5000 < 1000) enset_refresh();
   if (nav == Nav::Home) energy_chip_refresh();
@@ -1360,6 +1363,19 @@ bool info_describe(char* out, size_t n) {
     case Nav::EnSet:
       snprintf(out, n, "enset");
       return true;
+    case Nav::Co4:
+    case Nav::Co4Set:
+    case Nav::Co4Login:
+    case Nav::Co4Zones: {
+      Co4View v;
+      co4_get(&v);
+      static const char* const kView[4] = {"co4", "co4set", "co4login", "co4zones"};
+      snprintf(out, n, "%s page=%d state=%d token=%s zone=%s mode=%d fetch=%d data=%d zones=%d",
+               kView[static_cast<int>(nav) - static_cast<int>(Nav::Co4)], co4_page, static_cast<int>(v.state),
+               v.token_set ? "set" : "unset", v.zone_set ? "set" : "unset", static_cast<int>(v.mode),
+               static_cast<int>(v.fetch), v.have_data ? 1 : 0, static_cast<int>(v.zones_state));
+      return true;
+    }
     case Nav::Playground:
       snprintf(out, n, "playground state=%d fwd=%d", static_cast<int>(play_last_state), play_last_fwd ? 1 : 0);
       return true;

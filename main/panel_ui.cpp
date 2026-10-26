@@ -33,6 +33,7 @@
 #include <time.h>
 #include "material_icons.h"
 #include "settings.h"
+#include "co4_task.h"
 #include "energy_task.h"
 #include "espnow_play.h"
 #include "pv_task.h"
@@ -87,7 +88,7 @@ enum class Nav : uint8_t {
   Home, Category, Weather, Settings, WifiList, WifiPass, Location, Display, Time,
   Cameras, CamSettings, CamId, CamSearch, CamKey,
   Transit, Calendar, Rain, TransitSet, StationSearch, CalSet, TextEdit, Maint, RemSet, Energy, EnSet,
-  Playground
+  Playground, Co4, Co4Set, Co4Login, Co4Zones
 };
 
 const char* kShutterLabel[2] = {"Auf", "Ab"};
@@ -282,6 +283,15 @@ bool rem_ok_pressing();
 void info_hide_all();
 // Playground (panel_ui_play.inc)
 lv_obj_t* set_play_val = nullptr;
+lv_obj_t* set_co4_val = nullptr;
+int co4_page = 0;  // Co4 Energie: 0 Heute, 1 Verlauf
+void co4_hide_all();
+void co4_hide_views();
+void co4_swipe(int dir);
+void co4_tick();
+void co4_enter(int page);
+void open_co4set();
+void co4set_summary();
 PlayState play_last_state = PlayState::Off;
 bool play_last_fwd = false;
 void play_hide();
@@ -313,7 +323,7 @@ struct Named {
   char name[16];
   lv_obj_t* obj;
 };
-EXT_RAM_BSS_ATTR Named named[192];
+EXT_RAM_BSS_ATTR Named named[224];
 int named_n = 0;
 void reg(const char* name, lv_obj_t* obj) {
   for (int i = 0; i < named_n; ++i) {
@@ -322,7 +332,7 @@ void reg(const char* name, lv_obj_t* obj) {
       return;
     }
   }
-  if (named_n < 192) {
+  if (named_n < 224) {
     snprintf(named[named_n].name, sizeof(named[named_n].name), "%s", name);
     named[named_n].obj = obj;
     named_n++;
@@ -486,6 +496,7 @@ int round_c(float v) { return static_cast<int>(v >= 0.f ? v + 0.5f : v - 0.5f); 
 #include "panel_ui_rem.inc"
 #include "panel_ui_energy.inc"
 #include "panel_ui_play.inc"
+#include "panel_ui_co4.inc"
 
 }  // namespace
 
@@ -880,6 +891,8 @@ static void ui_init_impl() {
   build_energy_screens(screen);
   build_enset_screen(screen);
   build_play_screen(screen);
+  build_co4_screens(screen);
+  build_co4set_screen(screen);
   lv_obj_move_foreground(kb);
   build_sleep_layer();
   build_reminders(screen);
