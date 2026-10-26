@@ -101,4 +101,35 @@ config PANEL_METEO_PLZ
     help
         Postcode for warnings and the precipitation nowcast: 947000 = 9470 Buchs SG.
 
+menu "Co4 Energie"
+
+config PANEL_CO4_REALM_URL
+    string "Co4 Keycloak realm URL"
+    default "https://auth.co4.dev/auth/realms/co4_beta"
+    help
+        Only the realm: the device, token and logout endpoints come from OIDC
+        discovery (<realm>/.well-known/openid-configuration).
+
+config PANEL_CO4_CLIENT_ID
+    string "Co4 public client id (Device Authorization Grant)"
+    default "co4-panel"
+    help
+        Placeholder until Co4 creates the client. Public client, no secret:
+        the panel never holds a client secret or a password.
+
+config PANEL_CO4_BFF_URL
+    string "Co4 BFF base URL"
+    default "https://bff.beta.co4.dev"
+
+config PANEL_CO4_FIXTURE
+    bool "Co4 Energie: example data (fixture) instead of the Co4 series API"
+    default y
+    help
+        The Co4 measurement series and zevMyZones endpoints do not exist yet.
+        With this on, the dashboard and the zone list use anonymised example
+        data, marked "Beispieldaten" on screen. DIAGCO4FIX 0/1 switches at
+        runtime (builds with CONFIG_PANEL_DIAG_INJECT or the test harness).
+
+endmenu
+
 endmenu

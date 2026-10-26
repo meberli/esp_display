@@ -30,6 +30,7 @@
 #include "esp_wifi.h"
 #include "esp_ota_ops.h"
 #include <time.h>
+#include "co4_task.h"
 
 namespace {
 std::atomic<uint32_t> svc_ok[kSvcCount], svc_err[kSvcCount];
@@ -278,7 +279,7 @@ void scan_wifi() {
 bool read_only(const char* line) {
   return strcmp(line, "DIAGGT") == 0 || strcmp(line, "DIAGHW") == 0 || strcmp(line, "DIAGFB") == 0 || strcmp(line, "DIAGSTATS") == 0 ||
          strcmp(line, "DIAGSTACK") == 0 || strcmp(line, "DIAGENERGY") == 0 || strcmp(line, "DIAGHEALTH") == 0 ||
-         strcmp(line, "DIAGCO4EN") == 0 || strcmp(line, "SCANWIFI") == 0;
+         strcmp(line, "DIAGCO4EN") == 0 || strcmp(line, "DIAGCO4") == 0 || strcmp(line, "SCANWIFI") == 0;
 }
 
 void handle(const char* line) {
@@ -352,6 +353,13 @@ void handle(const char* line) {
     energy_dump();
   } else if (strcmp(line, "DIAGHEALTH") == 0) {
     health();
+  } else if (strcmp(line, "DIAGCO4") == 0) {
+    char buf[200];
+    co4_diag(buf, sizeof buf);  // tokens only as set/unset
+    console_puts(buf);
+  } else if (sscanf(line, "DIAGCO4MODE %d", &a) == 1 && a >= 0 && a <= 2) {
+    co4_set_mode(static_cast<Co4Mode>(a));
+    console_puts("DIAG OK");
   } else if (strcmp(line, "DIAGCO4EN") == 0) {
     play_diag();  // state and counters only, never keys
   } else if (strcmp(line, "SCANWIFI") == 0) {

@@ -8,6 +8,7 @@
 #include "lvgl.h"
 #include "net.h"
 #include "settings.h"
+#include "co4_task.h"
 #include "energy_task.h"
 #include "pv_task.h"
 #include "diag.h"
@@ -1044,5 +1045,6 @@ void app_start() {
   xTaskCreatePinnedToCore(ui_task, "ui", 16 * 1024, nullptr, 5, &ui_handle, 1);
   energy_start();  // whatwatt Go polling (core 0, below net and Loxone)
   pv_start();      // Growatt via Modbus TCP gateway, read only (core 0, lowest)
+  co4_start();     // Co4 Energie: login, zones, data (core 0, PSRAM stack)
   play_start();    // Playground CO4EN test sender: idle until used (core 0)
 }

@@ -80,6 +80,10 @@ const KeySpec kSchema[] = {
     {"pv_hours", KeyType::Blob, sizeof(PvHours), sizeof(PvHours), kKeyInternal, 0},  // PV hours today: never exported
     {"pv_hist", KeyType::Blob, sizeof(PvHist), sizeof(PvHist), kKeyInternal, 0},  // PV day history: never exported
     {"en_hist", KeyType::Blob, sizeof(EnergyHist), sizeof(EnergyHist), kKeyInternal, 0},  // history: never exported
+    // Co4 Energie: offline refresh token (secret, never exported, never logged) and the chosen zone.
+    {"co4_rt", KeyType::Str, 1, 2047, kKeyInternal, 0},
+    {"co4_zone", KeyType::Str, 1, 39, 0, 0},
+    {"co4_zname", KeyType::Str, 1, 47, 0, 0},
 };
 
 bool printable(const char* v) {

@@ -255,3 +255,10 @@ struct SettingsRequest {
   uint8_t text_which;
   char text[256];
 };
+
+// Co4 Energie. Offline refresh token: secret, NVS key "co4_rt", never exported,
+// logged or shown ("" erases). Zone: "co4_zone" (id) and "co4_zname" (name).
+bool settings_load_co4_token(char* out, size_t n);
+bool settings_save_co4_token(const char* rt);
+bool settings_load_co4_zone(char* id, size_t idn, char* name, size_t nn);
+bool settings_save_co4_zone(const char* id, const char* name);  // id "" or nullptr erases both

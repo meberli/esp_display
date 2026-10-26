@@ -1002,3 +1002,50 @@ const LoxoneConfig& settings_loxone() {
   static LoxoneConfig c = settings_load_loxone();
   return c;
 }
+
+// --- Co4 Energie ---------------------------------------------------------------
+// The offline token is written with one nvs_set_str + commit: NVS writes the new
+// entry before it erases the old one, so a power cut leaves the old or the new
+// token, never half of one. Values are never logged (Tx logs key names only).
+
+bool settings_load_co4_token(char* out, size_t n) {
+  if (n > 0) out[0] = '\0';
+  nvs_handle_t h;
+  if (nvs_open(kNs, NVS_READONLY, &h) != ESP_OK) return false;
+  bool ok = get_str(h, "co4_rt", out, n) && out[0] != '\0';
+  nvs_close(h);
+  if (!ok && n > 0) out[0] = '\0';
+  return ok;
+}
+
+bool settings_save_co4_token(const char* rt) {
+  Tx tx;
+  if (rt == nullptr || rt[0] == '\0') tx.erase("co4_rt");
+  else tx.str("co4_rt", rt);
+  return tx.commit();
+}
+
+bool settings_load_co4_zone(char* id, size_t idn, char* name, size_t nn) {
+  if (idn > 0) id[0] = '\0';
+  if (nn > 0) name[0] = '\0';
+  nvs_handle_t h;
+  if (nvs_open(kNs, NVS_READONLY, &h) != ESP_OK) return false;
+  bool ok = get_str(h, "co4_zone", id, idn) && id[0] != '\0';
+  if (ok) get_str(h, "co4_zname", name, nn);
+  nvs_close(h);
+  if (!ok && idn > 0) id[0] = '\0';
+  return ok;
+}
+
+bool settings_save_co4_zone(const char* id, const char* name) {
+  Tx tx;
+  if (id == nullptr || id[0] == '\0') {
+    tx.erase("co4_zone");
+    tx.erase("co4_zname");
+  } else {
+    tx.str("co4_zone", id);
+    if (name != nullptr && name[0] != '\0') tx.str("co4_zname", name);
+    else tx.erase("co4_zname");
+  }
+  return tx.commit();
+}
