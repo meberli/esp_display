@@ -239,10 +239,44 @@ void stacks(bool warn_only) {
 #endif
 }
 
+// SCANWIFI: one active scan, every BSSID of the connected SSID (no de-duplication) plus
+// the AP the station is associated with. Other SSIDs and secrets are never printed; nothing
+// is saved. Generic: works for any network (mesh/multi-AP channel check for ESP-NOW).
+void scan_wifi() {
+  static wifi_ap_record_t cur;
+  if (esp_wifi_sta_get_ap_info(&cur) != ESP_OK) {
+    console_printf("SCANWIFI not associated\n");
+    return;
+  }
+  console_printf("SCANWIFI cur bssid=%02X:%02X:%02X:%02X:%02X:%02X ch=%u rssi=%d auth=%d\n", cur.bssid[0], cur.bssid[1],
+                 cur.bssid[2], cur.bssid[3], cur.bssid[4], cur.bssid[5], (unsigned)cur.primary, cur.rssi, (int)cur.authmode);
+  wifi_scan_config_t sc = {};
+  sc.ssid = cur.ssid;  // only the connected SSID
+  sc.show_hidden = false;
+  esp_err_t err = esp_wifi_scan_start(&sc, true);
+  EXT_RAM_BSS_ATTR static wifi_ap_record_t recs[32];
+  uint16_t num = 32;
+  if (err == ESP_OK) err = esp_wifi_scan_get_ap_records(&num, recs);
+  if (err != ESP_OK) {
+    console_printf("SCANWIFI error %s\n", esp_err_to_name(err));
+    return;
+  }
+  int n = 0;
+  for (int i = 0; i < num; ++i) {
+    if (strcmp(reinterpret_cast<const char*>(recs[i].ssid), reinterpret_cast<const char*>(cur.ssid)) != 0) continue;
+    const uint8_t* b = recs[i].bssid;
+    console_printf("SCANWIFI ap bssid=%02X:%02X:%02X:%02X:%02X:%02X ch=%u rssi=%d auth=%d%s\n", b[0], b[1], b[2], b[3], b[4],
+                   b[5], (unsigned)recs[i].primary, recs[i].rssi, (int)recs[i].authmode,
+                   memcmp(b, cur.bssid, 6) == 0 ? " connected" : "");
+    ++n;
+  }
+  console_printf("SCANWIFI done %d ap\n", n);
+}
+
 bool read_only(const char* line) {
   return strcmp(line, "DIAGGT") == 0 || strcmp(line, "DIAGHW") == 0 || strcmp(line, "DIAGFB") == 0 || strcmp(line, "DIAGSTATS") == 0 ||
          strcmp(line, "DIAGSTACK") == 0 || strcmp(line, "DIAGENERGY") == 0 || strcmp(line, "DIAGHEALTH") == 0 ||
-         strcmp(line, "DIAGCO4EN") == 0;
+         strcmp(line, "DIAGCO4EN") == 0 || strcmp(line, "SCANWIFI") == 0;
 }
 
 void handle(const char* line) {
@@ -318,6 +352,8 @@ void handle(const char* line) {
     health();
   } else if (strcmp(line, "DIAGCO4EN") == 0) {
     play_diag();  // state and counters only, never keys
+  } else if (strcmp(line, "SCANWIFI") == 0) {
+    scan_wifi();
   }
 }
 
