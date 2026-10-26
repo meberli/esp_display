@@ -40,6 +40,8 @@ enum {
     CO4EN_TAG_KV_ID    = 0x14,
     CO4EN_TAG_KEYMAP   = 0x15,
     CO4EN_TAG_STATUS   = 0x20,
+    CO4EN_TAG_WLAN_INFO= 0x21, /* v0.7 optional: primary ch u8, bssid[6], rssi i8 */
+    CO4EN_TAG_BEACON_INFO = 0x22, /* v0.7 optional, only in CO4EN_T_BEACON */
     CO4EN_TAG_RAW      = 0x30,
     CO4EN_TAG_CMD      = 0x40, /* only in CO4EN_T_CMD */
     CO4EN_TAG_ACK_INFO = 0x41,

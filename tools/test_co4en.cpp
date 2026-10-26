@@ -248,6 +248,31 @@ int main() {
     CHECK(co4en_sweep_step(&p, 0, true) == 3 && co4en_sweep_step(&p, 50, true) == 0 && p.st == Co4enSweepSt::Backoff &&
               p.t_next == 50 + 60000, "sweep: single channel (Wi-Fi) not found -> backoff");
   }
+  {  // v0.7 BEACON (spec 6.2 vector)
+    uint8_t b[64];
+    size_t bn = unhex("01040200010000004002DF6A220D01DCDA0C11223306034002DF6A", b);
+    Co4enBeacon be = {};
+    static const uint8_t gw[6] = {0xDC, 0xDA, 0x0C, 0x11, 0x22, 0x33};
+    CHECK(bn == 27 && co4en_parse_beacon(b, bn, &be) && be.seq == 1 && be.channel == 6 && be.flags == 0x03 &&
+              be.unix == 1793000000u && memcmp(be.gw_mac, gw, 6) == 0, "beacon: spec vector");
+    CHECK(!co4en_parse_beacon(b, bn - 1, &be), "beacon: truncated");
+    b[14] = 0x02;
+    CHECK(!co4en_parse_beacon(b, bn, &be), "beacon: unknown beacon_ver ignored");
+    b[14] = 0x01;
+    uint8_t x[80];  // unknown TLV before 0x22, extra bytes inside 0x22
+    memcpy(x, b, 12);
+    x[12] = 0x7E; x[13] = 2; x[14] = 0xAA; x[15] = 0xBB;
+    x[16] = 0x22; x[17] = 15;
+    memcpy(x + 18, b + 14, 13);
+    x[31] = 0x99; x[32] = 0x99;
+    CHECK(co4en_parse_beacon(x, 33, &be) && be.channel == 6, "beacon: unknown TLV skipped, extra bytes ignored");
+    b[1] = CO4EN_T_ACK;
+    CHECK(!co4en_parse_beacon(b, bn, &be), "beacon: wrong type");
+    Co4enFrame f2;
+    co4en_begin(&f2, CO4EN_T_DATA, 0, 7, 0);
+    CHECK(co4en_wlan_info(&f2, 6, gw, -61) && f2.n == 22 && f2.b[12] == 0x21 && f2.b[13] == 8 && f2.b[14] == 6 &&
+              f2.b[21] == 0xC3, "wlan_info TLV 0x21");
+  }
   printf(fails ? "RESULT FAIL (%d)\n" : "RESULT PASS\n", fails);
   return fails ? 1 : 0;
 }

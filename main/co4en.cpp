@@ -402,6 +402,35 @@ bool co4en_parse_ack(const uint8_t* f, size_t n, Co4enAck* out) {
   return false;
 }
 
+bool co4en_parse_beacon(const uint8_t* f, size_t n, Co4enBeacon* out) {
+  Co4enHdr h;
+  if (!co4en_hdr(f, n, &h) || h.type != CO4EN_T_BEACON) return false;
+  for (size_t o = CO4EN_HDR_LEN; o + 2 <= n;) {
+    uint8_t tag = f[o], len = f[o + 1];
+    if (o + 2 + len > n) return false;
+    if (tag == CO4EN_TAG_BEACON_INFO && len >= 13) {
+      const uint8_t* v = f + o + 2;
+      if (v[0] != 0x01 || v[7] < 1 || v[7] > 13) return false;
+      out->seq = h.seq;
+      memcpy(out->gw_mac, v + 1, 6);
+      out->channel = v[7];
+      out->flags = v[8];
+      out->unix = get32(v + 9);
+      return true;
+    }
+    o += 2 + len;
+  }
+  return false;
+}
+
+bool co4en_wlan_info(Co4enFrame* f, uint8_t channel, const uint8_t bssid[6], int8_t rssi) {
+  uint8_t t[8];
+  t[0] = channel;
+  memcpy(t + 1, bssid, 6);
+  t[7] = static_cast<uint8_t>(rssi);
+  return co4en_tlv(f, CO4EN_TAG_WLAN_INFO, t, 8);
+}
+
 void co4en_hex(const uint8_t* b, size_t n, char* out, size_t out_n) {
   static const char hx[] = "0123456789ABCDEF";
   size_t o = 0;

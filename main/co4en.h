@@ -106,6 +106,21 @@ struct Co4enAck {
 };
 bool co4en_parse_ack(const uint8_t* f, size_t n, Co4enAck* out);
 
+// --- v0.7 BEACON (type 0x04, unencrypted, no MIC: a channel hint, never a trust anchor) ---
+constexpr uint8_t kCo4enBeaconPairingOpen = 0x01;  // info flags b0; b1-2 mode
+struct Co4enBeacon {
+  uint32_t seq;
+  uint8_t gw_mac[6];
+  uint8_t channel;  // 1..13
+  uint8_t flags;    // b0 pairing_open, b1-2 mode (0 fixed, 1 follow_ssid, 2 wifi)
+  uint32_t unix;
+};
+// Walks the TLVs (unknown tags skipped by length); false unless a v1 BEACON_INFO with
+// len >= 13 and channel 1..13 is found. Unknown beacon_ver -> false.
+bool co4en_parse_beacon(const uint8_t* f, size_t n, Co4enBeacon* out);
+// v0.7 WLAN_INFO TLV 0x21 (8 B): primary channel, BSSID, RSSI.
+bool co4en_wlan_info(Co4enFrame* f, uint8_t channel, const uint8_t bssid[6], int8_t rssi);
+
 void co4en_hex(const uint8_t* b, size_t n, char* out, size_t out_n);  // "0105..." (upper, no spaces)
 
 // --- seq (monotonic across reboots) -------------------------------------------------
