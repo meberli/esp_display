@@ -1,0 +1,81 @@
+# Release build for OTA: on a tag "v*", build the app in a clean checkout
+# (no sdkconfig.defaults.local, no panel_config.h: no Wi-Fi, Loxone, Windy or
+# iCal secrets in the image) and attach loxone_panel.bin (Guition) and
+# loxone_panel_sensecap_d1.bin (SenseCAP Indicator D1) to the release.
+# The panel keeps its secrets in NVS (settings_seed_from_build on the first
+# boot of a locally built firmware).
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: espressif/idf:v6.1
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag must match version.txt
+        shell: bash
+        run: |
+          v=$(tr -d ' \r\n' < version.txt)
+          if [ "${GITHUB_REF_NAME}" != "v$v" ]; then echo "::error::tag $GITHUB_REF_NAME does not match version.txt ($v)"; exit 1; fi
+      - name: Check that no local secret files are present
+        shell: bash
+        run: |
+          for f in sdkconfig.defaults.local main/panel_config.h include/panel_config.h; do
+            if [ -e "$f" ]; then echo "::error::$f must not be in the repository"; exit 1; fi
+          done
+      - name: Signing key from secret
+        shell: bash
+        env:
+          APP_SIGNING_KEY: ${{ secrets.APP_SIGNING_KEY }}
+        run: |
+          if [ -z "$APP_SIGNING_KEY" ]; then echo "::error::secret APP_SIGNING_KEY missing - release must be signed"; exit 1; fi
+          mkdir -p secure && umask 077 && printf '%s\n' "$APP_SIGNING_KEY" > secure/signing_key.pem
+      - name: Build
+        shell: bash
+        run: |
+          git config --global --add safe.directory '*'
+          . "$IDF_PATH/export.sh"
+          idf.py set-target esp32s3
+          idf.py build
+          espsecure verify-signature --version 2 --keyfile tools/esp_display_signing_pub.pem build/loxone_panel.bin
+          python tools/check_secrets.py --generic build/loxone_panel.bin
+          cp build/loxone_panel.bin loxone_panel.bin
+          sha256sum loxone_panel.bin > loxone_panel.bin.sha256
+          grep -q "^CONFIG_PANEL_WINDY_API_KEY=\"\"$" sdkconfig
+          grep -q "^CONFIG_PANEL_ICAL_URL=\"\"$" sdkconfig
+      - name: Build SenseCAP Indicator D1
+        shell: bash
+        run: |
+          git config --global --add safe.directory '*'
+          . "$IDF_PATH/export.sh"
+          D1="-B build-d1 -DSDKCONFIG=build-d1/sdkconfig -DPANEL_BOARD=sensecap_d1"
+          idf.py $D1 set-target esp32s3
+          idf.py $D1 build
+          espsecure verify-signature --version 2 --keyfile tools/esp_display_signing_pub.pem build-d1/loxone_panel_sensecap_d1.bin
+          rm -f secure/signing_key.pem
+          python tools/check_secrets.py --generic build-d1/loxone_panel_sensecap_d1.bin
+          cp build-d1/loxone_panel_sensecap_d1.bin loxone_panel_sensecap_d1.bin
+          sha256sum loxone_panel_sensecap_d1.bin > loxone_panel_sensecap_d1.bin.sha256
+          grep -q "^CONFIG_PANEL_BOARD_SENSECAP_D1=y$" build-d1/sdkconfig
+          grep -q "^CONFIG_PANEL_WINDY_API_KEY=\"\"$" build-d1/sdkconfig
+          grep -q "^CONFIG_PANEL_ICAL_URL=\"\"$" build-d1/sdkconfig
+      - name: Remove signing key
+        if: always()
+        shell: bash
+        run: rm -f secure/signing_key.pem
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            loxone_panel.bin
+            loxone_panel.bin.sha256
+            loxone_panel_sensecap_d1.bin
+            loxone_panel_sensecap_d1.bin.sha256
+          generate_release_notes: true
