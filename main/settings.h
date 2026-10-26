@@ -62,6 +62,10 @@ constexpr int kTimeoutChoiceN = 6;
 DisplaySettings settings_load_display();  // default 120 s, hint on, black
 bool settings_save_display(const DisplaySettings& d);
 
+// Design (UiDesign in ui_theme.h): 0 Dark Glass (default), 1 Co4. Read at boot.
+uint8_t settings_load_design();
+bool settings_save_design(uint8_t design);
+
 // Time: SNTP server and time zone (POSIX TZ string; name is for display).
 struct TimeSettings {
   char server[64];

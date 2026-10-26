@@ -34,6 +34,7 @@ const KeySpec kSchema[] = {
     {"scr_to", KeyType::U16, 0, 3600, 0, 0},
     {"scr_hint", KeyType::U8, 0, 1, 0, 0},
     {"scr_saver", KeyType::U8, 0, kSaverAnalog, 0, 0},
+    {"ui_design", KeyType::U8, 0, 1, 0, 0},
     {"ical_url", KeyType::Str, 8, 255, kKeySecret | kKeyUrl, 0},
     {"ical_dflt", KeyType::Str, 0, 255, kKeySecret | kKeyUrl, 0},
     {"waste_url", KeyType::Str, 8, 255, kKeyUrl, 0},  // unused since 0.8.2 (old buchs-sg.ch page); kept for old backups

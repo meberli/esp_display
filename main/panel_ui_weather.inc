@@ -485,7 +485,7 @@ void refresh_category() {
   }
   lv_label_set_text(cat_title, section_name(current_section));
   lv_label_set_text(cat_icon, kSectionIcon[current_section]);
-  lv_obj_set_style_text_color(cat_icon, lv_color_hex(kSectionAccent[current_section]), 0);
+  lv_obj_set_style_text_color(cat_icon, lv_color_hex(g_theme->header_bar ? 0xFFFFFF : kSectionAccent[current_section]), 0);
   if (count > 1) {
     char text[16];
     snprintf(text, sizeof(text), "%d / %d", section_page + 1, count);
@@ -880,7 +880,7 @@ void style_shutter_button(lv_obj_t* btn) {
   style_glass(btn, 18);
   lv_obj_set_style_bg_color(btn, lv_color_hex(0x232D42), 0);
   lv_obj_set_style_bg_grad_color(btn, lv_color_hex(0x1A2234), 0);
-  lv_obj_set_style_bg_color(btn, lv_color_hex(0x2B4A6B), LV_STATE_PRESSED);
+  lv_obj_set_style_bg_color(btn, lv_color_hex(g_theme->checked_top), LV_STATE_PRESSED);
   lv_obj_set_style_border_color(btn, lv_color_hex(kAccent), LV_STATE_PRESSED);
 }
 

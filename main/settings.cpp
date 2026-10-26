@@ -205,6 +205,21 @@ bool settings_save_display(const DisplaySettings& d) {
   return tx.commit();
 }
 
+uint8_t settings_load_design() {
+  uint8_t v = 0;
+  nvs_handle_t h;
+  if (nvs_open(kNs, NVS_READONLY, &h) != ESP_OK) return 0;
+  if (nvs_get_u8(h, "ui_design", &v) != ESP_OK || v > 1) v = 0;
+  nvs_close(h);
+  return v;
+}
+
+bool settings_save_design(uint8_t design) {
+  Tx tx;
+  tx.u8("ui_design", design);
+  return tx.commit();
+}
+
 TimeSettings settings_default_time() {
   TimeSettings t = {};
   snprintf(t.server, sizeof(t.server), "ch.pool.ntp.org");

@@ -6,6 +6,22 @@
 // (Open-Meteo geocoding). The network work runs in the net task; the UI only
 // queues one SettingsRequest (ui_take_settings) and gets ui_*_done back.
 
+// Co4: the title label itself carries the petrol-to-green header bar, so it
+// stays child 0 (wp_title and the Bilanz screen rely on that).
+void style_header(lv_obj_t* t) {
+  if (!g_theme->header_bar) return;
+  lv_obj_set_pos(t, 0, 0);
+  lv_obj_set_size(t, kScreen, 60);
+  lv_obj_set_style_pad_left(t, 24, 0);
+  lv_obj_set_style_pad_top(t, 20, 0);
+  lv_obj_set_style_bg_color(t, lv_color_hex(g_theme->grad_a), 0);
+  lv_obj_set_style_bg_grad_color(t, lv_color_hex(g_theme->grad_b), 0);
+  lv_obj_set_style_bg_grad_dir(t, LV_GRAD_DIR_HOR, 0);
+  lv_obj_set_style_bg_opa(t, LV_OPA_COVER, 0);
+  lv_obj_set_style_text_color(t, lv_color_hex(0xFFFFFF), 0);
+  lv_label_set_long_mode(t, LV_LABEL_LONG_CLIP);
+}
+
 lv_obj_t* make_screen_root(lv_obj_t* screen, const char* title) {
   lv_obj_t* root = lv_obj_create(screen);
   lv_obj_set_pos(root, 0, 0);
@@ -14,6 +30,7 @@ lv_obj_t* make_screen_root(lv_obj_t* screen, const char* title) {
   lv_obj_t* t = make_label(root, &font_inter_20, lv_color_hex(kText));
   lv_obj_set_pos(t, 24, 20);
   lv_label_set_text(t, title);
+  style_header(t);
   make_home_bar(root);
   hide(root);
   return root;
@@ -48,6 +65,7 @@ lv_obj_t* make_row(lv_obj_t* parent, int h, const char* icon, uint32_t icon_colo
   lv_obj_add_event_cb(row, cb, LV_EVENT_CLICKED, reinterpret_cast<void*>(static_cast<intptr_t>(user)));
   watch(row);
   if (icon != nullptr) {
+    if (g_theme->icon_mono) icon_color = g_theme->row_icon;
     lv_obj_t* ic = make_label(row, strcmp(icon, ICON_BOLT) == 0 ? &font_icon_bolt_24 : &font_icons_24,
                               lv_color_hex(icon_color));
     lv_label_set_text(ic, icon);
@@ -332,6 +350,9 @@ void screen_off() {
   if (scr_off) return;
   scr_off = true;
   bool clock = disp.saver != kSaverBlack;
+  // Co4: the clock saver sits on the darkest petrol; "Schwarz" stays black.
+  uint32_t bg = clock && g_theme->header_bar ? g_theme->saver_bg : 0x000000;
+  lv_obj_set_style_bg_color(sleep_layer, lv_color_hex(bg), 0);
   if (clock) {
     hide(sleep_hint);
   } else if (disp.hint) {
@@ -401,12 +422,17 @@ void build_sleep_layer() {
 
   saver_digital = lv_obj_create(sleep_layer);
   style_plain(saver_digital);
-  lv_obj_set_size(saver_digital, 440, 240);
+  lv_obj_set_size(saver_digital, 440, g_theme->logo ? 300 : 240);
   dig_time = make_label(saver_digital, &font_clock_150, lv_color_hex(kText));
   lv_label_set_text(dig_time, "--:--");
   lv_obj_align(dig_time, LV_ALIGN_TOP_MID, 0, 10);
   dig_date = make_label(saver_digital, &font_inter_20, lv_color_hex(kTextDim));
-  lv_obj_align(dig_date, LV_ALIGN_BOTTOM_MID, 0, -16);
+  lv_obj_align(dig_date, LV_ALIGN_BOTTOM_MID, 0, g_theme->logo ? -76 : -16);
+  if (g_theme->logo) {  // moves with the drift, like the clock
+    lv_obj_t* logo = lv_img_create(saver_digital);
+    lv_img_set_src(logo, &img_co4_logo);
+    lv_obj_align(logo, LV_ALIGN_BOTTOM_MID, 0, -10);
+  }
   lv_obj_set_style_text_align(dig_date, LV_TEXT_ALIGN_CENTER, 0);
   lv_obj_set_width(dig_date, 440);
   hide(saver_digital);
@@ -768,6 +794,70 @@ lv_obj_t* make_caption(lv_obj_t* parent, int y, const char* text) {
   return l;
 }
 
+// --- Design switch (confirm, save, restart) ---
+lv_obj_t* design_confirm = nullptr;
+uint8_t design_pending = 0;
+
+void on_design_confirm(lv_event_t* e) {
+  hide(design_confirm);
+  if (lv_event_get_user_data(e) == nullptr) return;  // Abbrechen
+  settings_save_design(design_pending);
+  lv_timer_t* t = lv_timer_create(
+      [](lv_timer_t*) {
+        disp_save_flush(true);  // like restart_now (panel_ui_api.inc)
+        esp_restart();
+      },
+      300, nullptr);
+  lv_timer_set_repeat_count(t, 1);
+}
+
+void on_design_btn(lv_event_t* e) {
+  int i = static_cast<int>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e)));
+  lv_obj_t* b = lv_event_get_target(e);
+  if (&ui_theme_get(i) == g_theme) {  // already active: keep it checked
+    lv_obj_add_state(b, LV_STATE_CHECKED);
+    return;
+  }
+  lv_obj_clear_state(b, LV_STATE_CHECKED);
+  design_pending = static_cast<uint8_t>(i);
+  show(design_confirm);
+  lv_obj_move_foreground(design_confirm);
+}
+
+void build_design_confirm(lv_obj_t* screen) {
+  design_confirm = lv_obj_create(screen);
+  lv_obj_set_size(design_confirm, kScreen - 2 * kMargin, 200);
+  lv_obj_center(design_confirm);
+  style_glass(design_confirm, 24);
+  lv_obj_set_style_border_color(design_confirm, lv_color_hex(kAccent), 0);
+  lv_obj_set_style_border_width(design_confirm, 2, 0);
+  lv_obj_set_style_pad_all(design_confirm, 20, 0);
+  lv_obj_clear_flag(design_confirm, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_t* t = make_label(design_confirm, &font_inter_sb16, lv_color_hex(kText));
+  lv_label_set_text(t, "Design wechseln?");
+  lv_obj_set_pos(t, 0, 0);
+  lv_obj_t* d = make_label(design_confirm, &font_inter_14, lv_color_hex(kTextDim));
+  lv_obj_set_width(d, kScreen - 2 * kMargin - 40);
+  lv_label_set_long_mode(d, LV_LABEL_LONG_WRAP);
+  lv_label_set_text(d, "Das Panel startet dazu neu. Deine Einstellungen bleiben erhalten.");
+  lv_obj_set_pos(d, 0, 30);
+  const char* names[2] = {"Abbrechen", "Neu starten"};
+  const char* keys[2] = {"design:no", "design:yes"};
+  for (int i = 0; i < 2; ++i) {
+    lv_obj_t* b = lv_btn_create(design_confirm);
+    lv_obj_set_size(b, 170, 52);
+    lv_obj_align(b, i == 0 ? LV_ALIGN_BOTTOM_LEFT : LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+    lv_obj_set_style_radius(b, 16, 0);
+    lv_obj_set_style_bg_color(b, lv_color_hex(i == 0 ? kBorder : kAccent), 0);
+    lv_obj_add_event_cb(b, on_design_confirm, LV_EVENT_CLICKED, i == 0 ? nullptr : reinterpret_cast<void*>(1));
+    lv_obj_t* l = make_label(b, &font_inter_sb16, lv_color_hex(i == 0 ? kText : 0x0B2129));
+    lv_label_set_text(l, names[i]);
+    lv_obj_center(l);
+    reg(keys[i], b);
+  }
+  hide(design_confirm);
+}
+
 void build_settings_screens(lv_obj_t* screen) {
   set_root = make_screen_root(screen, "Einstellungen");
   // Scrollable list: eight rows do not fit on one screen.
@@ -835,6 +925,17 @@ void build_settings_screens(lv_obj_t* screen) {
   lv_obj_clear_flag(disp_hint_sw, LV_OBJ_FLAG_CLICKABLE);  // the whole row toggles
   lv_obj_set_style_bg_color(disp_hint_sw, lv_color_hex(kBorder), static_cast<lv_style_selector_t>(LV_PART_MAIN));
   lv_obj_set_style_bg_color(disp_hint_sw, lv_color_hex(kAccent), static_cast<lv_style_selector_t>(LV_PART_INDICATOR) | LV_STATE_CHECKED);
+
+  // Design: Dark Glass or Co4. Fixed per boot, so a change restarts after asking.
+  make_page_scrollable(disp_root);
+  make_caption(disp_root, 400, "Design");
+  for (int i = 0; i < kDesignCount; ++i) {
+    char key[10];
+    snprintf(key, sizeof(key), "design:%d", i);
+    lv_obj_t* b = make_choice(disp_root, kMargin + i * 222, 422, 210, 56, ui_theme_get(i).name, on_design_btn, i, key);
+    if (&ui_theme_get(i) == g_theme) lv_obj_add_state(b, LV_STATE_CHECKED);
+  }
+  build_design_confirm(lv_obj_get_screen(disp_root));
 
   // Uhrzeit: NTP server and time zone.
   time_root = make_screen_root(screen, "Uhrzeit");

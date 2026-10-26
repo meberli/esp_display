@@ -16,6 +16,16 @@
 #include <strings.h>
 
 #include "fonts.h"
+#include "ui_theme.h"
+// UI text fonts follow the design (same size slots; Inter for Dark Glass,
+// Montserrat for Co4). Declarations above keep the real symbol names.
+#define font_inter_14 (*g_theme->f14)
+#define font_inter_16 (*g_theme->f16)
+#define font_inter_sb16 (*g_theme->fsb16)
+#define font_inter_20 (*g_theme->f20)
+#define font_inter_light_40 (*g_theme->f40)
+#define font_inter_xl_72 (*g_theme->f72)
+#define font_clock_150 (*g_theme->f150)
 #include "clock_sync.h"
 #include <math.h>
 #include <sys/time.h>
@@ -51,25 +61,25 @@ constexpr int kMaxPages = 32;
 constexpr uint32_t kShutterRereadMs = 3000;
 constexpr int kLocalRelay = -2;
 
-// Dark Glass (UI proposal 1): deep navy background, glass cards, soft accents.
-constexpr uint32_t kBgTop = 0x1A2438;
-constexpr uint32_t kBgBottom = 0x0B0F1A;
-constexpr uint32_t kText = 0xE8ECF4;
-constexpr uint32_t kTextDim = 0x8A94A8;
-constexpr uint32_t kCardTop = 0x1B2333;
-constexpr uint32_t kCardBottom = 0x131926;
-constexpr uint32_t kBorder = 0x2A3448;
-constexpr uint32_t kOffIcon = 0x5A6478;
-constexpr uint32_t kAccent = 0x7CC4FF;
-constexpr uint32_t kAmber = 0xFFC857;
-constexpr uint32_t kGreen = 0x7EE0A1;
-constexpr uint32_t kBlue = 0x7CC4FF;
-constexpr uint32_t kYellow = 0xFFC857;
-constexpr uint32_t kOrange = 0xFFD27A;
-constexpr uint32_t kCyan = 0x7CC4FF;
-constexpr uint32_t kPurple = 0xB4A8FF;
-constexpr uint32_t kTeal = 0x7FE3D8;
-constexpr uint32_t kRed = 0xFF7A7A;
+// Colours come from the active design (ui_theme.h: Dark Glass or Co4), chosen at boot.
+#define kBgTop (g_theme->bg_top)
+#define kBgBottom (g_theme->bg_bottom)
+#define kText (g_theme->text)
+#define kTextDim (g_theme->text_dim)
+#define kCardTop (g_theme->card_top)
+#define kCardBottom (g_theme->card_bottom)
+#define kBorder (g_theme->border)
+#define kOffIcon (g_theme->off_icon)
+#define kAccent (g_theme->accent)
+#define kAmber (g_theme->amber)
+#define kGreen (g_theme->green)
+#define kBlue (g_theme->blue)
+#define kYellow (g_theme->yellow)
+#define kOrange (g_theme->orange)
+#define kCyan (g_theme->cyan)
+#define kPurple (g_theme->purple)
+#define kTeal (g_theme->teal)
+#define kRed (g_theme->red)
 
 enum Section : uint8_t { kSecFav = 0, kSecLight = 1, kSecShutter = 2, kSecOther = 3 };
 enum class Nav : uint8_t {
@@ -83,7 +93,7 @@ const char* kShutterLabel[2] = {"Auf", "Ab"};
 const char* kShutterCommand[2] = {"FullUp", "FullDown"};
 const char* kShutterIcon[2] = {ICON_ARROW_UP, ICON_ARROW_DOWN};
 const char* kSectionIcon[4] = {ICON_STAR, ICON_BULB, ICON_BLINDS, ICON_TOGGLE};
-const uint32_t kSectionAccent[4] = {kAmber, kOrange, kAccent, kGreen};
+uint32_t kSectionAccent[4] = {};  // set from the design in the UI build
 
 struct RowPlan {
   bool shutter;
@@ -391,8 +401,8 @@ void style_glass(lv_obj_t* obj, lv_coord_t radius) {
   lv_obj_set_style_bg_grad_color(obj, lv_color_hex(kCardBottom), 0);
   lv_obj_set_style_bg_grad_dir(obj, LV_GRAD_DIR_VER, 0);
   lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
-  lv_obj_set_style_bg_color(obj, lv_color_hex(0x2C3954), LV_STATE_PRESSED);
-  lv_obj_set_style_bg_grad_color(obj, lv_color_hex(0x1F2940), LV_STATE_PRESSED);
+  lv_obj_set_style_bg_color(obj, lv_color_hex(g_theme->pressed_top), LV_STATE_PRESSED);
+  lv_obj_set_style_bg_grad_color(obj, lv_color_hex(g_theme->pressed_bottom), LV_STATE_PRESSED);
   lv_obj_set_style_radius(obj, radius, 0);
   lv_obj_set_style_border_width(obj, 1, 0);
   lv_obj_set_style_border_color(obj, lv_color_hex(kBorder), 0);
@@ -405,8 +415,8 @@ void style_glass(lv_obj_t* obj, lv_coord_t radius) {
 
 // Checked state (selected choice): accent-tinted glass with an accent border.
 void style_checked(lv_obj_t* obj) {
-  lv_obj_set_style_bg_color(obj, lv_color_hex(0x2B4A6B), LV_STATE_CHECKED);
-  lv_obj_set_style_bg_grad_color(obj, lv_color_hex(0x1F3550), LV_STATE_CHECKED);
+  lv_obj_set_style_bg_color(obj, lv_color_hex(g_theme->checked_top), LV_STATE_CHECKED);
+  lv_obj_set_style_bg_grad_color(obj, lv_color_hex(g_theme->checked_bottom), LV_STATE_CHECKED);
   lv_obj_set_style_border_color(obj, lv_color_hex(kAccent), LV_STATE_CHECKED);
 }
 
@@ -414,7 +424,7 @@ void style_checked(lv_obj_t* obj) {
 // (LV_STATE_PRESSED) tints it with the accent.
 void style_tile(lv_obj_t* obj, uint32_t accent) {
   lv_color_t a = lv_color_hex(accent);
-  style_glass(obj, 24);
+  style_glass(obj, g_theme->r_tile);
   lv_obj_set_style_bg_color(obj, lv_color_mix(a, lv_color_hex(kCardTop), 90), LV_STATE_PRESSED);
   lv_obj_set_style_bg_grad_color(obj, lv_color_mix(a, lv_color_hex(kCardBottom), 50), LV_STATE_PRESSED);
   lv_obj_set_style_border_color(obj, a, LV_STATE_PRESSED);
@@ -551,7 +561,15 @@ void ui_init() {
   g_ui_build_psram = p0 > p1 ? p0 - p1 : 0;
   heap_note("ui-build");
 }
+void style_header(lv_obj_t* t);  // panel_ui_settings.inc
+
 static void ui_init_impl() {
+  // Design is fixed for this boot (a change in Einstellungen restarts).
+  ui_theme_select(settings_load_design());
+  kSectionAccent[0] = kAmber;
+  kSectionAccent[1] = kOrange;
+  kSectionAccent[2] = kAccent;
+  kSectionAccent[3] = kGreen;
   lv_obj_t* screen = lv_scr_act();
   lv_obj_set_style_bg_color(screen, lv_color_hex(kBgTop), 0);
   lv_obj_set_style_bg_grad_color(screen, lv_color_hex(kBgBottom), 0);
@@ -574,13 +592,18 @@ static void ui_init_impl() {
   home_time = make_label(home_root, &font_inter_16, lv_color_hex(kTextDim));
   lv_label_set_text(home_time, "--:--");
   lv_obj_align(home_time, LV_ALIGN_TOP_RIGHT, -24, 24);
+  if (g_theme->logo) {
+    lv_obj_t* logo = lv_img_create(home_root);
+    lv_img_set_src(logo, &img_co4_logo);
+    lv_obj_align(logo, LV_ALIGN_TOP_MID, 0, 12);
+  }
 
   // One weather card: now (icon, temperature, place and condition), then
   // today and tomorrow side by side under a divider. Tap a day for details.
   lv_obj_t* weather = lv_obj_create(home_root);
   lv_obj_set_pos(weather, 24, 56);
   lv_obj_set_size(weather, kScreen - 48, 222);
-  style_glass(weather, 28);
+  style_glass(weather, g_theme->r_weather);
   // Tapping the current-weather block opens today's details; the day panels
   // below are children and keep their own taps.
   lv_obj_clear_flag(weather, LV_OBJ_FLAG_SCROLLABLE);
@@ -667,7 +690,9 @@ static void ui_init_impl() {
     watch(btn);
     reg(b.name, btn);
     card_btn[i] = btn;
-    lv_obj_t* icon = make_label(btn, &font_icons_38, lv_color_hex(b.color));
+    uint32_t ic = b.color;
+    if (g_theme->icon_mono) ic = i == 0 ? g_theme->icon_active : g_theme->icon;
+    lv_obj_t* icon = make_label(btn, &font_icons_38, lv_color_hex(ic));
     lv_label_set_text(icon, b.icon);
     lv_obj_center(icon);
   }
@@ -678,6 +703,17 @@ static void ui_init_impl() {
   lv_obj_set_size(cat_root, kScreen, kScreen);
   style_plain(cat_root);
 
+  if (g_theme->header_bar) {
+    lv_obj_t* bar = lv_obj_create(cat_root);
+    style_plain(bar);
+    lv_obj_set_pos(bar, 0, 0);
+    lv_obj_set_size(bar, kScreen, 60);
+    lv_obj_set_style_bg_color(bar, lv_color_hex(g_theme->grad_a), 0);
+    lv_obj_set_style_bg_grad_color(bar, lv_color_hex(g_theme->grad_b), 0);
+    lv_obj_set_style_bg_grad_dir(bar, LV_GRAD_DIR_HOR, 0);
+    lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(bar, LV_OBJ_FLAG_CLICKABLE);
+  }
   cat_icon = make_label(cat_root, &font_icons_24, lv_color_hex(kAmber));
   lv_obj_set_pos(cat_icon, 22, 20);
   cat_title = make_label(cat_root, &font_inter_20, lv_color_hex(kText));
