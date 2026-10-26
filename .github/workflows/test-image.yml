@@ -10,7 +10,7 @@ on:
     inputs:
       ref:
         description: Branch or commit to build
-        default: cursor/esp-idf-migration
+        default: master
         required: true
       target:
         description: Board
