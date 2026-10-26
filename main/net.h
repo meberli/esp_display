@@ -25,6 +25,18 @@ int wifi_scan(WifiAp* out, int cap, uint32_t gen = 0);
 // UI ("Abbrechen"): cancel scan generation gen (and older). Only stores an atomic;
 // the net task stops the driver scan itself.
 void wifi_scan_cancel(uint32_t gen);
+// Playground "sender follows the gateway" (CO4EN v0.7 6.1). Generic: any SSID, any vendor.
+// Scans the configured SSID on channel ch only and pins the strongest BSSID whose primary
+// channel is ch (bssid_set + channel, RAM only). Returns 1 pinned, 0 no AP of the SSID on
+// ch (pin cleared, normal connect), -1 scan failed (pin cleared). Does not connect while held.
+int wifi_pin_select(uint8_t ch, uint8_t bssid_out[6] = nullptr, int8_t* rssi_out = nullptr);
+void wifi_unpin();  // back to "any AP of the SSID" on the next connect
+bool wifi_pinned(uint8_t bssid[6], uint8_t* ch);
+// true once after the pinned AP was not found 6 x in a row (net unpinned itself and
+// reconnects to any AP); the Playground then re-runs discovery.
+bool wifi_pin_lost_take();
+// Drop the association so the reconnect uses the current (pinned) config.
+void wifi_reassoc();
 // SSID of the configured network.
 const char* wifi_ssid();
 

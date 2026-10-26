@@ -29,6 +29,21 @@ std::atomic<bool> g_hold{false};        // Playground CII mode: stay disconnecte
 std::atomic<int> g_last_reason{0};      // last WIFI_REASON_* of a disconnect
 std::atomic<int> g_auth_fails{0};       // auth / handshake rejections since wifi_start
 std::atomic<int> g_noap_fails{0};       // "AP not found" since wifi_start
+// Playground "sender follows the gateway": BSSID pinned to the gateway channel (RAM only).
+std::atomic<bool> g_pinned{false};
+std::atomic<bool> g_pin_lost{false};
+std::atomic<int> g_pin_noap{0};
+uint8_t g_pin_bssid[6] = {};
+uint8_t g_pin_ch = 0;
+constexpr int kPinNoApMax = 6;  // 3 immediate + 2/4/8 s backoff, then fall back to any AP
+void clear_pin_config() {
+  wifi_config_t wc = {};
+  if (esp_wifi_get_config(WIFI_IF_STA, &wc) != ESP_OK) return;
+  wc.sta.bssid_set = false;
+  memset(wc.sta.bssid, 0, sizeof(wc.sta.bssid));
+  wc.sta.channel = 0;
+  esp_wifi_set_config(WIFI_IF_STA, &wc);
+}
 esp_netif_t* g_netif = nullptr;
 char g_ssid[33] = "";
 // Reconnect backoff: the first 3 attempts right away (WPA3 routers often
@@ -89,6 +104,13 @@ void on_event(void*, esp_event_base_t base, int32_t id, void* data) {
         reason == WIFI_REASON_NO_AP_FOUND_IN_AUTHMODE_THRESHOLD || reason == WIFI_REASON_NO_AP_FOUND_W_COMPATIBLE_SECURITY) {
       g_noap_fails = g_noap_fails + 1;
       g_failed = true;
+      if (g_pinned && ++g_pin_noap >= kPinNoApMax) {  // pinned AP gone: never stay offline for it
+        clear_pin_config();
+        g_pinned = false;
+        g_pin_lost = true;
+        g_retry = 0;
+        printf("Wi-Fi pinned AP not found %d x: unpinned, connecting to any AP\n", kPinNoApMax);
+      }
     } else if (is_auth_reason(reason)) {
       g_auth_fails = g_auth_fails + 1;
       g_failed = true;
@@ -101,6 +123,7 @@ void on_event(void*, esp_event_base_t base, int32_t id, void* data) {
     g_connected = true;
     g_failed = false;
     g_retry = 0;
+    g_pin_noap = 0;
     xEventGroupSetBits(wifi_events(), kBitIp);
   }
 }
@@ -136,6 +159,8 @@ void wifi_start(const char* ssid, const char* password, const char* hostname) {
   g_retry = 0;
   if (g_retry_timer != nullptr) esp_timer_stop(g_retry_timer);
   g_last_reason = 0;
+  g_pinned = false;  // new credentials: fresh config below has no BSSID
+  g_pin_noap = 0;
   snprintf(g_ssid, sizeof(g_ssid), "%s", ssid);
   wifi_config_t wc = {};
   snprintf(reinterpret_cast<char*>(wc.sta.ssid), sizeof(wc.sta.ssid), "%s", ssid);
@@ -392,4 +417,89 @@ int wifi_scan(WifiAp* out, int cap, uint32_t gen) {
     n++;
   }
   return n;
+}
+
+int wifi_pin_select(uint8_t ch, uint8_t bssid_out[6], int8_t* rssi_out) {
+  if (ch < 1 || ch > 13 || g_ssid[0] == '\0' || g_scanning) return -1;
+  wifi_scan_config_t sc = {};
+  sc.ssid = reinterpret_cast<uint8_t*>(g_ssid);
+  sc.channel = ch;
+  sc.show_hidden = false;
+  bool paused = !g_connected && !g_hold;
+  g_scanning = true;  // no reconnect while the scan runs (and blocks a UI scan)
+  if (paused) {
+    if (g_retry_timer != nullptr) esp_timer_stop(g_retry_timer);
+    esp_wifi_disconnect();
+    vTaskDelay(pdMS_TO_TICKS(200));
+  }
+  EXT_RAM_BSS_ATTR static wifi_ap_record_t recs[16];
+  uint16_t num = 0;
+  esp_err_t err = ESP_FAIL;
+  for (int i = 0; i < 2; ++i) {
+    err = scan_once(sc, 0);
+    num = 16;
+    if (err == ESP_OK) err = esp_wifi_scan_get_ap_records(&num, recs);
+    if (err == ESP_OK) break;
+    vTaskDelay(pdMS_TO_TICKS(300));
+  }
+  int best = -1;
+  if (err == ESP_OK) {
+    for (int i = 0; i < num; ++i) {  // sorted by RSSI; filter on the primary channel anyway
+      if (recs[i].primary == ch && strcmp(reinterpret_cast<const char*>(recs[i].ssid), g_ssid) == 0) {
+        best = i;
+        break;
+      }
+    }
+  }
+  int rc;
+  if (best >= 0) {
+    wifi_config_t wc = {};
+    esp_wifi_get_config(WIFI_IF_STA, &wc);
+    wc.sta.bssid_set = true;
+    memcpy(wc.sta.bssid, recs[best].bssid, 6);
+    wc.sta.channel = ch;
+    esp_wifi_set_config(WIFI_IF_STA, &wc);
+    memcpy(g_pin_bssid, recs[best].bssid, 6);
+    g_pin_ch = ch;
+    g_pin_noap = 0;
+    g_pinned = true;
+    if (bssid_out != nullptr) memcpy(bssid_out, recs[best].bssid, 6);
+    if (rssi_out != nullptr) *rssi_out = recs[best].rssi;
+    printf("Wi-Fi pinned to %02X:%02X:%02X:%02X:%02X:%02X ch %u rssi %d\n", g_pin_bssid[0], g_pin_bssid[1],
+           g_pin_bssid[2], g_pin_bssid[3], g_pin_bssid[4], g_pin_bssid[5], ch, recs[best].rssi);
+    rc = 1;
+  } else {
+    clear_pin_config();
+    g_pinned = false;
+    printf("Wi-Fi: no AP of the SSID on ch %u (%s): not pinned\n", ch, esp_err_to_name(err));
+    rc = err == ESP_OK ? 0 : -1;
+  }
+  g_scanning = false;
+  if (paused && g_ssid[0] != '\0' && !g_hold) {
+    g_retry = 0;
+    esp_wifi_connect();
+  }
+  return rc;
+}
+
+void wifi_unpin() {
+  if (!g_pinned) return;
+  clear_pin_config();  // takes effect on the next (re)connect
+  g_pinned = false;
+  printf("Wi-Fi unpinned\n");
+}
+
+bool wifi_pinned(uint8_t bssid[6], uint8_t* ch) {
+  if (!g_pinned) return false;
+  if (bssid != nullptr) memcpy(bssid, g_pin_bssid, 6);
+  if (ch != nullptr) *ch = g_pin_ch;
+  return true;
+}
+
+bool wifi_pin_lost_take() { return g_pin_lost.exchange(false); }
+
+void wifi_reassoc() {
+  if (g_ssid[0] == '\0' || g_hold || g_scanning) return;
+  g_retry = 0;
+  esp_wifi_disconnect();  // the disconnect event reconnects with the (new) config
 }
