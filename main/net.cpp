@@ -341,6 +341,117 @@ HttpGetResult http_get_raw(const char* url, const char* user, const char* passwo
   return r;
 }
 
+// POST helper (Co4 login): like http_get_raw, but sends body first. The answer
+// body is read for every status (OAuth errors come as 400 with JSON). Never
+// logs url paths, bodies or the bearer token.
+HttpGetResult http_post(const char* url, const char* content_type, const char* body, size_t body_len,
+                        const char* bearer, uint8_t* resp, size_t cap, int timeout_ms) {
+  HttpGetResult r = {};
+  char label[40];
+  const char* h = strstr(url, "://");
+  h = h != nullptr ? h + 3 : url;
+  size_t hl = strcspn(h, "/:?");
+  snprintf(label, sizeof(label), "%.*s", static_cast<int>(hl < 39 ? hl : 39), h);
+  if (strncmp(url, "https://", 8) != 0) {
+    snprintf(r.error, sizeof(r.error), "https only");
+    return r;
+  }
+  TlsGuard g(label);
+  if (!g.ok) {
+    snprintf(r.error, sizeof(r.error), "TLS busy");
+    return r;
+  }
+  esp_http_client_config_t cfg = {};
+  cfg.url = url;
+  cfg.method = HTTP_METHOD_POST;
+  cfg.timeout_ms = timeout_ms;
+  cfg.buffer_size = 2048;
+  cfg.buffer_size_tx = 1024;
+  cfg.disable_auto_redirect = true;
+  cfg.crt_bundle_attach = esp_crt_bundle_attach;
+  esp_http_client_handle_t c = esp_http_client_init(&cfg);
+  if (c == nullptr) {
+    snprintf(r.error, sizeof(r.error), "client init failed");
+    return r;
+  }
+  char* auth = nullptr;
+  if (bearer != nullptr && bearer[0] != '\0') {
+    size_t n = strlen(bearer) + 8;
+    auth = static_cast<char*>(heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (auth == nullptr) {
+      snprintf(r.error, sizeof(r.error), "no memory");
+      esp_http_client_cleanup(c);
+      return r;
+    }
+    snprintf(auth, n, "Bearer %s", bearer);
+    esp_http_client_set_header(c, "Authorization", auth);
+  }
+  esp_http_client_set_header(c, "Content-Type", content_type);
+  esp_http_client_set_header(c, "Accept", "application/json");
+  auto done = [&]() {
+    esp_http_client_close(c);
+    esp_http_client_cleanup(c);
+    if (auth != nullptr) {
+      memset(auth, 0, strlen(auth));
+      heap_caps_free(auth);
+    }
+  };
+  esp_err_t err = esp_http_client_open(c, static_cast<int>(body_len));
+  if (err != ESP_OK) {
+    snprintf(r.error, sizeof(r.error), "%s", esp_err_to_name(err));
+    done();
+    return r;
+  }
+  size_t sent = 0;
+  while (sent < body_len) {
+    int n = esp_http_client_write(c, body + sent, static_cast<int>(body_len - sent));
+    if (n <= 0) {
+      snprintf(r.error, sizeof(r.error), "write error");
+      done();
+      return r;
+    }
+    sent += static_cast<size_t>(n);
+  }
+  int64_t content_length = esp_http_client_fetch_headers(c);
+  r.status = esp_http_client_get_status_code(c);
+  if (content_length > 0 && static_cast<size_t>(content_length) > cap) {
+    snprintf(r.error, sizeof(r.error), "Response is %lld bytes (limit %u)", content_length, static_cast<unsigned>(cap));
+    done();
+    return r;
+  }
+  size_t total = 0;
+  bool overflow = false;
+  const int64_t deadline = esp_timer_get_time() + static_cast<int64_t>(timeout_ms) * 6000;
+  for (;;) {
+    if (timeout_ms > 0 && esp_timer_get_time() > deadline) {
+      snprintf(r.error, sizeof(r.error), "body timeout");
+      done();
+      return r;
+    }
+    if (total >= cap) {
+      char dummy;
+      if (esp_http_client_read(c, &dummy, 1) > 0) overflow = true;
+      break;
+    }
+    int n = esp_http_client_read(c, reinterpret_cast<char*>(resp + total), cap - total);
+    if (n < 0) {
+      snprintf(r.error, sizeof(r.error), "read error");
+      done();
+      return r;
+    }
+    if (n == 0) break;
+    total += static_cast<size_t>(n);
+  }
+  done();
+  r.length = total;
+  if (overflow) {
+    snprintf(r.error, sizeof(r.error), "Response exceeded %u bytes", static_cast<unsigned>(cap));
+    return r;
+  }
+  r.ok = true;
+  return r;
+}
+
 const char* wifi_ssid() { return g_ssid; }
 
 void wifi_scan_cancel(uint32_t gen) {

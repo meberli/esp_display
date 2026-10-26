@@ -73,3 +73,8 @@ HttpGetResult http_get_raw(const char* url, const char* user, const char* passwo
 // hdr_name/hdr_value add one request header (e.g. x-windy-api-key).
 HttpGetResult http_get(const char* url, const char* user, const char* password, uint8_t* body, size_t cap,
                        int timeout_ms, const char* hdr_name = nullptr, const char* hdr_value = nullptr);
+// POST body (body_len bytes, content_type e.g. application/x-www-form-urlencoded)
+// to an https:// url under the TLS lock; the answer goes into resp (cap bytes,
+// read for every status). bearer != nullptr adds "Authorization: Bearer ...".
+HttpGetResult http_post(const char* url, const char* content_type, const char* body, size_t body_len,
+                        const char* bearer, uint8_t* resp, size_t cap, int timeout_ms);
