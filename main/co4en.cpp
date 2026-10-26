@@ -532,10 +532,17 @@ void co4en_sweep_start(Co4enSweep* s, uint8_t last_ch, uint8_t single_ch, uint32
 }
 
 uint32_t co4en_sweep_backoff_ms(uint8_t fails) {
-  static const uint32_t m[] = {1, 5, 15, 60};
-  uint8_t i = fails == 0 ? 0 : fails - 1;
-  if (i > 3) i = 3;
-  return m[i] * 60000u;
+  uint32_t s = CONFIG_CO4EN_RESWEEP_MIN_S;
+  for (uint8_t i = 1; i < fails && s < CONFIG_CO4EN_RESWEEP_MAX_S; ++i) s *= 2;
+  if (s > CONFIG_CO4EN_RESWEEP_MAX_S) s = CONFIG_CO4EN_RESWEEP_MAX_S;
+  return s * 1000u;
+}
+
+uint32_t co4en_resweep_wait_ms(const Co4enResweep& r, uint32_t now_ms) {
+  if (r.n == 0) return 0;
+  uint32_t gap = co4en_sweep_backoff_ms(r.fails);
+  uint32_t el = now_ms - r.last_ms;
+  return el >= gap ? 0 : gap - el;
 }
 
 uint8_t co4en_sweep_step(Co4enSweep* s, uint32_t now_ms, bool power_ok) {

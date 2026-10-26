@@ -89,6 +89,7 @@ uint32_t disc_t0 = 0, disc_t_next = 0, disc_phase_t0 = 0;
 uint8_t ap_warn_ch = 0;      // no AP of our SSID on this gateway channel
 uint8_t noap_n = 0;          // discoveries in a row that found the gateway but no AP on its channel
 bool boot_aligned = false;
+Co4enResweep rs = {};        // runtime re-search gate (count, last start, failures -> backoff)
 Co4enBeacon last_bc = {};
 bool bc_have = false;
 uint32_t bc_ms = 0;
@@ -144,6 +145,9 @@ PlayCounters counters() {
   c.disc_ch = disc_ch;
   c.pinned = wifi_pinned(nullptr, &c.pin_ch);
   c.ap_warn_ch = ap_warn_ch;
+  c.resweeps = rs.n;
+  c.last_resweep_s = rs.n != 0 ? (now_ms() - rs.last_ms) / 1000 : 0;
+  c.backoff_s = (co4en_resweep_wait_ms(rs, now_ms()) + 999) / 1000;
   c.bc_have = bc_have;
   c.bc_ch = last_bc.channel;
   c.bc_flags = last_bc.flags;
@@ -458,11 +462,43 @@ void set_channel(uint8_t ch) {
   if (e != ESP_OK) logf("set channel %u failed (%d)", ch, static_cast<int>(e));
 }
 
+// Pin an AP of the configured WLAN on gateway channel c (scan, BSSID pin, reassociate).
+// No AP there: warn (log + UI queue), Wi-Fi stays where it is.
+void pin_to_gw(uint8_t c, const char* why) {
+  int8_t rssi = 0;
+  int rc = wifi_pin_select(c, nullptr, &rssi);
+  if (rc == 1) {
+    ap_warn_ch = 0;
+    logf("%s: WLAN ch %u != gateway ch %u: reconnecting to an AP on ch %u (rssi %d)", why, cur_channel(), c, c, rssi);
+    wifi_reassoc();
+  } else {
+    ap_warn_ch = c;
+    char m[64];
+    snprintf(m, sizeof(m), "Kein Access Point auf Gateway-Kanal %u", c);
+    logf("%s%s", m, rc < 0 ? " (scan failed)" : "");
+    ui_post(PlayMsgKind::Status, m);
+  }
+}
+
+// Gateway reported its channel (ACK-INFO / BEACON while associated): adopt it (NVS only on
+// change) and move the WLAN to an AP on it. Once per distinct reported channel (hint_ch).
 void channel_hint(uint8_t gw_ch) {
+  if (offair() || gw_ch < 1 || gw_ch > 13 || gw_ch == hint_ch) return;
+  bool paired = st == PlayState::Paired;
+  uint8_t nc = paired ? co4en_gw_channel_update(gw_chan, gw_ch) : 0;
+  if (nc != 0) {
+    logf("gateway channel %u -> %u (reported by the gateway, saved)", gw_chan, nc);
+    gw_chan = nc;
+    nvs_save_u8(CO4EN_NVS_CHANNEL, gw_chan);
+  }
   uint8_t ch = cur_channel();
-  if (offair() || gw_ch == 0 || gw_ch == ch || gw_ch == hint_ch) return;
+  if (gw_ch == ch) return;
   hint_ch = gw_ch;
-  logf("gateway channel %u != WLAN channel %u (AP re-selection on the next discovery)", gw_ch, ch);
+  if (!paired || !wifi_connected()) {
+    logf("gateway channel %u != WLAN channel %u (AP re-selection on the next discovery)", gw_ch, ch);
+    return;
+  }
+  pin_to_gw(gw_ch, "gateway channel hint");
 }
 
 // --- v0.7 discovery: Wi-Fi down (bounded), BEACON listen 1..13, then probe / PAIR_REQ ------
@@ -733,6 +769,7 @@ void on_ack(const uint8_t src[6], const uint8_t* d, size_t n) {
   bool probe_hit = probe_out && pend.active && a.acked_seq == pend.seq;
   if (pend.active && (a.acked_seq == pend.seq)) pend.active = false;
   co4en_link_ack(&link);  // any ACK-INFO: the gateway hears us
+  co4en_resweep_ack(&rs);  // backoff back to the minimum
   if (probe_hit && st == PlayState::Searching) probe_found(a);
   if (a.result != CO4EN_ACK_OK) {
     ++failed_n;
@@ -775,6 +812,16 @@ void on_beacon(const uint8_t src[6], const uint8_t* d, size_t n) {
 
 void disc_begin(bool pairing) {
   if (!disc_possible() || disc != Disc::Idle) return;
+  if (!pairing) {  // re-search drops Wi-Fi: rate limited (2 min min, doubling to 30 min on failures)
+    uint32_t w = co4en_resweep_wait_ms(rs, now_ms());
+    if (w != 0) {
+      sw.st = Co4enSweepSt::Backoff;
+      sw.t_next = now_ms() + w;
+      logf("gateway re-search in %lu s (backoff, WLAN stays on)", static_cast<unsigned long>(w / 1000));
+      return;
+    }
+    co4en_resweep_started(&rs, now_ms());
+  }
   disc_pairing = pairing;
   disc_bc_ch = 0;
   disc_n = disc_i = disc_ch = 0;
@@ -815,15 +862,17 @@ void disc_finish(uint8_t ch) {
     if (rc == 1) {
       ap_warn_ch = 0;
       noap_n = 0;
+      if (!disc_pairing) co4en_resweep_result(&rs, true);
       logf("WLAN: AP on gateway channel %u (rssi %d) selected", ch, rssi);
     } else {
       ap_warn_ch = ch;
-      if (st == PlayState::Paired) {  // unreachable over this WLAN: retry with 1/5/15/60 min, no Wi-Fi drop loop
+      if (st == PlayState::Paired) {  // unreachable over this WLAN: retry with backoff, no Wi-Fi drop loop
         if (noap_n < 255) ++noap_n;
+        if (!disc_pairing) co4en_resweep_result(&rs, false);
         st = PlayState::Lost;
-        sw.fails = noap_n;
+        sw.fails = rs.fails > noap_n ? rs.fails : noap_n;
         sw.st = Co4enSweepSt::Backoff;
-        sw.t_next = now_ms() + co4en_sweep_backoff_ms(noap_n);
+        sw.t_next = now_ms() + co4en_sweep_backoff_ms(sw.fails);
       }
       char m[64];
       snprintf(m, sizeof(m), "Kein Access Point auf Gateway-Kanal %u", ch);
@@ -837,11 +886,13 @@ void disc_finish(uint8_t ch) {
        static_cast<unsigned long>(now_ms() - disc_t0));
   if (ch == 0 && (st == PlayState::Lost || st == PlayState::Searching)) {
     st = PlayState::Lost;
+    if (!disc_pairing) co4en_resweep_result(&rs, false);
     if (sw.st != Co4enSweepSt::Backoff) {  // listen-only failure: count it like a failed sweep
       if (sw.fails < 255) ++sw.fails;
-      sw.st = Co4enSweepSt::Backoff;
-      sw.t_next = now_ms() + co4en_sweep_backoff_ms(sw.fails);
     }
+    if (sw.fails < rs.fails) sw.fails = rs.fails;
+    sw.st = Co4enSweepSt::Backoff;
+    sw.t_next = now_ms() + co4en_sweep_backoff_ms(sw.fails);
     logf("gateway not found: next search in %lu min", static_cast<unsigned long>(co4en_sweep_backoff_ms(sw.fails) / 60000));
   }
 }
@@ -921,6 +972,7 @@ void do_reset() {
   wifi_unpin();
   ap_warn_ch = 0;
   noap_n = 0;
+  rs = {};
   boot_aligned = false;
   pend.active = false;
   probe_out = false;
@@ -1094,20 +1146,7 @@ void tick() {
   if (st == PlayState::Paired && !boot_aligned && disc == Disc::Idle && !cii_mode && gw_chan != 0 &&
       wifi_connected()) {
     boot_aligned = true;
-    if (cur_channel() != gw_chan) {
-      int rc = wifi_pin_select(gw_chan);
-      if (rc == 1) {
-        ap_warn_ch = 0;
-        logf("WLAN ch %u != gateway ch %u: reconnecting to an AP on ch %u", cur_channel(), gw_chan, gw_chan);
-        wifi_reassoc();
-      } else {
-        ap_warn_ch = gw_chan;
-        char m[64];
-        snprintf(m, sizeof(m), "Kein Access Point auf Gateway-Kanal %u", gw_chan);
-        logf("%s", m);
-        ui_post(PlayMsgKind::Status, m);
-      }
-    }
+    if (cur_channel() != gw_chan) pin_to_gw(gw_chan, "boot");
   }
   // Pinned AP gone (net fell back to any AP): find the gateway channel again.
   if (wifi_pin_lost_take() && st == PlayState::Paired && disc == Disc::Idle) start_search("pinned AP gone");
@@ -1129,7 +1168,11 @@ void tick() {
     } else {
       pend.active = false;
       ++failed_n;
-      if (st == PlayState::Paired && co4en_link_miss(&link)) start_search("Gateway verloren (3 ACKs missed)");
+      if (st == PlayState::Paired && co4en_link_miss(&link)) {
+        char why[48];
+        snprintf(why, sizeof(why), "Gateway verloren (%d ACKs missed)", kCo4enLinkMissMax);
+        start_search(why);
+      }
     }
   }
   search_tick(t);
@@ -1302,7 +1345,7 @@ void play_diag() {
   console_printf("CO4EN state=%s fwd=%d radio=%d ch=%u gw=%02X%02X%02X%02X%02X%02X pair_req=%lu sent=%lu mac_ok=%lu "
                  "acked=%lu failed=%lu dry=%lu seq=%lu enc=%s cii=%d gw_ch=%u link_miss=%u sweep=%s sweep_ch=%u "
                  "sweep_fails=%u next=%lus vstore=%u disc=%u disc_ch=%u pinned=%d pin_ch=%u ap_warn_ch=%u "
-                 "beacon=%s beacon_ch=%u beacon_flags=%02X beacon_age=%lus\n",
+                 "beacon=%s beacon_ch=%u beacon_flags=%02X beacon_age=%lus resweeps=%lu last_resweep_s=%lu backoff_s=%lu\n",
                  state_name(c.state), c.fwd ? 1 : 0, c.radio ? 1 : 0, c.channel, c.gw_mac[0], c.gw_mac[1], c.gw_mac[2],
                  c.gw_mac[3], c.gw_mac[4], c.gw_mac[5], static_cast<unsigned long>(c.pair_req),
                  static_cast<unsigned long>(c.sent), static_cast<unsigned long>(c.mac_ok),
@@ -1310,7 +1353,9 @@ void play_diag() {
                  static_cast<unsigned long>(c.dry), static_cast<unsigned long>(c.last_seq), c.kv_text ? "kvtext" : "kvid", c.cii ? 1 : 0,
                  c.gw_chan, c.link_miss, kSweepNames[c.sweep_st & 3], c.sweep_ch, c.sweep_fails,
                  static_cast<unsigned long>(c.sweep_next_s), c.vstore_mv, c.disc, c.disc_ch, c.pinned ? 1 : 0, c.pin_ch,
-                 c.ap_warn_ch, c.bc_have ? "yes" : "no", c.bc_ch, c.bc_flags, static_cast<unsigned long>(c.bc_age_s));
+                 c.ap_warn_ch, c.bc_have ? "yes" : "no", c.bc_ch, c.bc_flags, static_cast<unsigned long>(c.bc_age_s),
+                 static_cast<unsigned long>(c.resweeps), static_cast<unsigned long>(c.last_resweep_s),
+                 static_cast<unsigned long>(c.backoff_s));
 }
 
 void play_print_qr_test_only() { console_printf("CO4ENQR %s\n", qr); }

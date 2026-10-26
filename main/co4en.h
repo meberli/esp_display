@@ -11,6 +11,22 @@
 
 #include "co4en_proto.h"
 
+// Gateway-follow limits (menuconfig "Loxone panel"); host builds use the defaults.
+#if defined(__has_include)
+#if __has_include("sdkconfig.h")
+#include "sdkconfig.h"
+#endif
+#endif
+#ifndef CONFIG_CO4EN_LINK_MISS_MAX
+#define CONFIG_CO4EN_LINK_MISS_MAX 3
+#endif
+#ifndef CONFIG_CO4EN_RESWEEP_MIN_S
+#define CONFIG_CO4EN_RESWEEP_MIN_S 120
+#endif
+#ifndef CONFIG_CO4EN_RESWEEP_MAX_S
+#define CONFIG_CO4EN_RESWEEP_MAX_S 1800
+#endif
+
 // --- crypto (portable SHA-256, HMAC, HKDF) --------------------------------------
 void co4en_sha256(const uint8_t* data, size_t n, uint8_t out[32]);
 // HMAC-SHA256 over the concatenation of up to 3 parts (nullptr / 0 = unused).
@@ -156,7 +172,7 @@ uint16_t co4en_default_key_id(const char* key);  // 0 = not in the table
 // --- link loss + channel sweep (spec v0.5) -------------------------------------------
 // Probe = normal encrypted unicast DATA (STATUS, ACK_REQ) to the known gateway; a
 // channel counts as found on the ACK-INFO reply (MAC ACK alone is only a hint).
-constexpr int kCo4enLinkMissMax = 3;        // consecutive missed ACKs -> link lost
+constexpr int kCo4enLinkMissMax = CONFIG_CO4EN_LINK_MISS_MAX;  // consecutive missed ACKs -> link lost
 constexpr uint32_t kCo4enProbeWaitMs = 50;  // per channel
 constexpr uint32_t kCo4enVstoreMinMv = 15500;
 struct Co4enLink {
@@ -182,7 +198,8 @@ struct Co4enSweep {
 // Order: last known channel, then 1, 6, 11, then the rest up to 13 (no duplicates).
 // single_ch != 0: only that channel (Wi-Fi node: stays on the AP channel).
 void co4en_sweep_start(Co4enSweep* s, uint8_t last_ch, uint8_t single_ch, uint32_t now_ms);
-// Backoff after the n-th failed sweep (1-based): 1, 5, 15, then 60 min.
+// Backoff after the n-th failed search (1-based): RESWEEP_MIN_S doubled per failure,
+// capped at RESWEEP_MAX_S (defaults 2, 4, 8, 16, 30, 30 ... min). fails 0 = minimum.
 uint32_t co4en_sweep_backoff_ms(uint8_t fails);
 // Call periodically. Returns the channel to probe now (switch there, send one probe
 // with a new seq), 0 = nothing to do. power_ok: VSTORE >= 15.5 V (CII); otherwise the
@@ -191,3 +208,29 @@ uint8_t co4en_sweep_step(Co4enSweep* s, uint32_t now_ms, bool power_ok);
 // ACK-INFO received for the probe on s->ch: done. Returns true if `found` differs
 // from nvs_ch (caller persists it in NVS).
 bool co4en_sweep_found(Co4enSweep* s, uint8_t nvs_ch);
+
+// --- runtime re-sweep gate (gateway follow) ----------------------------------------
+// A re-search drops Wi-Fi briefly; it may start at most every backoff(fails) after the
+// previous one (min 2 min even after a success), so Wi-Fi / Loxone are not interrupted
+// continuously. fails counts failed searches in a row; an ACK resets it.
+struct Co4enResweep {
+  uint32_t n;        // re-searches started since boot
+  uint32_t last_ms;  // start of the last one (valid if n != 0)
+  uint8_t fails;
+};
+// ms until the next re-search may start (0 = now).
+uint32_t co4en_resweep_wait_ms(const Co4enResweep& r, uint32_t now_ms);
+inline void co4en_resweep_started(Co4enResweep* r, uint32_t now_ms) {
+  ++r->n;
+  r->last_ms = now_ms;
+}
+inline void co4en_resweep_result(Co4enResweep* r, bool found) {
+  if (found) r->fails = 0;
+  else if (r->fails < 255) ++r->fails;
+}
+inline void co4en_resweep_ack(Co4enResweep* r) { r->fails = 0; }
+// Channel reported by the gateway (ACK-INFO / BEACON): new gateway channel to adopt, or
+// 0 = nothing to do (invalid or unchanged).
+inline uint8_t co4en_gw_channel_update(uint8_t gw_ch, uint8_t reported) {
+  return reported >= 1 && reported <= 13 && reported != gw_ch ? reported : 0;
+}

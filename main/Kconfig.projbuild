@@ -30,6 +30,24 @@ config PANEL_DIAG_INJECT
         (DIAGGT, DIAGFB, DIAGSTATS, DIAGSTACK). DIAGTAP/DIAGSWIPE/DIAGRAW,
         DIAGVER, DIAGSCRTO, DIAGSAVER and DIAGBL need it (or the test harness).
 
+config CO4EN_LINK_MISS_MAX
+    int "CO4EN: missed ACKs in a row before the gateway is searched again"
+    range 1 20
+    default 3
+
+config CO4EN_RESWEEP_MIN_S
+    int "CO4EN: minimum seconds between gateway re-searches"
+    range 30 3600
+    default 120
+    help
+        A re-search drops Wi-Fi for up to ~18 s. Doubled after each failed
+        search up to CO4EN_RESWEEP_MAX_S; reset by an ACK.
+
+config CO4EN_RESWEEP_MAX_S
+    int "CO4EN: maximum seconds between gateway re-searches"
+    range 60 86400
+    default 1800
+
 config PANEL_SERIAL_BAUD
     int "Console/harness baud rate after boot"
     default 460800 if PANEL_TEST_HARNESS

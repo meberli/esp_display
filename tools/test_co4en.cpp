@@ -226,11 +226,11 @@ int main() {
     CHECK(!co4en_sweep_found(&s, nvs), "sweep: same channel -> no NVS write");
     CHECK(!co4en_sweep_found(&s, nvs), "sweep: found without probe ignored");
   }
-  {  // not found: backoff 1, 5, 15, 60, 60 min; VSTORE low pauses
+  {  // not found: backoff 2, 4, 8, 16, 30 min (Kconfig defaults); VSTORE low pauses
     Co4enSweep s = {};
     co4en_sweep_start(&s, 0, 0, 0);
     uint32_t t = 0;
-    const uint32_t bo[5] = {60000, 300000, 900000, 3600000, 3600000};
+    const uint32_t bo[5] = {120000, 240000, 480000, 960000, 1800000};
     bool ok = true;
     for (int round = 0; round < 5; ++round) {
       int probes = 0;
@@ -239,14 +239,58 @@ int main() {
       ok &= co4en_sweep_step(&s, s.t_next - 1, true) == 0;
       t = s.t_next;
     }
-    CHECK(ok, "sweep: 13 probes per sweep, backoff 1/5/15/60/60 min");
+    CHECK(ok, "sweep: 13 probes per sweep, backoff 2/4/8/16/30 min");
     Co4enSweep p = {};
     co4en_sweep_start(&p, 3, 0, 0);
     CHECK(co4en_sweep_step(&p, 0, false) == 0 && p.t_next == 1000 && p.idx == 0, "sweep: VSTORE low -> waits");
     CHECK(co4en_sweep_step(&p, 1000, true) == 3, "sweep: VSTORE ok -> probes");
     co4en_sweep_start(&p, 3, 3, 0);
     CHECK(co4en_sweep_step(&p, 0, true) == 3 && co4en_sweep_step(&p, 50, true) == 0 && p.st == Co4enSweepSt::Backoff &&
-              p.t_next == 50 + 60000, "sweep: single channel (Wi-Fi) not found -> backoff");
+              p.t_next == 50 + 120000, "sweep: single channel (Wi-Fi) not found -> backoff");
+  }
+  {  // backoff curve: minimum for 0/1 failures, doubling, capped, no overflow
+    CHECK(co4en_sweep_backoff_ms(0) == 120000 && co4en_sweep_backoff_ms(1) == 120000 &&
+              co4en_sweep_backoff_ms(5) == 1800000 && co4en_sweep_backoff_ms(6) == 1800000 &&
+              co4en_sweep_backoff_ms(255) == 1800000, "backoff: 2 min .. 30 min cap");
+  }
+  {  // runtime re-sweep state machine: N missed ACKs -> search, gate, channel change, no AP
+    Co4enLink l = {};
+    Co4enResweep r = {};
+    uint8_t gw = 7, nvs = 7;
+    int nvs_writes = 0;
+    uint32_t t = 1000;
+    CHECK(co4en_resweep_wait_ms(r, t) == 0, "resweep: first search allowed at once");
+    bool lost = false;
+    for (int i = 0; i < kCo4enLinkMissMax; ++i) lost = co4en_link_miss(&l);
+    CHECK(lost && kCo4enLinkMissMax == 3, "resweep: N=3 missed ACKs trigger");
+    co4en_resweep_started(&r, t);
+    uint8_t c = co4en_gw_channel_update(gw, 6);  // sweep finds the gateway on 6
+    if (c) { gw = c; if (gw != nvs) { nvs = gw; ++nvs_writes; } }
+    co4en_resweep_result(&r, true);
+    CHECK(gw == 6 && nvs == 6 && nvs_writes == 1 && r.fails == 0 && r.n == 1, "resweep: channel change saved once");
+    CHECK(co4en_gw_channel_update(gw, 6) == 0 && co4en_gw_channel_update(gw, 0) == 0 &&
+              co4en_gw_channel_update(gw, 14) == 0, "resweep: same / invalid channel ignored");
+    CHECK(co4en_resweep_wait_ms(r, t + 1000) == 119000, "resweep: min 2 min after a success");
+    t += 120000;
+    CHECK(co4en_resweep_wait_ms(r, t) == 0, "resweep: allowed after 2 min");
+    // no AP of the WLAN on the gateway channel / gateway not found: failures double the gap
+    const uint32_t gap[6] = {120000, 240000, 480000, 960000, 1800000, 1800000};
+    bool ok = true;
+    for (int i = 0; i < 6; ++i) {
+      co4en_resweep_started(&r, t);
+      co4en_resweep_result(&r, false);
+      ok &= co4en_resweep_wait_ms(r, t) == gap[i] && co4en_resweep_wait_ms(r, t + gap[i] - 1) == 1 &&
+            co4en_resweep_wait_ms(r, t + gap[i]) == 0;
+      t += gap[i];
+    }
+    CHECK(ok && r.n == 7 && r.fails == 6, "resweep: backoff 2/4/8/16/30/30 min after failures");
+    co4en_resweep_ack(&r);
+    CHECK(r.fails == 0 && co4en_resweep_wait_ms(r, r.last_ms) == 120000 && co4en_resweep_wait_ms(r, r.last_ms + 120000) == 0, "resweep: ACK resets backoff to 2 min");
+    co4en_link_ack(&l);
+    CHECK(!co4en_link_miss(&l), "resweep: ACK resets the miss counter");
+    Co4enResweep w = {};
+    w.n = 1; w.last_ms = 0xFFFFF000u;  // millis wrap
+    CHECK(co4en_resweep_wait_ms(w, 0x00001000u) == 120000 - 0x2000, "resweep: ms wrap-around");
   }
   {  // v0.7 BEACON (spec 6.2 vector)
     uint8_t b[64];
