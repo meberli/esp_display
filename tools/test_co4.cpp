@@ -161,6 +161,18 @@ static void test_form() {
   CHECK(strcmp(f, "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Adevice_code&scope=openid+offline_access") == 0);
   char s[12] = "a=b";
   CHECK(!co4_form_add(s, sizeof(s), "client_id", "co4-panel") && strcmp(s, "a=b") == 0);
+
+  char b[256];
+  auto pub = [&]() { return !strstr(b, "client_secret") && !strstr(b, "code_challenge") && !strstr(b, "code_verifier"); };
+  CHECK(co4_form_device(b, sizeof(b), "co4-panel", "openid offline_access"));
+  CHECK(strcmp(b, "client_id=co4-panel&scope=openid+offline_access") == 0 && pub());
+  CHECK(co4_form_poll(b, sizeof(b), "co4-panel", "DEVCODE-PLACEHOLDER"));
+  CHECK(strcmp(b, "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Adevice_code&device_code=DEVCODE-PLACEHOLDER"
+                  "&client_id=co4-panel") == 0 && pub());
+  CHECK(co4_form_refresh(b, sizeof(b), "co4-panel", "RT.PLACEHOLDER"));
+  CHECK(strcmp(b, "grant_type=refresh_token&refresh_token=RT.PLACEHOLDER&client_id=co4-panel") == 0 && pub());
+  CHECK(!co4_form_refresh(b, sizeof(b), "co4-panel", "") && b[0] == '\0');
+  CHECK(!co4_form_device(b, 10, "co4-panel", "openid offline_access") && b[0] == '\0');
 }
 
 static void test_refresh_at() {

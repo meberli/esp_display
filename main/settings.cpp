@@ -1063,6 +1063,22 @@ bool settings_load_co4_site(char* site, size_t n) {
   return ok;
 }
 
+bool settings_load_co4_expired() {
+  nvs_handle_t h;
+  if (nvs_open(kNs, NVS_READONLY, &h) != ESP_OK) return false;
+  uint8_t v = 0;
+  bool ok = nvs_get_u8(h, "co4_exp", &v) == ESP_OK && v == 1;
+  nvs_close(h);
+  return ok;
+}
+
+bool settings_save_co4_expired(bool expired) {
+  Tx tx;
+  if (expired) tx.u8("co4_exp", 1);
+  else tx.erase("co4_exp");
+  return tx.commit();
+}
+
 bool settings_save_co4_site(const char* site) {
   Tx tx;
   if (site == nullptr || site[0] == '\0') tx.erase("co4_site");

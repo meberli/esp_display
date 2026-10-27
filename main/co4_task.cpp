@@ -18,7 +18,10 @@
 #include "sys.h"
 
 #ifndef CONFIG_PANEL_CO4_REALM_URL
-#define CONFIG_PANEL_CO4_REALM_URL "https://auth.co4.dev/auth/realms/co4_beta"
+#ifndef CONFIG_PANEL_CO4_SCOPE
+#define CONFIG_PANEL_CO4_SCOPE "openid offline_access"
+#endif
+#define CONFIG_PANEL_CO4_REALM_URL "https://auth.co4.cloud/realms/co4_beta"
 #endif
 #ifndef CONFIG_PANEL_CO4_CLIENT_ID
 #define CONFIG_PANEL_CO4_CLIENT_ID "co4-panel"
@@ -174,9 +177,7 @@ void do_login() {
     set_state(g_w->refresh[0] ? Co4State::LoggedIn : Co4State::NoLogin, "Co4 nicht erreichbar");
     return;
   }
-  form_start();
-  form("client_id", CONFIG_PANEL_CO4_CLIENT_ID);
-  form("scope", "openid offline_access");
+  if (!co4_form_device(g_w->form, sizeof(g_w->form), CONFIG_PANEL_CO4_CLIENT_ID, CONFIG_PANEL_CO4_SCOPE)) return;
   HttpGetResult r = post_form(g_w->oidc.device_ep);
   if (!r.ok || r.status != 200 || !co4_parse_device_auth(g_w->body, r.length, &g_w->dev)) {
     ESP_LOGW(kTag, "device authorization failed (HTTP %d)", r.status);
@@ -197,10 +198,7 @@ void do_login() {
 }
 
 void do_poll() {
-  form_start();
-  form("grant_type", "urn:ietf:params:oauth:grant-type:device_code");
-  form("device_code", g_w->dev.device_code);
-  form("client_id", CONFIG_PANEL_CO4_CLIENT_ID);
+  if (!co4_form_poll(g_w->form, sizeof(g_w->form), CONFIG_PANEL_CO4_CLIENT_ID, g_w->dev.device_code)) return;
   HttpGetResult r = post_form(g_w->oidc.token_ep);
   Co4TokErr e = Co4TokErr::Other;
   bool got = r.status == 200 && take_tokens(r.length, &e);
@@ -219,6 +217,7 @@ void do_poll() {
     case Co4PollStep::Done:
       wipe(g_w->dev.device_code, sizeof(g_w->dev.device_code));
       ESP_LOGI(kTag, "login ok");
+      settings_save_co4_expired(false);
       set_state(Co4State::LoggedIn, "");
       g_next_data = now;
       return;
@@ -245,10 +244,10 @@ bool ensure_access() {
     g_next_refresh_try = now + kRetryMs;
     return false;
   }
-  form_start();
-  form("grant_type", "refresh_token");
-  form("refresh_token", g_w->refresh);
-  form("client_id", CONFIG_PANEL_CO4_CLIENT_ID);
+  if (!co4_form_refresh(g_w->form, sizeof(g_w->form), CONFIG_PANEL_CO4_CLIENT_ID, g_w->refresh)) {
+    g_next_refresh_try = now + kRetryMs;
+    return false;
+  }
   HttpGetResult r = post_form(g_w->oidc.token_ep);
   Co4TokErr e = Co4TokErr::Other;
   if (r.status == 200 && take_tokens(r.length, &e)) return true;
@@ -262,7 +261,8 @@ bool ensure_access() {
   if (e == Co4TokErr::InvalidGrant) {
     ESP_LOGW(kTag, "refresh: invalid_grant, login expired");
     drop_tokens();
-    set_state(Co4State::Expired, "Anmeldung abgelaufen");
+    settings_save_co4_expired(true);  // survives reboot: "abgelaufen", not "nicht verbunden"
+    set_state(Co4State::Expired, "Co4-Anmeldung abgelaufen");
     return false;
   }
   ESP_LOGW(kTag, "refresh failed (HTTP %d), retry later", r.status);
@@ -289,6 +289,7 @@ void do_logout() {
     }
   }
   drop_tokens();  // locally always, even if Co4 is not reachable
+  settings_save_co4_expired(false);
   xSemaphoreTake(g_mu, portMAX_DELAY);
   g_view->have_data = false;
   g_view->fetch = Co4Fetch::Idle;
@@ -578,7 +579,7 @@ void co4_start() {
   g_view->mode = Co4Mode::Live;
 #endif
   bool tok = settings_load_co4_token(g_w->refresh, sizeof(g_w->refresh));
-  g_view->state = tok ? Co4State::LoggedIn : Co4State::NoLogin;
+  g_view->state = tok ? Co4State::LoggedIn : settings_load_co4_expired() ? Co4State::Expired : Co4State::NoLogin;
   g_view->token_set = tok;
   g_view->zone_set = settings_load_co4_zone(g_view->zone_id, sizeof(g_view->zone_id), g_view->zone_name,
                                             sizeof(g_view->zone_name));

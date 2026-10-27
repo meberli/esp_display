@@ -265,3 +265,7 @@ bool settings_load_co4_zone(char* id, size_t idn, char* name, size_t nn);
 bool settings_save_co4_zone(const char* id, const char* name, const char* site);  // id "" or nullptr erases all
 bool settings_load_co4_site(char* site, size_t n);
 bool settings_save_co4_site(const char* site);  // "" erases
+// "co4_exp": login expired (invalid_grant). Shown after reboot as expired
+// instead of "nicht verbunden"; cleared on login and logout.
+bool settings_load_co4_expired();
+bool settings_save_co4_expired(bool expired);

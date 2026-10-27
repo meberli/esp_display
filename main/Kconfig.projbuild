@@ -105,17 +105,25 @@ menu "Co4 Energie"
 
 config PANEL_CO4_REALM_URL
     string "Co4 Keycloak realm URL"
-    default "https://auth.co4.dev/auth/realms/co4_beta"
+    default "https://auth.co4.cloud/realms/co4_beta"
     help
-        Only the realm: the device, token and logout endpoints come from OIDC
-        discovery (<realm>/.well-known/openid-configuration).
+        Only the realm (beta: host from co4-frontend-app config.codegen /
+        co4-k8s beta overlays): the device, token and logout endpoints come
+        from OIDC discovery (<realm>/.well-known/openid-configuration).
 
 config PANEL_CO4_CLIENT_ID
     string "Co4 public client id (Device Authorization Grant)"
     default "co4-panel"
     help
-        Placeholder until Co4 creates the client. Public client, no secret:
-        the panel never holds a client secret or a password.
+        Public Keycloak client, Device Authorization Grant only, no secret,
+        no PKCE: the panel never holds a client secret or a password.
+
+config PANEL_CO4_SCOPE
+    string "Co4 OIDC scope"
+    default "openid offline_access"
+    help
+        offline_access is optional on the client; requested so the refresh
+        token survives reboots.
 
 config PANEL_CO4_BFF_URL
     string "Co4 BFF base URL"

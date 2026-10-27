@@ -187,3 +187,31 @@ int64_t co4_refresh_at(int64_t now_ms, int expires_in_s) {
   if (at < now_ms + 10000) at = now_ms + 10000;
   return at;
 }
+
+static bool form_kv(char* buf, size_t cap, const char* const* kv, int n) {
+  if (cap == 0) return false;
+  buf[0] = '\0';
+  for (int i = 0; i < n; i += 2) {
+    if (kv[i + 1] == nullptr || kv[i + 1][0] == '\0' || !co4_form_add(buf, cap, kv[i], kv[i + 1])) {
+      buf[0] = '\0';
+      return false;
+    }
+  }
+  return true;
+}
+
+bool co4_form_device(char* buf, size_t cap, const char* client_id, const char* scope) {
+  const char* kv[] = {"client_id", client_id, "scope", scope};
+  return form_kv(buf, cap, kv, 4);
+}
+
+bool co4_form_poll(char* buf, size_t cap, const char* client_id, const char* device_code) {
+  const char* kv[] = {"grant_type", "urn:ietf:params:oauth:grant-type:device_code", "device_code", device_code,
+                      "client_id", client_id};
+  return form_kv(buf, cap, kv, 6);
+}
+
+bool co4_form_refresh(char* buf, size_t cap, const char* client_id, const char* refresh_token) {
+  const char* kv[] = {"grant_type", "refresh_token", "refresh_token", refresh_token, "client_id", client_id};
+  return form_kv(buf, cap, kv, 6);
+}

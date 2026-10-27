@@ -55,6 +55,13 @@ bool co4_parse_token(const char* json, size_t len, Co4TokenOut* out);
 // application/x-www-form-urlencoded: appends "&key=value" (no "&" when empty).
 bool co4_form_add(char* buf, size_t cap, const char* key, const char* value);
 
+// Token endpoint / device endpoint bodies for the public client: only
+// client_id, never client_secret, never code_challenge (no PKCE). buf is
+// overwritten; false (buf "") if it does not fit or an argument is empty.
+bool co4_form_device(char* buf, size_t cap, const char* client_id, const char* scope);
+bool co4_form_poll(char* buf, size_t cap, const char* client_id, const char* device_code);
+bool co4_form_refresh(char* buf, size_t cap, const char* client_id, const char* refresh_token);
+
 // Device-code polling: RFC 8628 3.5. Interval at least 5 s.
 struct Co4Poll {
   int interval_s;
