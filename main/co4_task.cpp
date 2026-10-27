@@ -39,6 +39,7 @@ constexpr size_t kAccessCap = 2560;
 constexpr size_t kRefreshCap = 2048;
 constexpr uint32_t kDataPeriodMs = 15 * 60 * 1000;
 constexpr uint32_t kRetryMs = 60 * 1000;
+constexpr uint32_t kMinWaitMs = 50;
 
 enum Cmd : uint32_t {
   kCmdLogin = 1u << 0,
@@ -505,8 +506,13 @@ void do_data() {
   Co4View v;
   co4_get(&v);
   bool demo = v.mode == Co4Mode::Demo;
-  if (!v.zone_set && !demo) return;
-  if (!demo && v.state != Co4State::LoggedIn) return;
+  // Nothing to fetch yet (no zone / not logged in): still move g_next_data, or
+  // task() would compute wait=0 and spin on core 0 (task_wdt IDLE0). Login and
+  // zone pick set g_next_data = now themselves.
+  if ((!v.zone_set && !demo) || (!demo && v.state != Co4State::LoggedIn)) {
+    g_next_data = now_ms() + kRetryMs;
+    return;
+  }
   edit(Co4Event::Data, [](Co4View& w) { w.fetch = Co4Fetch::Loading; });
   const Co4Source& src = v.mode == Co4Mode::Live ? kBffLive : co4_fixture_source();
   const char* bearer = nullptr;
@@ -550,6 +556,7 @@ void task(void*) {
       int32_t d = static_cast<int32_t>(g_next_data - now);
       if (d < static_cast<int32_t>(wait)) wait = d > 0 ? static_cast<uint32_t>(d) : 0;
     }
+    if (wait < kMinWaitMs) wait = kMinWaitMs;  // always block: never starve IDLE0
     uint32_t cmd = 0;
     xTaskNotifyWait(0, UINT32_MAX, &cmd, pdMS_TO_TICKS(wait));
     if (cmd & kCmdMode) {
