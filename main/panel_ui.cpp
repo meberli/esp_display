@@ -217,14 +217,14 @@ lv_obj_t* loc_list = nullptr;
 lv_obj_t* loc_status = nullptr;
 lv_obj_t* kb = nullptr;
 lv_obj_t* msg_wifi_btn = nullptr;
-WifiAp ui_aps[kMaxAps];
+EXT_RAM_BSS_ATTR WifiAp ui_aps[kMaxAps];
 int ui_ap_n = 0;
 bool wl_scanning = false;
 ScanGen wl_gen;              // scan generation: "Abbrechen" makes a late result stale
 lv_obj_t* wl_left = nullptr;   // "Abbrechen"
 lv_obj_t* wl_right = nullptr;  // "Nochmals versuchen" (firmware opened the list) / "Neu suchen"
 void wifi_list_leave();        // panel_ui_settings.inc
-GeoPlace ui_places[kMaxPlaces];
+EXT_RAM_BSS_ATTR GeoPlace ui_places[kMaxPlaces];
 int ui_place_n = 0;
 bool loc_searching = false;
 bool wp_connecting = false;
@@ -367,7 +367,7 @@ lv_obj_t* retry_btn = nullptr;
 EXT_RAM_BSS_ATTR LoxoneControl controls[kLoxoneControlCap];
 size_t control_count = 0;
 char server_name[48] = "";
-PagePlan pages[kMaxPages];
+EXT_RAM_BSS_ATTR PagePlan pages[kMaxPages];
 int page_n = 0;
 int section_origin[4] = {-1, -1, -1, -1};
 int section_pages[4] = {};

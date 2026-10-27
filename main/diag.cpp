@@ -57,13 +57,13 @@ const char* reset_name(esp_reset_reason_t r) {
 }
 
 void health() {
-  static PvView pv;  // static: keep the diag stack small
+  EXT_RAM_BSS_ATTR static PvView pv;  // static: keep the diag stack small
   pv_get(&pv);
   static wifi_ap_record_t ap;
   int rssi = esp_wifi_sta_get_ap_info(&ap) == ESP_OK ? ap.rssi : 0;
   uint32_t up = static_cast<uint32_t>(esp_timer_get_time() / 1000000);
   unsigned last = clock_last_sync_s();
-  static char svc[300];
+  EXT_RAM_BSS_ATTR static char svc[300];
   size_t u = 0;
   for (int i = 0; i < kSvcCount; ++i)
     u += snprintf(svc + u, sizeof(svc) - u, "%s%s=%lu/%lu", i ? " " : "", kSvcName[i], (unsigned long)svc_err[i].load(),
@@ -105,7 +105,7 @@ void energy_dump() {
                    d.in_kwh, d.out_kwh, d.water_l, d.cost_chf, d.credit_chf, d.flags);
   }
   // PV production per day (separate "pv_hist"; inverter Eac today).
-  static PvView pv;
+  EXT_RAM_BSS_ATTR static PvView pv;
   pv_get(&pv);
   console_printf("DIAG energy pv today=%ld %.1f kWh%s\n", (long)pv.hist.ymd, pv.hist.today < 0 ? 0.0f : pv.hist.today,
                  pv.hist.today < 0 ? " (no reading yet)" : "");

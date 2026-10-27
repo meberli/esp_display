@@ -64,7 +64,7 @@ uint8_t my_mac[6];
 uint8_t gw_mac[6], pmk[16], lmk[16], gw_chan = 0;
 bool kv_text_mode = false;  // NVS "kvtext"
 bool km_done[128];          // KEYMAP announced since pairing / boot / ACK result 1
-char test_keys[16][CO4EN_KEY_MAX + 1];  // test.* keys -> ids 100..115 (this boot)
+EXT_RAM_BSS_ATTR char test_keys[16][CO4EN_KEY_MAX + 1];  // test.* keys -> ids 100..115 (this boot)
 Co4enNonceWin nwin;  // latest PAIR_REQ nonce and the one before
 // Link loss + channel recovery (spec v0.5).
 bool cii_mode = false;      // Wi-Fi disconnected, ESP-NOW hops channels (not persisted)
@@ -161,12 +161,12 @@ PlayCounters counters() {
 
 void ui_post(PlayMsgKind k, const char* text) {
   if (g_ui == nullptr) return;
-  static PlayUiMsg m;  // play task only
+  EXT_RAM_BSS_ATTR static PlayUiMsg m;  // play task only
   m.kind = k;
   m.c = counters();
   snprintf(m.text, sizeof(m.text), "%s", text != nullptr ? text : "");
   if (xQueueSend(g_ui, &m, 0) != pdTRUE) {
-    static PlayUiMsg drop;
+    EXT_RAM_BSS_ATTR static PlayUiMsg drop;
     xQueueReceive(g_ui, &drop, 0);  // drop the oldest, keep the newest
     xQueueSend(g_ui, &m, 0);
   }
@@ -312,7 +312,7 @@ void on_recv(const esp_now_recv_info_t* info, const uint8_t* data, int n) {
   // Only the types a node consumes; anything else is dropped here.
   if (data[1] != CO4EN_T_PAIR_RESP && data[1] != CO4EN_T_ACK && data[1] != CO4EN_T_BEACON && data[1] != CO4EN_T_CMD)
     return;
-  static Cmd c;  // Wi-Fi task only
+  EXT_RAM_BSS_ATTR static Cmd c;  // Wi-Fi task only
   c.kind = CmdKind::Rx;
   memcpy(c.src, info->src_addr, 6);
   c.n = static_cast<uint16_t>(n);
@@ -370,7 +370,7 @@ void radio_down() {
 
 // Hand a finished frame to ESP-NOW (or just log it: "dry").
 void tx(const Co4enFrame& f, const uint8_t* dst, const char* mode) {
-  static char hex[CO4EN_MAX_FRAME * 2 + 1];
+  EXT_RAM_BSS_ATTR static char hex[CO4EN_MAX_FRAME * 2 + 1];
   co4en_hex(f.b, f.n, hex, sizeof(hex));
   Co4enHdr h = {};
   co4en_hdr(f.b, f.n, &h);
@@ -1253,7 +1253,7 @@ void tick() {
 
 void task(void*) {
   load();
-  static Cmd c;
+  EXT_RAM_BSS_ATTR static Cmd c;
   for (;;) {
     // ACK wait needs ms resolution; otherwise 100 ms is plenty.
     TickType_t wait = pend.active ? pdMS_TO_TICKS(2) : pdMS_TO_TICKS(100);
@@ -1322,7 +1322,7 @@ void play_start() {
 bool play_ui_take(PlayUiMsg* out) { return g_ui != nullptr && xQueueReceive(g_ui, out, 0) == pdTRUE; }
 
 static Cmd* cmd_buf() {
-  static Cmd c;  // callers: UI task / console task, one at a time in practice
+  EXT_RAM_BSS_ATTR static Cmd c;  // callers: UI task / console task, one at a time in practice
   memset(&c, 0, sizeof(c));
   return &c;
 }

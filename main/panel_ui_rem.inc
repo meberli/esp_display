@@ -12,10 +12,10 @@ struct Pending {
   uint32_t key;
 };
 constexpr int kRemQueue = 8;
-Pending rem_q[kRemQueue];
+EXT_RAM_BSS_ATTR Pending rem_q[kRemQueue];
 int rem_n = 0;
 // Harness: synthetic events (REMTEST) that join the calendar data.
-CalEvent rem_test[4];
+EXT_RAM_BSS_ATTR CalEvent rem_test[4];
 int rem_test_n = 0;
 
 lv_obj_t* rem_card = nullptr;

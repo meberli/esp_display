@@ -8,14 +8,14 @@
 
 constexpr uint32_t kCamRefreshMs = 120000;
 constexpr uint32_t kCamRetryMs = 30000;
-Webcam cams[kMaxCams];
+EXT_RAM_BSS_ATTR Webcam cams[kMaxCams];
 int cam_n = 0;
 int cam_idx = 0;
 uint16_t* cam_frame[2] = {nullptr, nullptr};
 lv_img_dsc_t cam_dsc[2];
 int cam_shown = -1;          // frame on screen, -1 none
 uint32_t cam_shown_id = 0;   // webcam in that frame
-CamInfo cam_info = {};       // details of cam_shown_id
+EXT_RAM_BSS_ATTR CamInfo cam_info;       // details of cam_shown_id
 bool cam_inflight = false;
 uint32_t cam_next_ms = 0;
 char cam_err[96] = "";

@@ -72,8 +72,8 @@ uint32_t next_weather_ms = 0;
 EXT_RAM_BSS_ATTR static WeatherDetailDay week[kWxDays];
 // Weather location; written only by the network task (and before it starts).
 Location g_loc;
-WifiAp g_aps[kMaxAps];
-GeoPlace g_places[kMaxPlaces];
+EXT_RAM_BSS_ATTR WifiAp g_aps[kMaxAps];
+EXT_RAM_BSS_ATTR GeoPlace g_places[kMaxPlaces];
 
 void url_encode(const char* in, char* out, size_t n) {
   static const char* hex = "0123456789ABCDEF";
@@ -313,11 +313,11 @@ bool windy_key(char* key, size_t n) {
 
 // Results too big for the queue: written by the network task before it posts
 // the result, read by the UI task in handle_result (one request in flight).
-Board g_board;
-OtaCheck g_ota;
+EXT_RAM_BSS_ATTR Board g_board;
+EXT_RAM_BSS_ATTR OtaCheck g_ota;
 EXT_RAM_BSS_ATTR Calendar g_cal;
 EXT_RAM_BSS_ATTR MeteoNow g_meteo;
-Station g_hits[kMaxStationHits];
+EXT_RAM_BSS_ATTR Station g_hits[kMaxStationHits];
 
 QueueHandle_t net_q = nullptr;
 QueueHandle_t res_q = nullptr;
@@ -514,7 +514,7 @@ void lox_task(void*) {
   for (;;) {
     NetRequest req;
     if (xQueueReceive(lox_q, &req, portMAX_DELAY) != pdTRUE) continue;
-    static NetResult res;
+    EXT_RAM_BSS_ATTR static NetResult res;
     memset(&res, 0, sizeof(res));
     res.op = req.op;
     switch (req.op) {
@@ -552,7 +552,7 @@ void net_task(void*) {
     if (xQueueReceive(net_q, &req, portMAX_DELAY) != pdTRUE) {
       continue;
     }
-    static NetResult res;
+    EXT_RAM_BSS_ATTR static NetResult res;
     memset(&res, 0, sizeof(res));
     res.op = req.op;
     switch (req.op) {

@@ -1,3 +1,4 @@
+#include "esp_attr.h"
 #include "settings.h"
 #include "waste_window.h"
 
@@ -841,7 +842,7 @@ struct AckRing {
   uint8_t next;
 };
 static_assert(sizeof(AckRing) == 48 * 4 + 4, "rem_ack size must match the schema (kAckBytes)");
-AckRing ack_ring;
+EXT_RAM_BSS_ATTR AckRing ack_ring;
 bool ack_loaded = false;
 
 void ack_load() {

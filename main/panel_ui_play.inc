@@ -25,7 +25,7 @@ lv_obj_t* play_cnt = nullptr;
 lv_obj_t* play_hex = nullptr;
 lv_obj_t* play_log = nullptr;
 lv_obj_t* play_log_cap = nullptr;
-char play_log_buf[8][96];
+EXT_RAM_BSS_ATTR char play_log_buf[8][96];
 int play_log_n = 0;
 
 void play_hide() {
@@ -235,7 +235,7 @@ void play_apply(const PlayUiMsg& m) {
 }
 
 void play_tick() {
-  static PlayUiMsg m;  // UI task only
+  EXT_RAM_BSS_ATTR static PlayUiMsg m;  // UI task only
   for (int i = 0; i < 8 && play_ui_take(&m); ++i) play_apply(m);
   static uint32_t keep = 0;  // keep the status stream alive while the page is shown
   if (nav == Nav::Playground && now_ms() - keep > 10000) {

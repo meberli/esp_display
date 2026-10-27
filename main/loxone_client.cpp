@@ -266,7 +266,7 @@ bool fetch_ll_value(LoxoneAuthorizer& auth, const char* id, const char* command,
     set_detail(result, str::kLoxPathTooLong);
     return false;
   }
-  static uint8_t body[1200];
+  EXT_RAM_BSS_ATTR static uint8_t body[1200];
   size_t length = 0;
   *result = loxone_get(auth, path, body, sizeof(body), &length);
   if (!result->ok) {

@@ -84,7 +84,7 @@ lv_obj_t* st_ta = nullptr;
 lv_obj_t* st_status = nullptr;
 lv_obj_t* st_list = nullptr;
 int st_target = 0;
-Station st_hits[kMaxStationHits];
+EXT_RAM_BSS_ATTR Station st_hits[kMaxStationHits];
 int st_hit_n = 0;
 bool st_busy = false;
 
