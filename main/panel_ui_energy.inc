@@ -22,6 +22,7 @@ lv_obj_t* es_big = nullptr;
 lv_obj_t* es_unit = nullptr;
 lv_obj_t* es_amps = nullptr;
 lv_obj_t* es_val[3] = {};
+lv_obj_t* es_name[3] = {};
 lv_obj_t* es_price = nullptr;
 lv_obj_t* es_hin[24] = {};
 lv_obj_t* es_hout[24] = {};
@@ -37,6 +38,7 @@ lv_obj_t* ew_status = nullptr;
 lv_obj_t* ew_big = nullptr;
 lv_obj_t* ew_meter = nullptr;
 lv_obj_t* ew_val[3] = {};
+lv_obj_t* ew_name[3] = {};
 lv_obj_t* ew_price = nullptr;
 lv_obj_t* ew_hint = nullptr;
 lv_obj_t* ew_wk_tot = nullptr;
@@ -78,6 +80,46 @@ lv_obj_t* en_daylbl(lv_obj_t* c, int x, int y) {
   lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
   lv_label_set_long_mode(l, LV_LABEL_LONG_CLIP);
   return l;
+}
+
+// Right column of the Strom / Wasser cards (x 244..414): name left, value
+// right-aligned against the card edge. en_kv_fit() keeps the pair apart
+// whatever the design font (Montserrat is wider than Inter) or value length:
+// value in its own font if both fit, else the value drops to the name font,
+// and only if that still does not fit the name is shortened with "...".
+constexpr int kKvR = 414, kKvGap = 6;
+constexpr int kKvXStrom = 236;   // separator at 228
+constexpr int kKvXWasser = 212;  // separator at 204: longer names ("Kosten gestern")
+lv_obj_t* en_kv_name(lv_obj_t* c, int x, int y, const char* text) {
+  lv_obj_t* l = en_lbl(c, &font_inter_14, kTextDim, x, y, text);
+  lv_label_set_long_mode(l, LV_LABEL_LONG_DOT);
+  return l;
+}
+void en_kv_val(lv_obj_t* v, int x, int y) {
+  lv_obj_set_width(v, kKvR - x);
+  lv_obj_set_style_text_align(v, LV_TEXT_ALIGN_RIGHT, 0);
+  lv_label_set_long_mode(v, LV_LABEL_LONG_CLIP);
+  lv_obj_set_pos(v, x, y);
+  lv_obj_set_user_data(v, const_cast<lv_font_t*>(lv_obj_get_style_text_font(v, LV_PART_MAIN)));
+}
+int en_text_w(lv_obj_t* l, const char* t) {
+  lv_point_t sz;
+  lv_txt_get_size(&sz, t, lv_obj_get_style_text_font(l, LV_PART_MAIN), lv_obj_get_style_text_letter_space(l, LV_PART_MAIN), 0,
+                  LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+  return sz.x;
+}
+void en_kv_fit(lv_obj_t* name, lv_obj_t* val) {
+  const int need = en_text_w(name, lv_label_get_text(name));
+  const int x = lv_obj_get_x(name);
+  const lv_font_t* big = static_cast<const lv_font_t*>(lv_obj_get_user_data(val));
+  if (big != nullptr) lv_obj_set_style_text_font(val, big, 0);
+  int avail = kKvR - x - en_text_w(val, lv_label_get_text(val)) - kKvGap;
+  if (need > avail) {
+    lv_obj_set_style_text_font(val, lv_obj_get_style_text_font(name, LV_PART_MAIN), 0);
+    avail = kKvR - x - en_text_w(val, lv_label_get_text(val)) - kKvGap;
+  }
+  lv_obj_set_width(name, need <= avail ? LV_SIZE_CONTENT : (avail > 24 ? avail : 24));
+  lv_obj_move_foreground(val);
 }
 
 lv_obj_t* en_rect(lv_obj_t* parent, int x, int y, int w, int h, uint32_t color) {
@@ -241,14 +283,12 @@ void build_energy_screens(lv_obj_t* screen) {
   const char* names[3] = {"Bezug heute", "Einspeisung", "Kosten netto"};
   const uint32_t colors[3] = {kAmber, kAccent, kText};
   for (int i = 0; i < 3; ++i) {
-    en_lbl(c, &font_inter_14, kTextDim, 244, 14 + i * 30, names[i]);
+    es_name[i] = en_kv_name(c, kKvXStrom, 14 + i * 30, names[i]);
     es_val[i] = make_label(c, &font_inter_sb16, lv_color_hex(colors[i]));
-    lv_obj_set_width(es_val[i], 96);
-    lv_obj_set_style_text_align(es_val[i], LV_TEXT_ALIGN_RIGHT, 0);
-    lv_obj_set_pos(es_val[i], 318, 12 + i * 30);
+    en_kv_val(es_val[i], kKvXStrom, 12 + i * 30);
   }
-  es_price = en_lbl(c, &font_inter_14, kTextDim, 244, 102, "");
-  lv_obj_set_width(es_price, 184);
+  es_price = en_lbl(c, &font_inter_14, kTextDim, kKvXStrom, 102, "");
+  lv_obj_set_width(es_price, kKvR - kKvXStrom);
   lv_label_set_long_mode(es_price, LV_LABEL_LONG_DOT);
   for (int h = 0; h < 24; ++h) {
     es_hself[h] = en_rect(c, 22 + h * 16, kEsBase - 1, 11, 1, kGreen);
@@ -300,17 +340,17 @@ void build_energy_screens(lv_obj_t* screen) {
   ew_big = en_lbl(c, &font_inter_light_40, kText, 16, 36, "-");
   en_lbl(c, &font_inter_20, kTextDim, 0, 0, "Liter");
   ew_meter = en_lbl(c, &font_inter_14, kTextDim, 18, 94, "");
-  make_bar(c, 228, 14, 1, 106, kBorder, LV_OPA_COVER);
+  lv_obj_set_width(ew_meter, kKvXWasser - 8 - 8 - 18);
+  lv_label_set_long_mode(ew_meter, LV_LABEL_LONG_WRAP);  // two lines fit above the separator at 132
+  make_bar(c, kKvXWasser - 8, 14, 1, 106, kBorder, LV_OPA_COVER);
   const char* wn[3] = {"Kosten gestern", "\xC3\x98 7 Tage", "Vorgestern"};
   for (int i = 0; i < 3; ++i) {
-    en_lbl(c, &font_inter_14, kTextDim, 244, 14 + i * 30, wn[i]);
+    ew_name[i] = en_kv_name(c, kKvXWasser, 14 + i * 30, wn[i]);
     ew_val[i] = make_label(c, &font_inter_sb16, lv_color_hex(i == 2 ? kText : kAccent));
-    lv_obj_set_width(ew_val[i], 96);
-    lv_obj_set_style_text_align(ew_val[i], LV_TEXT_ALIGN_RIGHT, 0);
-    lv_obj_set_pos(ew_val[i], 318, 12 + i * 30);
+    en_kv_val(ew_val[i], kKvXWasser, 12 + i * 30);
   }
-  ew_price = en_lbl(c, &font_inter_14, kTextDim, 244, 102, "");
-  lv_obj_set_width(ew_price, 184);
+  ew_price = en_lbl(c, &font_inter_14, kTextDim, kKvXWasser, 102, "");
+  lv_obj_set_width(ew_price, kKvR - kKvXWasser);
   lv_label_set_long_mode(ew_price, LV_LABEL_LONG_DOT);
   // No hourly bars: the water meter reports its total once a day.
   make_bar(c, 18, 132, 396, 1, kBorder, LV_OPA_COVER);
@@ -410,6 +450,7 @@ void energy_refresh_strom() {
   float net = h.cost - (v.show_exp ? h.credit : 0.0f);
   snprintf(b, sizeof(b), "%sCHF %.2f", net < 0 ? "-" : "", fabsf(net));
   lv_label_set_text(es_val[2], h.have ? b : "-");
+  for (int i = 0; i < 3; ++i) en_kv_fit(es_name[i], es_val[i]);
   char p1[12], p2[12];
   energy_format_price(p1, sizeof(p1), tariff_price(v.tariff, now));
   energy_format_price(p2, sizeof(p2), v.tariff.feed);
@@ -529,6 +570,7 @@ void energy_refresh_wasser() {
   if (v.water_on && y2.ymd) snprintf(b, sizeof(b), "%s%.0f L", (y2.flags & kDayWaterApprox) ? "~" : "", y2.water_l);
   else snprintf(b, sizeof(b), "-");
   lv_label_set_text(ew_val[2], b);
+  for (int i = 0; i < 3; ++i) en_kv_fit(ew_name[i], ew_val[i]);
   char p[12];
   energy_format_price(p, sizeof(p), v.tariff.water);
   lv_label_set_text_fmt(ew_price, "%s CHF/m\xC2\xB3 mit Abwasser", p);
