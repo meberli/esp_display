@@ -47,15 +47,20 @@ void co4_start();
 // UI: non-blocking; true while events are queued.
 bool co4_ui_take(Co4Event* ev);
 void co4_get(Co4View* out);
-// Copies the zone list (only meaningful when zones_state == Ok).
-void co4_get_zones(Co4ZoneList* out);
+// Copies the current object-tree level (items meaningful when zones_state == Ok;
+// path/depth always). zones_state/zones_err describe the tree request.
+void co4_get_nav(Co4NavLevel* out);
 // Copies the data block; false if none yet.
 bool co4_get_data(Co4Data* out);
 
 void co4_login();
 void co4_login_cancel();
 void co4_logout();
-void co4_zones_load();
+// Zone choice by object tree (requests go to the Co4 task, Core 0):
+void co4_nav_root();                                  // load the roots
+void co4_nav_open(const char* soid, const char* name);  // descend into a child
+void co4_nav_back();                                  // one level up
+void co4_nav_reload();                                // current level again
 void co4_zone_choose(const char* id, const char* name, const char* site);
 void co4_refresh_now();
 void co4_set_mode(Co4Mode m);

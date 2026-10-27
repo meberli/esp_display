@@ -33,7 +33,7 @@
 namespace {
 
 const char* const kTag = "co4";
-constexpr size_t kBodyCap = 32 * 1024;  // discovery ~6-10 KB, site day @15 min ~11 KB
+constexpr size_t kBodyCap = 64 * 1024;  // discovery ~6-10 KB, site day @15 min ~11 KB, tree levels
 constexpr size_t kFormCap = 3 * 1024;
 constexpr size_t kAccessCap = 2560;
 constexpr size_t kRefreshCap = 2048;
@@ -60,7 +60,7 @@ struct Work {
   Co4Oidc oidc;
   Co4DeviceAuth dev;
   Co4Poll poll;
-  Co4ZoneList zones;
+  Co4NavLevel nav;
   Co4Data data;
 };
 
@@ -69,13 +69,17 @@ QueueHandle_t g_q = nullptr;
 TaskHandle_t g_task = nullptr;
 Work* g_w = nullptr;           // task-owned (except zones/data copies under g_mu)
 Co4View* g_view = nullptr;     // PSRAM, guarded by g_mu
-Co4ZoneList* g_zones = nullptr;  // PSRAM, guarded by g_mu
+Co4NavLevel* g_nav = nullptr;  // PSRAM, guarded by g_mu
 Co4Data* g_data = nullptr;       // PSRAM, guarded by g_mu
 // Inputs from the UI, guarded by g_mu.
 char g_pick_id[40];
 char g_pick_name[48];
 char g_pick_site[20];
 Co4Mode g_pick_mode = Co4Mode::Fixture;
+enum class NavOp : uint8_t { Root, Open, Back, Reload };
+NavOp g_nav_op = NavOp::Root;
+char g_nav_soid[20];
+char g_nav_name[48];
 
 bool g_have_oidc = false;
 uint32_t g_access_until = 0;  // now_ms() when the access token must be renewed
@@ -298,25 +302,63 @@ void do_logout() {
   emit(Co4Event::Data);
 }
 
-void do_zones() {
+bool bff_get(const char* path, const char* bearer, size_t* len, char* err, size_t err_n);
+
+void publish_nav() {
+  xSemaphoreTake(g_mu, portMAX_DELAY);
+  *g_nav = g_w->nav;
+  xSemaphoreGive(g_mu);
+}
+
+// Object tree: one level per request (co4CoreNavRoots / co4CoreNavGet). Names and
+// IDs are never logged.
+void do_nav() {
+  xSemaphoreTake(g_mu, portMAX_DELAY);
+  NavOp op = g_nav_op;
+  char soid[20], name[48];
+  snprintf(soid, sizeof(soid), "%s", g_nav_soid);
+  snprintf(name, sizeof(name), "%s", g_nav_name);
+  xSemaphoreGive(g_mu);
+  Co4NavLevel& L = g_w->nav;
+  if (op == NavOp::Root) {
+    L.depth = 0;
+  } else if (op == NavOp::Open) {
+    if (L.depth < kCo4NavDepth && co4_bff_niid_ok(soid)) {
+      Co4NavCrumb& c = L.path[L.depth++];
+      snprintf(c.soid, sizeof(c.soid), "%s", soid);
+      snprintf(c.name, sizeof(c.name), "%s", name);
+    }
+  } else if (op == NavOp::Back) {
+    if (L.depth > 0) --L.depth;
+  }
+  L.n = 0;
+  L.total = 0;
+  publish_nav();
   edit(Co4Event::Zones, [](Co4View& v) {
     v.zones_state = Co4ZonesState::Loading;
     v.zones_err[0] = '\0';
   });
+  const char* cur = L.depth > 0 ? L.path[L.depth - 1].soid : "";
   char err[48] = "";
   bool ok = false;
   if (mode() != Co4Mode::Live) {
-    // zevMyZones (vorgeschlagen, noch nicht vorhanden): example zones until Co4 provides it.
-    co4_zones_fixture(&g_w->zones);
-    ok = true;
+    ok = co4_bff_nav_fixture(cur, &L, err, sizeof(err));
+  } else if (!wifi_connected()) {
+    snprintf(err, sizeof(err), "%s", "keine Verbindung");
+  } else if (!ensure_access()) {
+    snprintf(err, sizeof(err), "%s", "Co4 nicht erreichbar");
   } else {
-    snprintf(err, sizeof(err), "%s", "Zonenliste noch nicht angebunden");
+    char path[96];
+    size_t len = 0;
+    if (!co4_bff_nav_path(path, sizeof(path), cur)) {
+      snprintf(err, sizeof(err), "%s", "Objekt ung\xC3\xBCltig");
+    } else if (bff_get(path, g_w->access, &len, err, sizeof(err))) {
+      ok = co4_bff_parse_nav(g_w->body, len, cur[0] == '\0', &L, err, sizeof(err));
+      if (!ok) ESP_LOGW(kTag, "nav: %s", err);
+    }
   }
-  if (ok) {
-    xSemaphoreTake(g_mu, portMAX_DELAY);
-    *g_zones = g_w->zones;
-    xSemaphoreGive(g_mu);
-  }
+  ESP_LOGI(kTag, "nav depth %u: %s, %u/%u", L.depth, ok ? "ok" : "error", L.n, L.total);
+  publish_nav();
   edit(Co4Event::Zones, [&](Co4View& v) {
     v.zones_state = ok ? Co4ZonesState::Ok : Co4ZonesState::Error;
     snprintf(v.zones_err, sizeof(v.zones_err), "%s", err);
@@ -528,7 +570,7 @@ void task(void*) {
       }
     }
     if (cmd & kCmdLogin) do_login();
-    if (cmd & kCmdZones) do_zones();
+    if (cmd & kCmdZones) do_nav();
     if (cmd & kCmdZone) do_zone_pick();
     if (cmd & kCmdRefresh) g_next_data = now_ms();
     co4_get(&v);
@@ -566,9 +608,9 @@ void co4_start() {
   g_q = xQueueCreate(8, sizeof(Co4Event));
   g_w = ps_new<Work>();
   g_view = ps_new<Co4View>();
-  g_zones = ps_new<Co4ZoneList>();
+  g_nav = ps_new<Co4NavLevel>();
   g_data = ps_new<Co4Data>();
-  if (g_mu == nullptr || g_q == nullptr || g_w == nullptr || g_view == nullptr || g_zones == nullptr ||
+  if (g_mu == nullptr || g_q == nullptr || g_w == nullptr || g_view == nullptr || g_nav == nullptr ||
       g_data == nullptr) {
     ESP_LOGE(kTag, "no memory, Co4 disabled");
     return;
@@ -600,11 +642,12 @@ void co4_get(Co4View* out) {
   xSemaphoreGive(g_mu);
 }
 
-void co4_get_zones(Co4ZoneList* out) {
+void co4_get_nav(Co4NavLevel* out) {
   out->n = 0;
-  if (g_zones == nullptr) return;
+  out->depth = 0;
+  if (g_nav == nullptr) return;
   xSemaphoreTake(g_mu, portMAX_DELAY);
-  *out = *g_zones;
+  *out = *g_nav;
   xSemaphoreGive(g_mu);
 }
 
@@ -620,7 +663,22 @@ bool co4_get_data(Co4Data* out) {
 void co4_login() { cmd(kCmdLogin); }
 void co4_login_cancel() { cmd(kCmdCancel); }
 void co4_logout() { cmd(kCmdLogout); }
-void co4_zones_load() { cmd(kCmdZones); }
+namespace {
+void nav_req(NavOp op, const char* soid, const char* name) {
+  if (g_mu == nullptr) return;
+  xSemaphoreTake(g_mu, portMAX_DELAY);
+  g_nav_op = op;
+  snprintf(g_nav_soid, sizeof(g_nav_soid), "%s", soid != nullptr && co4_bff_niid_ok(soid) ? soid : "");
+  co4_copy_utf8(g_nav_name, sizeof(g_nav_name), name != nullptr ? name : "");
+  xSemaphoreGive(g_mu);
+  cmd(kCmdZones);
+}
+}  // namespace
+
+void co4_nav_root() { nav_req(NavOp::Root, nullptr, nullptr); }
+void co4_nav_open(const char* soid, const char* name) { nav_req(NavOp::Open, soid, name); }
+void co4_nav_back() { nav_req(NavOp::Back, nullptr, nullptr); }
+void co4_nav_reload() { nav_req(NavOp::Reload, nullptr, nullptr); }
 void co4_refresh_now() { cmd(kCmdRefresh); }
 
 void co4_zone_choose(const char* id, const char* name, const char* site) {

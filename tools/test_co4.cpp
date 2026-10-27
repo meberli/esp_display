@@ -1,6 +1,7 @@
 // Host test for main/co4_data.cpp and main/co4_oidc.cpp (Co4 Energie: fixture,
 // zones, ratios, device-flow parsing and polling). Example values only.
 //   g++ -std=c++17 -Wall -I main -I components/ArduinoJson/src tools/test_co4.cpp main/co4_data.cpp main/co4_oidc.cpp -o /tmp/tco4 && TZ=Europe/Zurich /tmp/tco4
+#include <string>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -65,19 +66,47 @@ static void test_ratio() {
   CHECK(!co4_ratio(v, 0, kCo4MaxBars, &r) && r.autarky_pct == 0.0f);
 }
 
-static void test_zones() {
-  Co4ZoneList z;
-  char err[48];
-  co4_zones_fixture(&z);
-  CHECK(z.n == 3 && strcmp(z.z[0].id, "zone-beispiel-1") == 0);
-  CHECK(strstr(z.z[2].name, "B\xC3\xBCro") != nullptr);
+// Object tree with the placeholder tree (co4CoreNavRoots / co4CoreNavGet form).
+static void test_tree() {
+  static Co4NavLevel L;
+  char err[48], path[96];
+  CHECK(co4_bff_nav_path(path, sizeof(path), "") && strcmp(path, "co4CoreNavRoots") == 0);
+  CHECK(co4_bff_nav_path(path, sizeof(path), "9001") && strcmp(path, "co4CoreNavGet?id=9001&hidden=false") == 0);
+  CHECK(!co4_bff_nav_path(path, sizeof(path), "9001&x=1"));
+  CHECK(co4_bff_nav_fixture("", &L, err, sizeof(err)) && L.n == 2 && L.total == 2);
+  CHECK(strcmp(L.it[0].name, "Archiv (leer)") == 0 && !L.it[0].kids);  // sorted by name
+  CHECK(strcmp(L.it[1].soid, "9001") == 0 && L.it[1].kids && L.it[1].zone[0] == '\0');
+  CHECK(co4_bff_nav_fixture("9001", &L, err, sizeof(err)) && L.n == 2);
+  CHECK(L.it[0].zone[0] == '\0');  // zev_Site is not selectable
+  CHECK(co4_bff_nav_fixture("9010", &L, err, sizeof(err)) && L.n == 3);
+  CHECK(strcmp(L.it[0].name, "Hauptz\xC3\xA4hler") == 0 && L.it[0].zone[0] == '\0');
+  CHECK(strcmp(L.it[1].soid, "9011") == 0 && strcmp(L.it[1].zone, "7011") == 0 && L.it[1].kids);
+  CHECK(strcmp(L.it[2].zone, "7012") == 0 && !L.it[2].kids);
+  CHECK(co4_bff_nav_fixture("9002", &L, err, sizeof(err)) && L.n == 0 && L.total == 0);
+  // several natures: the zev_Zone entry wins; string ids; missing name; no extra fields kept
+  const char* multi =
+      "{\"data\":{\"object\":{\"id\":\"1\",\"children\":[{\"id\":\"5\",\"hasChildren\":false,"
+      "\"properties\":[{\"label\":\"description\",\"value\":\"x\"}],\"permissions\":[1],"
+      "\"natures\":[{\"id\":\"8\",\"nature\":{\"code\":\"core_Folder\"}},{\"id\":\"9\",\"nature\":{\"code\":\"zev_Zone\"}}]},"
+      "{\"properties\":[{\"label\":\"name\",\"value\":\"ohne id\"}]}]}}}";
+  CHECK(co4_bff_parse_nav(multi, strlen(multi), false, &L, err, sizeof(err)) && L.n == 1);
+  CHECK(strcmp(L.it[0].zone, "9") == 0 && strcmp(L.it[0].name, "(ohne Namen)") == 0);
   const char* bad = "{\"errors\":[{\"message\":\"x\"}]}";
-  CHECK(!co4_zones_parse(bad, strlen(bad), &z, err, sizeof(err)) && err[0] != '\0');
-  CHECK(!co4_zones_parse("nope", 4, &z, err, sizeof(err)));
-  const char* empty = "{\"data\":[]}";
-  CHECK(co4_zones_parse(empty, strlen(empty), &z, err, sizeof(err)) && z.n == 0);
-  const char* noname = "{\"data\":[{\"id\":\"z-1\"},{\"name\":\"ohne id\"}]}";
-  CHECK(co4_zones_parse(noname, strlen(noname), &z, err, sizeof(err)) && z.n == 1 && strcmp(z.z[0].name, "z-1") == 0);
+  CHECK(!co4_bff_parse_nav(bad, strlen(bad), true, &L, err, sizeof(err)) && err[0] != '\0');
+  CHECK(!co4_bff_parse_nav("nope", 4, true, &L, err, sizeof(err)));
+  const char* nobj = "{\"data\":{\"object\":null}}";
+  CHECK(!co4_bff_parse_nav(nobj, strlen(nobj), false, &L, err, sizeof(err)));
+  // more children than kept: counted, list cut
+  std::string big = "{\"data\":{\"roots\":[";
+  for (int k = 0; k < kCo4NavMax + 5; ++k) {
+    char e[96];
+    snprintf(e, sizeof(e), "%s{\"id\":%d,\"properties\":[{\"label\":\"name\",\"value\":\"N%03d\"}]}", k ? "," : "",
+             100 + k, k);
+    big += e;
+  }
+  big += "]}}";
+  CHECK(co4_bff_parse_nav(big.data(), big.size(), true, &L, err, sizeof(err)) && L.n == kCo4NavMax &&
+        L.total == kCo4NavMax + 5);
 }
 
 static void test_utf8() {
@@ -318,7 +347,7 @@ static void test_site() {
 int main() {
   test_fixture();
   test_ratio();
-  test_zones();
+  test_tree();
   test_utf8();
   test_discovery();
   test_device();

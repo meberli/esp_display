@@ -24,8 +24,7 @@ using Doc = BasicJsonDocument<PsramAlloc>;
 using Doc = DynamicJsonDocument;
 #endif
 
-// Unit: the ZEV schema does not name the unit of energyStats; the related ZEV
-// balance types document kWh. Treated as kWh (offene Frage an Co4).
+// Unit: energyStats values are kWh (confirmed).
 
 namespace {
 constexpr size_t kDocCap = 24 * 1024;  // PSRAM; a day @15 min with 3 sources needs ~10 KB
@@ -288,4 +287,132 @@ bool co4_bff_parse_zone_site(const char* json, size_t len, char* site, size_t si
   }
   snprintf(site, site_n, "%s", tmp);
   return true;
+}
+
+// --- Object tree -------------------------------------------------------------------
+
+bool co4_bff_nav_path(char* out, size_t n, const char* soid) {
+  int w;
+  if (soid == nullptr || soid[0] == '\0') {
+    w = snprintf(out, n, "co4CoreNavRoots");
+  } else {
+    if (!co4_bff_niid_ok(soid)) return false;
+    w = snprintf(out, n, "co4CoreNavGet?id=%s&hidden=false", soid);
+  }
+  return w > 0 && static_cast<size_t>(w) < n;
+}
+
+namespace {
+char lower_ascii(char c) { return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c; }
+bool name_before(const Co4NavItem& a, const Co4NavItem& b) {
+  for (size_t i = 0;; ++i) {
+    char x = lower_ascii(a.name[i]), y = lower_ascii(b.name[i]);
+    if (x != y || x == '\0') return x < y;
+  }
+}
+}  // namespace
+
+bool co4_bff_parse_nav(const char* json, size_t len, bool roots, Co4NavLevel* out, char* err, size_t err_n) {
+  out->n = 0;
+  out->total = 0;
+  if (err_n > 0) err[0] = '\0';
+  StaticJsonDocument<512> filter;
+  JsonObject it = roots ? filter["data"]["roots"][0].to<JsonObject>()
+                        : filter["data"]["object"]["children"][0].to<JsonObject>();
+  it["id"] = true;
+  it["hasChildren"] = true;
+  it["properties"][0]["label"] = true;
+  it["properties"][0]["value"] = true;
+  it["natures"][0]["id"] = true;
+  it["natures"][0]["nature"]["code"] = true;
+  if (!roots) filter["data"]["object"]["id"] = true;
+  filter["errors"][0]["message"] = true;
+  filter["error"] = true;
+  Doc doc(kDocCap * 2);
+  if (deserializeJson(doc, json, len, DeserializationOption::Filter(filter))) {
+    snprintf(err, err_n, "Antwort unlesbar");
+    return false;
+  }
+  if (error_answer(doc, err, err_n)) return false;
+  JsonArrayConst arr;
+  if (roots) {
+    arr = doc["data"]["roots"].as<JsonArrayConst>();
+  } else {
+    if (doc["data"]["object"].isNull()) {
+      snprintf(err, err_n, "Objekt nicht gefunden");
+      return false;
+    }
+    arr = doc["data"]["object"]["children"].as<JsonArrayConst>();  // null = no children
+  }
+  if (roots && arr.isNull()) {
+    snprintf(err, err_n, "Antwort ohne Objekte");
+    return false;
+  }
+  for (JsonObjectConst o : arr) {
+    char soid[20];
+    if (!niid_text(o["id"], soid, sizeof(soid))) continue;
+    if (out->total < 0xFFFF) ++out->total;
+    if (out->n >= kCo4NavMax) continue;
+    Co4NavItem& d = out->it[out->n++];
+    memset(&d, 0, sizeof(d));
+    snprintf(d.soid, sizeof(d.soid), "%s", soid);
+    const char* name = "";
+    for (JsonObjectConst pr : o["properties"].as<JsonArrayConst>()) {
+      const char* l = pr["label"] | "";
+      if (strcmp(l, "name") == 0) {
+        name = pr["value"] | "";
+        break;
+      }
+    }
+    co4_copy_utf8(d.name, sizeof(d.name), name[0] != '\0' ? name : "(ohne Namen)");
+    for (JsonObjectConst na : o["natures"].as<JsonArrayConst>()) {
+      const char* code = na["nature"]["code"] | "";
+      if (strcmp(code, "zev_Zone") == 0 && niid_text(na["id"], d.zone, sizeof(d.zone))) break;
+      d.zone[0] = '\0';
+    }
+    d.kids = o["hasChildren"] | false;
+  }
+  // insertion sort by name (frontend shows children sorted by name)
+  for (int i = 1; i < out->n; ++i) {
+    Co4NavItem t = out->it[i];
+    int j = i - 1;
+    for (; j >= 0 && name_before(t, out->it[j]); --j) out->it[j + 1] = out->it[j];
+    out->it[j + 1] = t;
+  }
+  return true;
+}
+
+namespace {
+// BEISPIELDATEN (Platzhalter): object tree in co4CoreNavRoots / co4CoreNavGet form.
+// Root 9001 > site 9010 > zones 9011, 9012 (+ meter 9013); root 9002 is empty.
+const char kNavRoots[] =
+    "{\"data\":{\"roots\":["
+    "{\"id\":9001,\"hasChildren\":true,\"properties\":[{\"label\":\"name\",\"value\":\"Beispiel-Organisation\"}],"
+    "\"natures\":[{\"id\":7001,\"nature\":{\"code\":\"core_Folder\"}}]},"
+    "{\"id\":9002,\"hasChildren\":false,\"properties\":[{\"label\":\"name\",\"value\":\"Archiv (leer)\"}],"
+    "\"natures\":[]}]}}";
+const char kNav9001[] =
+    "{\"data\":{\"object\":{\"id\":9001,\"children\":["
+    "{\"id\":9010,\"hasChildren\":true,\"properties\":[{\"label\":\"name\",\"value\":\"Beispiel-ZEV Sonnenhalde\"}],"
+    "\"natures\":[{\"id\":7010,\"nature\":{\"code\":\"zev_Site\"}}]},"
+    "{\"id\":9020,\"hasChildren\":false,\"properties\":[{\"label\":\"name\",\"value\":\"Dokumente\"}],"
+    "\"natures\":[]}]}}}";
+const char kNav9010[] =
+    "{\"data\":{\"object\":{\"id\":9010,\"children\":["
+    "{\"id\":9011,\"hasChildren\":true,\"properties\":[{\"label\":\"name\",\"value\":\"Zone Haus A\"}],"
+    "\"natures\":[{\"id\":7011,\"nature\":{\"code\":\"zev_Zone\"}}]},"
+    "{\"id\":9012,\"hasChildren\":false,\"properties\":[{\"label\":\"name\",\"value\":\"Zone Haus B\"}],"
+    "\"natures\":[{\"id\":7012,\"nature\":{\"code\":\"zev_Zone\"}}]},"
+    "{\"id\":9013,\"hasChildren\":false,\"properties\":[{\"label\":\"name\",\"value\":\"Hauptz\xC3\xA4hler\"}],"
+    "\"natures\":[{\"id\":7013,\"nature\":{\"code\":\"zev_MeteringPoint\"}}]}]}}}";
+const char kNavEmpty[] = "{\"data\":{\"object\":{\"id\":0,\"children\":[]}}}";
+}  // namespace
+
+bool co4_bff_nav_fixture(const char* soid, Co4NavLevel* out, char* err, size_t err_n) {
+  bool roots = soid == nullptr || soid[0] == '\0';
+  const char* j = roots ? kNavRoots
+                  : strcmp(soid, "9001") == 0 ? kNav9001
+                  : strcmp(soid, "9010") == 0 ? kNav9010
+                                              : kNavEmpty;
+  return co4_bff_parse_nav(j, strlen(j), roots, out, err, err_n);
 }

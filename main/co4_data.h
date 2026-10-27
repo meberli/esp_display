@@ -82,9 +82,7 @@ const Co4Source& co4_live_source();
 void co4_fixture_fill(int64_t now_ms, Co4Data* out);
 
 // --- Zones --------------------------------------------------------------------
-// zevMyZones (vorgeschlagen, noch nicht vorhanden): a BFF operation listing the
-// zones of the logged-in user. Proposed answer: {"data":[{"id":"…","name":"…"}]}.
-// Until it exists the zone list comes from the fixture.
+// zevGetConsumptionZones answer (zones of one site), see co4_bff_parse_zones.
 constexpr int kCo4MaxZones = 12;
 struct Co4Zone {
   char id[40];
@@ -95,8 +93,26 @@ struct Co4ZoneList {
   int n;
   Co4Zone z[kCo4MaxZones];
 };
-// Parses the proposed zevMyZones answer (also {"errors":[…]}). err: short German text.
-bool co4_zones_parse(const char* json, size_t len, Co4ZoneList* out, char* err, size_t err_n);
-// Example zones (placeholders, no real zone IDs).
-void co4_zones_fixture(Co4ZoneList* out);
-extern const char kCo4ZonesFixtureJson[];
+
+// --- Object tree (zone choice) ----------------------------------------------------
+// Navigation as in co4-frontend-app: co4CoreNavRoots, then co4CoreNavGet per node
+// (object.children). Only name, id, natures and hasChildren are kept.
+constexpr int kCo4NavMax = 48;   // children kept per level (rest counted in total)
+constexpr int kCo4NavDepth = 8;  // breadcrumb depth
+struct Co4NavItem {
+  char soid[20];  // system object id (input for co4CoreNavGet)
+  char name[48];
+  char zone[20];  // niid of the zev_Zone nature instance, "" = not a ZEV zone
+  bool kids;      // hasChildren
+};
+struct Co4NavCrumb {
+  char soid[20];
+  char name[48];
+};
+struct Co4NavLevel {
+  uint8_t depth;  // 0 = roots, else path[depth-1] is the current node
+  Co4NavCrumb path[kCo4NavDepth];
+  uint16_t n;      // items in it[]
+  uint16_t total;  // children in the answer (> n: list cut)
+  Co4NavItem it[kCo4NavMax];
+};

@@ -9,7 +9,7 @@ lv_obj_t* co4login_root = nullptr;
 lv_obj_t* co4zone_root = nullptr;
 Co4View* co4_v = nullptr;   // PSRAM copies, UI task only
 Co4Data* co4_d = nullptr;
-Co4ZoneList* co4_z = nullptr;
+Co4NavLevel* co4_z = nullptr;  // current object-tree level (copy)
 bool co4_dirty = true;
 
 // Dashboard widgets (per page)
@@ -54,7 +54,9 @@ char c4l_qr_txt[200] = "";
 lv_obj_t* c4z_list = nullptr;
 lv_obj_t* c4z_msg = nullptr;
 lv_obj_t* c4z_btn[2] = {};
-int c4z_shown = -1;
+lv_obj_t* c4z_btn_lbl[2] = {};
+lv_obj_t* c4z_crumb = nullptr;
+char c4z_shown[64] = "";  // signature of the rendered level
 
 // Whole-site block (Heute: today, Verlauf: month + year). Battery column only
 // when the site delivers battery values; never added to Bezug.
@@ -269,7 +271,7 @@ void c4_site_show(C4SiteTbl* t, const Co4SiteData& sd, const Co4Totals* const* b
 void build_co4_screens(lv_obj_t* screen) {
   co4_v = static_cast<Co4View*>(heap_caps_calloc(1, sizeof(Co4View), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
   co4_d = static_cast<Co4Data*>(heap_caps_calloc(1, sizeof(Co4Data), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-  co4_z = static_cast<Co4ZoneList*>(heap_caps_calloc(1, sizeof(Co4ZoneList), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  co4_z = static_cast<Co4NavLevel*>(heap_caps_calloc(1, sizeof(Co4NavLevel), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
   // --- Heute
   lv_obj_t* r = co4_root[0] = make_screen_root(screen, "Co4 Energie");
   c4_build_common(r, 0);
@@ -799,20 +801,41 @@ void co4_login_refresh() {
 
 // --- Zone choice ------------------------------------------------------------------
 
+// Object tree: root > ... > node. Rows open their children; only objects with
+// the nature zev_Zone get "Auswählen". The tree requests run on the Co4 task.
+
 void on_c4z_row(lv_event_t* e) {
   if (gesture_consumed) return;
   int i = static_cast<int>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e)));
   if (i < 0 || i >= co4_z->n) return;
-  console_printf("Co4 zone %d chosen\n", i);  // id/name are not logged
-  co4_zone_choose(co4_z->z[i].id, co4_z->z[i].name, co4_z->z[i].site);
+  const Co4NavItem& it = co4_z->it[i];
+  if (!it.kids) return;
+  console_printf("Co4 tree: open level %u\n", co4_z->depth + 1);  // names/IDs are not logged
+  c4z_shown[0] = '\0';
+  co4_nav_open(it.soid, it.name);
+}
+
+void on_c4z_pick(lv_event_t* e) {
+  if (gesture_consumed) return;
+  int i = static_cast<int>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e)));
+  if (i < 0 || i >= co4_z->n || co4_z->it[i].zone[0] == '\0') return;
+  console_printf("Co4 zone chosen\n");  // id/name are not logged
+  // Site niid: not taken from the tree (not unambiguous), zevGetZone fills it.
+  co4_zone_choose(co4_z->it[i].zone, co4_z->it[i].name, "");
   open_co4set();
 }
 
 void on_c4z_btn(lv_event_t* e) {
   if (gesture_consumed) return;
   int id = static_cast<int>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e)));
-  if (id == 0) open_co4set();
-  else co4_zones_load();
+  c4z_shown[0] = '\0';
+  if (id == 0) {
+    if (co4_z->depth > 0) co4_nav_back();
+    else open_co4set();
+  } else if (id == 1) {
+    if (co4_v->zones_state == Co4ZonesState::Error || co4_z->depth == 0) co4_nav_reload();
+    else open_co4set();
+  }
 }
 
 void co4_open_zones() {
@@ -820,70 +843,129 @@ void co4_open_zones() {
   hide_settings();
   info_hide_views();
   hide(home_root);
-  c4z_shown = -1;
+  c4z_shown[0] = '\0';
   show(co4zone_root);
-  co4_zones_load();
+  co4_nav_root();
   co4_refresh();
 }
 
 void build_co4_zones(lv_obj_t* screen) {
   co4zone_root = make_screen_root(screen, "Zone w\xC3\xA4hlen");
-  c4z_list = make_list(co4zone_root, 56, 300);
+  c4z_crumb = make_label(co4zone_root, &font_inter_14, lv_color_hex(kTextDim));
+  lv_obj_set_width(c4z_crumb, 440);
+  lv_label_set_long_mode(c4z_crumb, LV_LABEL_LONG_DOT);
+  lv_obj_set_pos(c4z_crumb, 22, 60);
+  c4z_list = make_list(co4zone_root, 88, 272);
   c4z_msg = make_label(co4zone_root, &font_inter_16, lv_color_hex(kTextDim));
   lv_obj_set_width(c4z_msg, 432);
   lv_label_set_long_mode(c4z_msg, LV_LABEL_LONG_WRAP);
-  lv_obj_set_pos(c4z_msg, 24, 120);
+  lv_obj_set_pos(c4z_msg, 24, 160);
   lv_obj_set_style_text_align(c4z_msg, LV_TEXT_ALIGN_CENTER, 0);
-  c4z_btn[0] = co4_btn(co4zone_root, 206, "Abbrechen", on_c4z_btn, 0, "co4:zno", false);
+  c4z_btn[0] = co4_btn(co4zone_root, 206, "Abbrechen", on_c4z_btn, 0, "co4:zno", false, &c4z_btn_lbl[0]);
   lv_obj_set_pos(c4z_btn[0], 24, 372);
-  c4z_btn[1] = co4_btn(co4zone_root, 206, "Nochmals versuchen", on_c4z_btn, 1, "co4:zretry", true);
+  c4z_btn[1] = co4_btn(co4zone_root, 206, "Nochmals versuchen", on_c4z_btn, 1, "co4:zretry", true, &c4z_btn_lbl[1]);
   lv_obj_set_pos(c4z_btn[1], 250, 372);
+}
+
+// "Co4 > A > B" (shortened from the left when long; the label dots the end).
+void c4z_crumb_text(char* out, size_t n) {
+  int first = co4_z->depth > 3 ? co4_z->depth - 3 : 0;
+  int w = snprintf(out, n, "%s", first > 0 ? "Co4 > ... " : "Co4");
+  for (int d = first; d < co4_z->depth && w > 0 && static_cast<size_t>(w) < n; ++d)
+    w += snprintf(out + w, n - w, " > %s", co4_z->path[d].name);
+}
+
+void c4z_row(int i) {
+  const Co4NavItem& it = co4_z->it[i];
+  bool zone = it.zone[0] != '\0';
+  lv_obj_t* row = make_row(c4z_list, 64, zone ? ICON_BOLT : ICON_PLACE, zone ? kGreen : kAccent, on_c4z_row, i);
+  if (zone) {
+    lv_obj_set_style_border_color(row, lv_color_hex(kGreen), 0);
+    lv_obj_set_style_border_width(row, 2, 0);
+  }
+  int text_w = zone ? 220 : 300;
+  lv_obj_t* n = make_label(row, &font_inter_sb16, lv_color_hex(kText));
+  lv_obj_set_width(n, text_w);
+  lv_label_set_long_mode(n, LV_LABEL_LONG_DOT);
+  lv_label_set_text(n, it.name);
+  lv_obj_align(n, LV_ALIGN_LEFT_MID, 56, -10);
+  lv_obj_t* sub = make_label(row, &font_inter_14, lv_color_hex(zone ? kGreen : kTextDim));
+  bool cur = zone && co4_v->zone_set && strcmp(co4_v->zone_id, it.zone) == 0;
+  lv_label_set_text(sub, zone ? (cur ? "ZEV-Zone \xC2\xB7 gew\xC3\xA4hlt" : "ZEV-Zone")
+                              : (it.kids ? "Enth\xC3\xA4lt Objekte" : "Keine Unterobjekte"));
+  lv_obj_align(sub, LV_ALIGN_LEFT_MID, 56, 12);
+  if (it.kids) {
+    lv_obj_t* ch = make_label(row, &font_icons_24, lv_color_hex(kTextDim));
+    lv_label_set_text(ch, ICON_CHEVRON);
+    lv_obj_align(ch, LV_ALIGN_RIGHT_MID, -8, 0);
+  }
+  char key[16];
+  snprintf(key, sizeof(key), "co4:z%d", i);
+  reg(key, row);
+  if (zone) {
+    lv_obj_t* b = lv_btn_create(row);
+    lv_obj_set_size(b, 112, 40);
+    lv_obj_set_style_radius(b, 12, 0);
+    lv_obj_set_style_bg_color(b, lv_color_hex(kGreen), 0);
+    lv_obj_set_style_shadow_width(b, 0, 0);
+    lv_obj_add_event_cb(b, on_c4z_pick, LV_EVENT_CLICKED, reinterpret_cast<void*>(static_cast<intptr_t>(i)));
+    watch(b);
+    lv_obj_t* l = make_label(b, &font_inter_sb16, lv_color_hex(0x0B2129));
+    lv_label_set_text(l, "Ausw\xC3\xA4hlen");
+    lv_obj_center(l);
+    lv_obj_align(b, LV_ALIGN_RIGHT_MID, it.kids ? -36 : -8, 0);
+    snprintf(key, sizeof(key), "co4:zp%d", i);
+    reg(key, b);
+  }
 }
 
 void co4_zones_refresh() {
   const Co4View& v = *co4_v;
-  hide(c4z_btn[1]);
-  if (v.zones_state == Co4ZonesState::Ok) {
-    co4_get_zones(co4_z);
-    if (c4z_shown != co4_z->n) {
+  co4_get_nav(co4_z);
+  char crumb[160];
+  c4z_crumb_text(crumb, sizeof(crumb));
+  lv_label_set_text(c4z_crumb, crumb);
+  bool err = v.zones_state == Co4ZonesState::Error;
+  bool ok = v.zones_state == Co4ZonesState::Ok;
+  lv_label_set_text(c4z_btn_lbl[0], co4_z->depth > 0 ? "Zur\xC3\xBC" "ck" : "Abbrechen");
+  if (err || co4_z->depth == 0) {
+    lv_label_set_text(c4z_btn_lbl[1], err ? "Nochmals versuchen" : "Neu laden");
+    show(c4z_btn[1]);
+  } else {
+    lv_label_set_text(c4z_btn_lbl[1], "Abbrechen");
+    show(c4z_btn[1]);
+  }
+  if (ok && co4_z->n > 0) {
+    char sig[64];
+    snprintf(sig, sizeof(sig), "%u/%s/%u/%u/%d", co4_z->depth,
+             co4_z->depth ? co4_z->path[co4_z->depth - 1].soid : "", co4_z->n, co4_z->total, v.zone_set);
+    if (strcmp(sig, c4z_shown) != 0) {
       unreg_prefix("co4:z");
+      reg("co4:zno", c4z_btn[0]);
+      reg("co4:zretry", c4z_btn[1]);
       lv_obj_clean(c4z_list);
-      for (int i = 0; i < co4_z->n; ++i) {
-        lv_obj_t* row = make_row(c4z_list, 56, ICON_BOLT, kGreen, on_c4z_row, i);
-        lv_obj_t* n = make_label(row, &font_inter_sb16, lv_color_hex(kText));
-        lv_obj_set_width(n, 330);
-        lv_label_set_long_mode(n, LV_LABEL_LONG_DOT);
-        lv_label_set_text(n, co4_z->z[i].name[0] ? co4_z->z[i].name : co4_z->z[i].id);
-        lv_obj_align(n, LV_ALIGN_LEFT_MID, 56, 0);
-        if (v.zone_set && strcmp(v.zone_id, co4_z->z[i].id) == 0) {
-          lv_obj_t* ck = make_label(row, &font_icons_24, lv_color_hex(kGreen));
-          lv_label_set_text(ck, ICON_CHECK);
-          lv_obj_align(ck, LV_ALIGN_RIGHT_MID, -14, 0);
-        }
-        char key[16];
-        snprintf(key, sizeof(key), "co4:z%d", i);
-        reg(key, row);
+      for (int i = 0; i < co4_z->n; ++i) c4z_row(i);
+      if (co4_z->total > co4_z->n) {
+        lv_obj_t* more = make_label(c4z_list, &font_inter_14, lv_color_hex(kTextDim));
+        lv_label_set_text_fmt(more, "Weitere %u Objekte nicht angezeigt", co4_z->total - co4_z->n);
       }
-      c4z_shown = co4_z->n;
+      lv_obj_scroll_to_y(c4z_list, 0, LV_ANIM_OFF);
+      snprintf(c4z_shown, sizeof(c4z_shown), "%s", sig);
     }
     show(c4z_list);
-    if (co4_z->n == 0) {
-      lv_label_set_text(c4z_msg, "Dein Co4-Konto hat keine Zonen.");
-      show(c4z_msg);
-      show(c4z_btn[1]);
-    } else {
-      hide(c4z_msg);
-    }
+    hide(c4z_msg);
     return;
   }
   hide(c4z_list);
-  c4z_shown = -1;
+  c4z_shown[0] = '\0';
   show(c4z_msg);
-  if (v.zones_state == Co4ZonesState::Error) {
-    lv_label_set_text_fmt(c4z_msg, "Zonen konnten nicht geladen werden.\n%s", v.zones_err);
-    show(c4z_btn[1]);
+  if (err) {
+    lv_label_set_text_fmt(c4z_msg, "Objekte konnten nicht geladen werden.\n%s", v.zones_err);
+  } else if (ok) {
+    lv_label_set_text(c4z_msg, co4_z->depth == 0 ? "Dein Co4-Konto zeigt keine Objekte."
+                                                 : "Dieses Objekt enth\xC3\xA4lt keine Unterobjekte.");
   } else {
-    lv_label_set_text(c4z_msg, "Lade Zonen \xE2\x80\xA6");
+    lv_label_set_text(c4z_msg, "Lade Objekte \xE2\x80\xA6");
   }
 }
 

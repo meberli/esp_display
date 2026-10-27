@@ -78,5 +78,19 @@ Co4BffRc co4_bff_parse_site_stats(const char* json, size_t len, float* v, int ca
 // zevGetZone answer -> site niid (decimal). false if missing.
 bool co4_bff_parse_zone_site(const char* json, size_t len, char* site, size_t site_n, char* err, size_t err_n);
 
+// --- Object tree (zone choice) ----------------------------------------------------
+// Sources (co4-backend-bff .wundergraph/operations): co4CoreNavRoots (no input,
+// data.roots[] of fragment co4Gi) and co4CoreNavGet(id: BigInt, hidden: Boolean)
+// (data.object.children[] of fragment co4ChildGi). Name = properties[] entry with
+// label "name" (co4-frontend-app graph.ts); a ZEV zone is a natures[] entry with
+// nature.code "zev_Zone" (co4-frontend-pilets-zev), its niid is that entry's id.
+// soid "" = roots path.
+bool co4_bff_nav_path(char* out, size_t n, const char* soid);
+// roots: true for a co4CoreNavRoots answer. Fills out->n/total/it, sorted by name
+// (path/depth untouched). Only id, name, natures and hasChildren are kept.
+bool co4_bff_parse_nav(const char* json, size_t len, bool roots, Co4NavLevel* out, char* err, size_t err_n);
+// BEISPIELDATEN: placeholder tree in the same answer format (no real objects/IDs).
+bool co4_bff_nav_fixture(const char* soid, Co4NavLevel* out, char* err, size_t err_n);
+
 // kWh per block -> mean kW over the block.
 void co4_bff_energy_to_power(float* v, int n, int64_t step_ms);
