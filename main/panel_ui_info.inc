@@ -1065,14 +1065,14 @@ void build_info_screens(lv_obj_t* screen) {
   // ÖV board
   tr_root = make_screen_root(screen, "");
   tr_title = lv_obj_get_child(tr_root, 0);
-  lv_obj_set_pos(tr_title, 56, 20);
-  lv_obj_set_width(tr_title, 320);
+  header_title_at(tr_title, 56, 20, 320);
   lv_label_set_long_mode(tr_title, LV_LABEL_LONG_DOT);
   lv_obj_t* tic = make_label(tr_root, &font_icons_24, lv_color_hex(kAccent));
   lv_label_set_text(tic, ICON_TRAIN);
   lv_obj_set_pos(tic, 22, 19);
   tr_page = make_label(tr_root, &font_inter_14, lv_color_hex(kTextDim));
   lv_obj_align(tr_page, LV_ALIGN_TOP_RIGHT, -24, 25);
+  header_note(tr_page);
   tr_status = make_label(tr_root, &font_inter_14, lv_color_hex(kTextDim));
   lv_obj_set_pos(tr_status, 24, 50);
   lv_obj_set_width(tr_status, 432);
@@ -1113,12 +1113,13 @@ void build_info_screens(lv_obj_t* screen) {
 
   // Kalender view
   calv_root = make_screen_root(screen, "Kalender");
-  lv_obj_set_x(lv_obj_get_child(calv_root, 0), 56);
+  header_title_at(lv_obj_get_child(calv_root, 0), 56, 20, 0);
   lv_obj_t* cic = make_label(calv_root, &font_icons_24, lv_color_hex(kPurple));
   lv_label_set_text(cic, ICON_CALENDAR);
   lv_obj_set_pos(cic, 22, 19);
   calv_status = make_label(calv_root, &font_inter_14, lv_color_hex(kTextDim));
   lv_obj_align(calv_status, LV_ALIGN_TOP_RIGHT, -24, 25);
+  header_note(calv_status);
   calv_list = make_list(calv_root, 58, 400);
   lv_obj_set_style_pad_row(calv_list, 6, 0);
 

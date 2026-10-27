@@ -8,18 +8,41 @@
 
 // Co4: the title label itself carries the petrol-to-green header bar, so it
 // stays child 0 (wp_title and the Bilanz screen rely on that).
+// The bar is kHeaderH high so content placed at y >= 56 (cards, lists) stays
+// below it. Screens with an icon left of the title must not move the label
+// afterwards (that shifted the whole bar); they call header_title_at().
+constexpr int32_t kHeaderH = 52;
 void style_header(lv_obj_t* t) {
   if (!g_theme->header_bar) return;
   lv_obj_set_pos(t, 0, 0);
-  lv_obj_set_size(t, kScreen, 60);
+  lv_obj_set_size(t, kScreen, kHeaderH);
   lv_obj_set_style_pad_left(t, 24, 0);
-  lv_obj_set_style_pad_top(t, 20, 0);
+  lv_obj_set_style_pad_top(t, 16, 0);
   lv_obj_set_style_bg_color(t, lv_color_hex(g_theme->grad_a), 0);
   lv_obj_set_style_bg_grad_color(t, lv_color_hex(g_theme->grad_b), 0);
   lv_obj_set_style_bg_grad_dir(t, LV_GRAD_DIR_HOR, 0);
   lv_obj_set_style_bg_opa(t, LV_OPA_COVER, 0);
   lv_obj_set_style_text_color(t, lv_color_hex(0xFFFFFF), 0);
   lv_label_set_long_mode(t, LV_LABEL_LONG_CLIP);
+}
+
+// Title text at (x, y) with optional text width w. With a header bar the bar
+// keeps spanning the screen and only the text inset changes.
+void header_title_at(lv_obj_t* t, int32_t x, int32_t y, int32_t w) {
+  if (!g_theme->header_bar) {
+    lv_obj_set_pos(t, x, y);
+    if (w > 0) lv_obj_set_width(t, w);
+    return;
+  }
+  lv_obj_set_style_pad_left(t, x, 0);
+  lv_obj_set_style_pad_right(t, w > 0 ? kScreen - x - w : 0, 0);
+}
+
+// Small status/page text that sits on the header row: readable on the bar.
+void header_note(lv_obj_t* l) {
+  if (!g_theme->header_bar) return;
+  lv_obj_set_style_text_color(l, lv_color_hex(0xFFFFFF), 0);
+  lv_obj_set_style_text_opa(l, LV_OPA_80, 0);
 }
 
 lv_obj_t* make_screen_root(lv_obj_t* screen, const char* title) {

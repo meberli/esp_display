@@ -584,6 +584,8 @@ void ui_init() {
   heap_note("ui-build");
 }
 void style_header(lv_obj_t* t);  // panel_ui_settings.inc
+void header_title_at(lv_obj_t* t, int32_t x, int32_t y, int32_t w);
+void header_note(lv_obj_t* l);
 
 static void ui_init_impl() {
   // Design is fixed for this boot (a change in Einstellungen restarts).
