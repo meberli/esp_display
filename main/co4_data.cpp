@@ -35,10 +35,23 @@ bool co4_ratio(const float (*v)[kCo4MaxBars], int from, int to, Co4Ratio* out) {
       }
     }
   }
-  const float use = out->sum[kCo4Eigen] + out->sum[kCo4Bezug];
-  if (use > 0.0f) out->autarky_pct = 100.0f * out->sum[kCo4Eigen] / use;
-  if (out->sum[kCo4Pv] > 0.0f) out->self_pct = 100.0f * out->sum[kCo4Eigen] / out->sum[kCo4Pv];
-  return any && (use > 0.0f || out->sum[kCo4Pv] > 0.0f);
+  // Bezug may be negative (corrections in the Co4 data, shown as delivered).
+  // The shares stay in [0, 100]: Bezug <= 0 with own use -> Autarkie 100 %.
+  const float eig = out->sum[kCo4Eigen], bez = out->sum[kCo4Bezug], pv = out->sum[kCo4Pv];
+  const float use = eig + (bez > 0.0f ? bez : 0.0f);
+  if (use > 0.0f && eig > 0.0f) out->autarky_pct = fminf(100.0f, 100.0f * eig / use);
+  if (pv > 0.0f && eig > 0.0f) out->self_pct = fminf(100.0f, 100.0f * eig / pv);
+  return any;
+}
+
+void co4_fmt_kwh(char* out, size_t n, float v) {
+  if (!(v == v) || isinf(v)) v = 0;
+  const float a = fabsf(v);
+  // newlib snprintf (not LVGL's, which has no %f); no "-0.0" for tiny negatives.
+  if (a >= 1000) snprintf(out, n, "%.2f MWh", static_cast<double>(v / 1000.0f));
+  else if (a >= 100) snprintf(out, n, "%.0f kWh", static_cast<double>(v));
+  else if (a < 0.05f) snprintf(out, n, "0.0 kWh");
+  else snprintf(out, n, "%.1f kWh", static_cast<double>(v));
 }
 
 namespace {

@@ -101,12 +101,6 @@ lv_obj_t* co4_btn(lv_obj_t* parent, int w, const char* text, lv_event_cb_t cb, i
   return b;
 }
 
-void co4_fmt_kwh(char* out, size_t n, float v) {
-  if (!(v >= 0)) v = 0;
-  if (v >= 1000) snprintf(out, n, "%.2f MWh", v / 1000.0f);
-  else if (v >= 100) snprintf(out, n, "%.0f kWh", v);
-  else snprintf(out, n, "%.1f kWh", v);
-}
 
 // Index of the block interval that contains now (or -1).
 int co4_index(const int64_t t0, const int64_t step, int n, int64_t now_ms) {
@@ -400,18 +394,25 @@ void c4_bar_pair(lv_obj_t* a, lv_obj_t* b, int base, int hmax, float va, float v
 
 void co4_refresh_heute(int64_t now_ms) {
   const Co4Curve& day = co4_d->day;
-  float vmax = 0;
+  float vmax = 0, vmin = 0;  // negative Bezug: the axis goes below 0
   for (int s = 0; s < kCo4SeriesN; ++s)
-    for (int i = 0; i < day.n; ++i)
+    for (int i = 0; i < day.n; ++i) {
       if (day.v[s][i] > vmax) vmax = day.v[s][i];
+      if (day.v[s][i] < vmin) vmin = day.v[s][i];
+    }
+  const float lim = 300.0f;  // x100 must fit lv_coord_t
+  vmax = fminf(vmax, lim);
+  vmin = fmaxf(vmin, -lim);
   const int top = vmax > 0 ? static_cast<int>(vmax * 100.0f * 1.1f) + 1 : 100;
-  lv_chart_set_range(c4_chart, LV_CHART_AXIS_PRIMARY_Y, 0, top);
+  const int bot = vmin < 0 ? static_cast<int>(vmin * 100.0f * 1.1f) - 1 : 0;
+  lv_chart_set_range(c4_chart, LV_CHART_AXIS_PRIMARY_Y, bot, top);
   const Co4Series map[4] = {kCo4Pv, kCo4Bezug, kCo4Einspeisung, kCo4BatEntladen};
   int peak_i = -1;
   for (int k = 0; k < 4; ++k) {
     for (int i = 0; i < kCo4MaxPoints; ++i) {
       float x = i < day.n ? day.v[map[k]][i] : NAN;
-      c4_ser[k]->y_points[i] = x == x ? static_cast<lv_coord_t>(x * 100.0f + 0.5f) : LV_CHART_POINT_NONE;
+      c4_ser[k]->y_points[i] = x == x ? static_cast<lv_coord_t>(lroundf(fmaxf(-lim, fminf(lim, x)) * 100.0f))
+                                      : LV_CHART_POINT_NONE;
       if (k == 0 && x == x && (peak_i < 0 || x > day.v[kCo4Pv][peak_i])) peak_i = i;
     }
   }

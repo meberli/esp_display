@@ -58,13 +58,17 @@ struct Co4Data {
 
 // Autarkie = Eigenverbrauch / (Eigenverbrauch + Bezug),
 // Eigenverbrauchsquote = Eigenverbrauch / PV. Over points [from, to) of a block,
-// NAN points skipped. false if nothing to compute (pct are 0 then).
+// NAN points skipped. Shares clamped to [0, 100] (Bezug may be negative).
+// false if no value at all (pct are 0 then).
 struct Co4Ratio {
   float sum[kCo4SeriesN];
   float autarky_pct;
   float self_pct;
 };
 bool co4_ratio(const float (*v)[kCo4MaxBars], int from, int to, Co4Ratio* out);
+
+// "-0.4 kWh", "123 kWh", "-1.25 MWh"; sign kept, NAN -> 0.0 kWh.
+void co4_fmt_kwh(char* out, size_t n, float v);
 
 // A data source. fetch() runs on the Co4 task (core 0) and may block. bearer is
 // the current access token (RAM only) or nullptr for the fixture.

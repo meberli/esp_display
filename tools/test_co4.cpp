@@ -64,6 +64,31 @@ static void test_ratio() {
   for (auto& s : v)
     for (float& x : s) x = NAN;
   CHECK(!co4_ratio(v, 0, kCo4MaxBars, &r) && r.autarky_pct == 0.0f);
+  // BEISPIELDATEN: negative Bezug (correction) is kept in the sum, shares stay in [0, 100].
+  v[kCo4Bezug][0] = 2;
+  v[kCo4Bezug][1] = -2.4f;
+  v[kCo4Eigen][0] = 3;
+  v[kCo4Pv][0] = 5;
+  CHECK(co4_ratio(v, 0, kCo4MaxBars, &r));
+  CHECK(fabsf(r.sum[kCo4Bezug] + 0.4f) < 0.001f);
+  CHECK(r.autarky_pct == 100.0f && fabsf(r.self_pct - 60.0f) < 0.01f);
+  for (auto& s : v)
+    for (float& x : s) x = NAN;
+  v[kCo4Bezug][0] = -1;  // only a negative Bezug: data, but no share
+  CHECK(co4_ratio(v, 0, kCo4MaxBars, &r) && r.autarky_pct == 0.0f && r.self_pct == 0.0f);
+  char t[16];
+  co4_fmt_kwh(t, sizeof(t), -0.4f);
+  CHECK(strcmp(t, "-0.4 kWh") == 0);
+  co4_fmt_kwh(t, sizeof(t), -0.01f);
+  CHECK(strcmp(t, "0.0 kWh") == 0);
+  co4_fmt_kwh(t, sizeof(t), -250);
+  CHECK(strcmp(t, "-250 kWh") == 0);
+  co4_fmt_kwh(t, sizeof(t), -1250);
+  CHECK(strcmp(t, "-1.25 MWh") == 0);
+  co4_fmt_kwh(t, sizeof(t), NAN);
+  CHECK(strcmp(t, "0.0 kWh") == 0);
+  co4_fmt_kwh(t, sizeof(t), 12.34f);
+  CHECK(strcmp(t, "12.3 kWh") == 0);
 }
 
 // Object tree with the placeholder tree (co4CoreNavRoots / co4CoreNavGet form).
