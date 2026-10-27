@@ -89,6 +89,8 @@ uint32_t disc_t0 = 0, disc_t_next = 0, disc_phase_t0 = 0;
 uint8_t ap_warn_ch = 0;      // no AP of our SSID on this gateway channel
 uint8_t noap_n = 0;          // discoveries in a row that found the gateway but no AP on its channel
 bool boot_aligned = false;
+uint32_t keepalive_n = 0;
+bool keepalive_out = false;  // outstanding heartbeat sent while lost
 Co4enResweep rs = {};        // runtime re-search gate (count, last start, failures -> backoff)
 Co4enBeacon last_bc = {};
 bool bc_have = false;
@@ -146,6 +148,8 @@ PlayCounters counters() {
   c.pinned = wifi_pinned(nullptr, &c.pin_ch);
   c.ap_warn_ch = ap_warn_ch;
   c.resweeps = rs.n;
+  c.keepalives = keepalive_n;
+  c.lost_backoff = st == PlayState::Lost && sw.st == Co4enSweepSt::Backoff;
   c.last_resweep_s = rs.n != 0 ? (now_ms() - rs.last_ms) / 1000 : 0;
   c.backoff_s = (co4en_resweep_wait_ms(rs, now_ms()) + 999) / 1000;
   c.bc_have = bc_have;
@@ -560,8 +564,44 @@ void search_tick(uint32_t t) {
     send_probe(ch);
   } else if (sw.st == Co4enSweepSt::Backoff && st == PlayState::Searching) {
     st = PlayState::Lost;
-    logf("gateway not found: next search in %lu min", static_cast<unsigned long>(co4en_sweep_backoff_ms(sw.fails) / 60000));
+    if (disc == Disc::Idle)  // inside a discovery disc_finish() logs the final backoff once
+      logf("gateway not found: next search in %lu min", static_cast<unsigned long>(co4en_sweep_backoff_ms(sw.fails) / 60000));
   }
+}
+
+// Paired gateway heard again while lost (keepalive ACK / beacon): link ok, cancel the
+// scheduled re-search, reset backoff + miss counter. No Wi-Fi change here.
+void lost_recover(const char* why) {
+  co4en_lost_recover(&link, &rs, &sw);
+  keepalive_out = false;
+  probe_out = false;
+  st = PlayState::Paired;
+  noap_n = 0;
+  last_status_ms = now_ms();
+  logf("gateway back (%s): link ok, re-search cancelled", why);
+  ui_post(PlayMsgKind::Status, state_name(st));
+}
+
+void send_keepalive() {
+  if (!radio_up()) return;
+  Co4enFrame f;
+  uint8_t flags;
+  begin_data(&f, &flags);
+  add_status(&f);
+  flags |= CO4EN_F_ACK_REQ;
+  uint32_t s = next_seq();
+  f.b[2] = flags;
+  memcpy(&f.b[4], &s, 4);
+  tx(f, gw_mac, "keepalive");
+  remember_ack_seq(s);
+  pend.active = true;
+  pend.seq = s;
+  pend.deadline = now_ms() + CO4EN_ACK_WAIT_MS;
+  pend.retries = 0;  // one frame per period; a miss only waits for the next one
+  pend.f = f;
+  keepalive_out = true;
+  ++keepalive_n;
+  last_status_ms = last_data_ms = now_ms();
 }
 
 void probe_found(const Co4enAck& a) {
@@ -771,6 +811,8 @@ void on_ack(const uint8_t src[6], const uint8_t* d, size_t n) {
   co4en_link_ack(&link);  // any ACK-INFO: the gateway hears us
   co4en_resweep_ack(&rs);  // backoff back to the minimum
   if (probe_hit && st == PlayState::Searching) probe_found(a);
+  else if (st == PlayState::Lost && disc == Disc::Idle) lost_recover("ACK");  // e.g. keepalive between re-searches
+  keepalive_out = false;
   if (a.result != CO4EN_ACK_OK) {
     ++failed_n;
     if (a.result == CO4EN_ACK_ERR_DECODE) {  // e.g. unknown KV-ID: announce the KEYMAP again
@@ -805,8 +847,9 @@ void on_beacon(const uint8_t src[6], const uint8_t* d, size_t n) {
     disc_bc_ch = b.channel;
     logf("beacon %02X:%02X:%02X:%02X:%02X:%02X ch %u flags %02X (heard on ch %u)", b.gw_mac[0], b.gw_mac[1],
          b.gw_mac[2], b.gw_mac[3], b.gw_mac[4], b.gw_mac[5], b.channel, b.flags, cur_channel());
-  } else if (linked && !offair() && b.channel != gw_chan) {
-    channel_hint(b.channel);
+  } else if (linked && !offair()) {
+    if (st == PlayState::Lost && disc == Disc::Idle) lost_recover("beacon");
+    if (b.channel != gw_chan) channel_hint(b.channel);
   }
 }
 
@@ -973,6 +1016,8 @@ void do_reset() {
   ap_warn_ch = 0;
   noap_n = 0;
   rs = {};
+  keepalive_n = 0;
+  keepalive_out = false;
   boot_aligned = false;
   pend.active = false;
   probe_out = false;
@@ -1168,6 +1213,7 @@ void tick() {
     } else {
       pend.active = false;
       ++failed_n;
+      keepalive_out = false;
       if (st == PlayState::Paired && co4en_link_miss(&link)) {
         char why[48];
         snprintf(why, sizeof(why), "Gateway verloren (%d ACKs missed)", kCo4enLinkMissMax);
@@ -1176,6 +1222,9 @@ void tick() {
     }
   }
   search_tick(t);
+  if (co4en_keepalive_due(st == PlayState::Lost, sw.st == Co4enSweepSt::Backoff, disc == Disc::Idle,
+                          !offair() && wifi_connected(), pend.active, t, last_status_ms, kHeartbeatMs))
+    send_keepalive();
   if (st == PlayState::Confirming && !pend.active && t - last_data_ms >= kConfirmPeriodMs &&
       (offair() || wifi_connected())) {  // not while Wi-Fi reconnects after a discovery
     if (confirm_n >= kConfirmFrames) {
@@ -1345,7 +1394,7 @@ void play_diag() {
   console_printf("CO4EN state=%s fwd=%d radio=%d ch=%u gw=%02X%02X%02X%02X%02X%02X pair_req=%lu sent=%lu mac_ok=%lu "
                  "acked=%lu failed=%lu dry=%lu seq=%lu enc=%s cii=%d gw_ch=%u link_miss=%u sweep=%s sweep_ch=%u "
                  "sweep_fails=%u next=%lus vstore=%u disc=%u disc_ch=%u pinned=%d pin_ch=%u ap_warn_ch=%u "
-                 "beacon=%s beacon_ch=%u beacon_flags=%02X beacon_age=%lus resweeps=%lu last_resweep_s=%lu backoff_s=%lu\n",
+                 "beacon=%s beacon_ch=%u beacon_flags=%02X beacon_age=%lus resweeps=%lu last_resweep_s=%lu backoff_s=%lu keepalives=%lu lost_backoff=%d\n",
                  state_name(c.state), c.fwd ? 1 : 0, c.radio ? 1 : 0, c.channel, c.gw_mac[0], c.gw_mac[1], c.gw_mac[2],
                  c.gw_mac[3], c.gw_mac[4], c.gw_mac[5], static_cast<unsigned long>(c.pair_req),
                  static_cast<unsigned long>(c.sent), static_cast<unsigned long>(c.mac_ok),
@@ -1355,7 +1404,8 @@ void play_diag() {
                  static_cast<unsigned long>(c.sweep_next_s), c.vstore_mv, c.disc, c.disc_ch, c.pinned ? 1 : 0, c.pin_ch,
                  c.ap_warn_ch, c.bc_have ? "yes" : "no", c.bc_ch, c.bc_flags, static_cast<unsigned long>(c.bc_age_s),
                  static_cast<unsigned long>(c.resweeps), static_cast<unsigned long>(c.last_resweep_s),
-                 static_cast<unsigned long>(c.backoff_s));
+                 static_cast<unsigned long>(c.backoff_s), static_cast<unsigned long>(c.keepalives),
+                 c.lost_backoff ? 1 : 0);
 }
 
 void play_print_qr_test_only() { console_printf("CO4ENQR %s\n", qr); }

@@ -49,6 +49,8 @@ struct PlayCounters {
   uint8_t bc_ch, bc_flags;
   uint32_t bc_age_s;
   // runtime gateway re-search (link loss -> Wi-Fi drop + sweep), rate limited
+  uint32_t keepalives;      // heartbeats sent while lost (between re-searches)
+  bool lost_backoff;        // lost, waiting for the next re-search
   uint32_t resweeps;        // started since boot
   uint32_t last_resweep_s;  // seconds since the last one (0 = none)
   uint32_t backoff_s;       // seconds until the next one may start (0 = now)

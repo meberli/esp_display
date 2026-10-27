@@ -317,6 +317,43 @@ int main() {
     CHECK(co4en_wlan_info(&f2, 6, gw, -61) && f2.n == 22 && f2.b[12] == 0x21 && f2.b[13] == 8 && f2.b[14] == 6 &&
               f2.b[21] == 0xC3, "wlan_info TLV 0x21");
   }
+  {  // keepalive between re-searches (gateway off -> search -> backoff -> back on the same channel)
+    Co4enLink l = {};
+    Co4enResweep r = {};
+    Co4enSweep sw = {};
+    uint32_t t = 1000, last = 0;
+    bool lost = false;
+    for (int i = 0; i < 3; ++i) lost = co4en_link_miss(&l);
+    CHECK(lost, "keepalive: gateway gone -> lost after 3 misses");
+    co4en_resweep_started(&r, t);
+    co4en_resweep_result(&r, false);
+    sw.st = Co4enSweepSt::Backoff;
+    sw.fails = r.fails;
+    sw.t_next = t + co4en_sweep_backoff_ms(sw.fails);
+    CHECK(sw.t_next - t == 120000, "keepalive: first backoff 2 min");
+    int sent = 0;
+    for (uint32_t x = t; static_cast<int32_t>(x - sw.t_next) < 0; x += 1000)
+      if (co4en_keepalive_due(true, true, true, true, false, x, last, 60000)) { ++sent; last = x; }
+    CHECK(sent == 2, "keepalive: 60 s heartbeats continue during the 2 min backoff");
+    CHECK(!co4en_keepalive_due(true, true, false, true, false, t + 200000, last, 60000) &&
+              !co4en_keepalive_due(true, true, true, false, false, t + 200000, last, 60000) &&
+              !co4en_keepalive_due(true, true, true, true, true, t + 200000, last, 60000) &&
+              !co4en_keepalive_due(false, true, true, true, false, t + 200000, last, 60000) &&
+              !co4en_keepalive_due(true, false, true, true, false, t + 200000, last, 60000),
+          "keepalive: not during discovery / offline / ACK wait / when paired / sweeping");
+    CHECK(co4en_keepalive_due(true, true, true, true, false, 30000, 0xFFFF0000u, 60000), "keepalive: millis wrap");
+    co4en_resweep_result(&r, false);
+    co4en_resweep_result(&r, false);
+    l.miss = 3;
+    sw.fails = r.fails;
+    co4en_lost_recover(&l, &r, &sw);
+    CHECK(l.miss == 0 && r.fails == 0 && sw.st == Co4enSweepSt::Idle && sw.fails == 0,
+          "keepalive: ACK while in backoff resets misses + backoff, cancels the search");
+    CHECK(co4en_resweep_wait_ms(r, r.last_ms + 120000) == 0, "keepalive: next re-search gap back to 2 min");
+    uint8_t gw = 6;
+    CHECK(co4en_gw_channel_update(gw, 11) == 11 && co4en_gw_channel_update(gw, 6) == 0,
+          "keepalive: ACK with other channel -> re-pin, same channel -> none");
+  }
   printf(fails ? "RESULT FAIL (%d)\n" : "RESULT PASS\n", fails);
   return fails ? 1 : 0;
 }

@@ -229,6 +229,22 @@ inline void co4en_resweep_result(Co4enResweep* r, bool found) {
   else if (r->fails < 255) ++r->fails;
 }
 inline void co4en_resweep_ack(Co4enResweep* r) { r->fails = 0; }
+// Gateway lost, waiting for the next re-search: keep sending the normal heartbeat on the
+// current (pinned) channel, so a gateway that comes back on it is seen within one period.
+// No Wi-Fi drop: only while associated (online) and no discovery / ACK wait is running.
+inline bool co4en_keepalive_due(bool lost, bool backoff, bool disc_idle, bool online, bool pend, uint32_t now_ms,
+                                uint32_t last_ms, uint32_t period_ms) {
+  return lost && backoff && disc_idle && online && !pend && static_cast<int32_t>(now_ms - last_ms) >= static_cast<int32_t>(period_ms);
+}
+// ACK (or BEACON) from the paired gateway while lost: link ok again; miss counter, re-search
+// backoff and the scheduled sweep are reset (the next re-search is cancelled).
+inline void co4en_lost_recover(Co4enLink* l, Co4enResweep* r, Co4enSweep* s) {
+  co4en_link_ack(l);
+  co4en_resweep_ack(r);
+  s->st = Co4enSweepSt::Idle;
+  s->fails = 0;
+  s->ch = 0;
+}
 // Channel reported by the gateway (ACK-INFO / BEACON): new gateway channel to adopt, or
 // 0 = nothing to do (invalid or unchanged).
 inline uint8_t co4en_gw_channel_update(uint8_t gw_ch, uint8_t reported) {
