@@ -35,8 +35,8 @@ def main():
     res = []
 
     # Home button mid-swipe (positions from the harness)
-    lx, ly = p.pos("cat:licht")
-    sx, sy = p.pos("cat:schalter")
+    lx, ly = p.pos("cat:loxone")
+    sx, sy = p.pos("cat:kameras")  # never cat:schalter: it switches a real device
     card_licht = (lx - 68, ly - 56, lx + 68, ly + 56)  # 136x112 button
     p.shot(f("press_home_idle"))
     p.cmd(f"PRESS {lx} {ly}"); p.cmd(f"MOVE {lx - 13} {ly + 1}"); time.sleep(0.1); p.cmd(f"MOVE {lx - 53} {ly + 2}")

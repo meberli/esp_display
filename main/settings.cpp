@@ -734,6 +734,23 @@ bool settings_save_pv_on(bool on) {
   return tx.commit();
 }
 
+void settings_load_sw_target(char* out, size_t len) {
+  if (len == 0) return;
+  out[0] = '\0';
+  nvs_handle_t h;
+  if (nvs_open(kNs, NVS_READONLY, &h) == ESP_OK) {
+    size_t n = len;
+    if (nvs_get_str(h, "sw_target", out, &n) != ESP_OK) out[0] = '\0';
+    nvs_close(h);
+  }
+}
+
+bool settings_save_sw_target(const char* id) {
+  Tx tx;
+  tx.str("sw_target", id);
+  return tx.commit();
+}
+
 bool settings_load_energy_hist(EnergyHist* hist) {
   energy_hist_clear(hist);
   nvs_handle_t h;

@@ -152,6 +152,9 @@ bool settings_save_energy_flags(const EnergySettings& e);  // on, poll, model, e
 // PV (Growatt via Modbus TCP gateway, read only): "pv_on" (default on).
 bool settings_load_pv_on();
 bool settings_save_pv_on(bool on);
+// Home "Schalter" button target: "relay" or a Loxone action id; "" = first.
+void settings_load_sw_target(char* out, size_t len);
+bool settings_save_sw_target(const char* id);
 // History (internal, excluded from backups): one blob, written at most hourly.
 bool settings_load_energy_hist(EnergyHist* h);
 bool settings_load_pv_hist(PvHist* h);       // "pv_hist" blob (daily PV kWh)

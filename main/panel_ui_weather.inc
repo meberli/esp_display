@@ -411,7 +411,72 @@ void fill_title(char* out, size_t n, const LoxoneControl& ctrl) {
   }
 }
 
+void on_tile(lv_event_t* event);
+void on_shutter(lv_event_t* event);
+void watch(lv_obj_t* obj);
+void style_shutter_button(lv_obj_t* btn);
+
+// Rows of the scrolling category list: row r sits at r * (kTileH + kGap).
+// A row is either two control tiles or one shutter box, created on first use.
+lv_obj_t* ensure_tile(int slot) {
+  if (tiles[slot] != nullptr) return tiles[slot];
+  const int col = slot % 2, row = slot / 2;
+  lv_obj_t* btn = lv_btn_create(cat_list);
+  lv_obj_set_pos(btn, kMargin + col * (kTileW + kGap), row * (kTileH + kGap));
+  lv_obj_set_size(btn, kTileW, kTileH);
+  style_glass(btn, 22);
+  lv_obj_add_flag(btn, LV_OBJ_FLAG_SCROLL_CHAIN_VER);
+  lv_obj_add_event_cb(btn, on_tile, LV_EVENT_CLICKED, reinterpret_cast<void*>(static_cast<intptr_t>(slot)));
+  watch(btn);
+  tiles[slot] = btn;
+  tile_icon[slot] = make_label(btn, &font_icons_32, lv_color_hex(kOffIcon));
+  lv_obj_set_pos(tile_icon[slot], 16, 14);
+  tile_name[slot] = make_label(btn, &font_inter_sb16, lv_color_hex(kText));
+  lv_obj_set_width(tile_name[slot], kTileW - 32);
+  lv_label_set_long_mode(tile_name[slot], LV_LABEL_LONG_WRAP);
+  lv_obj_set_pos(tile_name[slot], 16, 66);
+  tile_sub[slot] = make_label(btn, &font_inter_14, lv_color_hex(kTextDim));
+  lv_obj_set_width(tile_sub[slot], kTileW - 32);
+  lv_label_set_long_mode(tile_sub[slot], LV_LABEL_LONG_DOT);
+  lv_obj_align(tile_sub[slot], LV_ALIGN_BOTTOM_LEFT, 16, -14);
+  return btn;
+}
+
+lv_obj_t* ensure_row(int row_slot) {
+  if (shutter_box[row_slot] != nullptr) return shutter_box[row_slot];
+  lv_obj_t* box = lv_obj_create(cat_list);
+  lv_obj_set_pos(box, kMargin, row_slot * (kTileH + kGap));
+  lv_obj_set_size(box, kScreen - 2 * kMargin, kTileH);
+  style_glass(box, 22);
+  lv_obj_clear_flag(box, LV_OBJ_FLAG_CLICKABLE);
+  shutter_box[row_slot] = box;
+  shutter_title[row_slot] = make_label(box, &font_inter_sb16, lv_color_hex(kText));
+  lv_obj_set_pos(shutter_title[row_slot], 18, 16);
+  lv_obj_set_width(shutter_title[row_slot], 300);
+  lv_label_set_long_mode(shutter_title[row_slot], LV_LABEL_LONG_DOT);
+  shutter_pos[row_slot] = make_label(box, &font_inter_14, lv_color_hex(kAccent));
+  lv_obj_align(shutter_pos[row_slot], LV_ALIGN_TOP_RIGHT, -18, 18);
+  for (int which = 0; which < 2; ++which) {
+    lv_obj_t* btn = lv_btn_create(box);
+    lv_obj_set_pos(btn, 14 + which * 208, 52);
+    lv_obj_set_size(btn, 198, 88);
+    style_shutter_button(btn);
+    lv_obj_add_flag(btn, LV_OBJ_FLAG_SCROLL_CHAIN_VER);
+    intptr_t tag = static_cast<intptr_t>(row_slot * 2 + which);
+    lv_obj_add_event_cb(btn, on_shutter, LV_EVENT_CLICKED, reinterpret_cast<void*>(tag));
+    watch(btn);
+    lv_obj_t* arrow = make_label(btn, &font_icons_32, lv_color_hex(kAccent));
+    lv_label_set_text(arrow, kShutterIcon[which]);
+    lv_obj_align(arrow, LV_ALIGN_CENTER, -28, 0);
+    lv_obj_t* label = make_label(btn, &font_inter_20, lv_color_hex(kText));
+    lv_label_set_text(label, kShutterLabel[which]);
+    lv_obj_align(label, LV_ALIGN_CENTER, 18, 0);
+  }
+  return box;
+}
+
 void show_relay_tile(int slot) {
+  ensure_tile(slot);
   show(tiles[slot]);
   bool on = panel_relay_is_on();
   lv_label_set_text(tile_name[slot], "Relais");
@@ -424,6 +489,7 @@ void show_switch_tile(int slot, int index) {
     show_relay_tile(slot);
     return;
   }
+  ensure_tile(slot);
   show(tiles[slot]);
   const LoxoneControl& ctrl = controls[index];
   lv_label_set_text(tile_name[slot], ctrl.name);
@@ -438,6 +504,7 @@ void show_switch_tile(int slot, int index) {
 }
 
 void show_shutter_row(int row_slot, int index) {
+  ensure_row(row_slot);
   show(shutter_box[row_slot]);
   char title[110];
   char pos[16];
@@ -461,22 +528,8 @@ void refresh_category() {
     section_page = 0;
   }
   page = section_origin[current_section] + section_page;
-  // Left-edge handle: a previous page exists (swipe right to reach it).
-  if (prev_hint != nullptr) {
-    if (section_page > 0) {
-      show(prev_hint);
-    } else {
-      hide(prev_hint);
-    }
-  }
-  // Right-edge handle: a next page exists (swipe left to reach it).
-  if (next_hint != nullptr) {
-    if (section_page + 1 < count) {
-      show(next_hint);
-    } else {
-      hide(next_hint);
-    }
-  }
+  hide(prev_hint);  // one page per category: no paging
+  hide(next_hint);
   for (int slot = 0; slot < kPerPage; ++slot) {
     hide(tiles[slot]);
   }
@@ -486,14 +539,7 @@ void refresh_category() {
   lv_label_set_text(cat_title, section_name(current_section));
   lv_label_set_text(cat_icon, kSectionIcon[current_section]);
   lv_obj_set_style_text_color(cat_icon, lv_color_hex(g_theme->header_bar ? 0xFFFFFF : kSectionAccent[current_section]), 0);
-  if (count > 1) {
-    char text[16];
-    snprintf(text, sizeof(text), "%d / %d", section_page + 1, count);
-    lv_label_set_text(cat_page, text);
-    show(cat_page);
-  } else {
-    hide(cat_page);
-  }
+  hide(cat_page);
   const PagePlan& current = pages[page];
   if (current.nrows == 0) {
     lv_label_set_text(empty_hint, empty_text(current.section));
@@ -536,6 +582,7 @@ void settings_back();
 
 void show_home() {
   nav = Nav::Home;
+  hide(lox_root);
   set_group = -1;
   page = -1;
   hide(cat_root);
@@ -561,12 +608,119 @@ void enter_section(Section section) {
   message_open = false;
   hide(message);
   hide(home_root);
+  hide(lox_root);
   hide(wx_root);
   info_hide_views();
   show(cat_root);
+  lv_obj_scroll_to_y(cat_list, 0, LV_ANIM_OFF);
   refresh_category();
   arm_visible_reads();
   publish_status();
+}
+
+void lox_menu_refresh() {
+  for (int i = 0; i < 3; ++i) {
+    if (lox_count[i] == nullptr) continue;
+    int n = 0;
+    for (size_t c = 0; c < control_count; ++c) {
+      if (section_of(controls[c]) == static_cast<Section>(i)) ++n;
+    }
+    char t[16];
+    snprintf(t, sizeof(t), "%d", n);
+    lv_label_set_text(lox_count[i], n > 0 ? t : "leer");
+  }
+}
+
+void open_lox_menu() {
+  if (message_open) return;
+  nav = Nav::LoxMenu;
+  page = -1;
+  hide(cat_root);
+  hide(home_root);
+  hide(wx_root);
+  info_hide_views();
+  show(lox_root);
+  lox_menu_refresh();
+}
+
+// ---- Home "Schalter" button ------------------------------------------------
+// Targets: the "Sonstiges" controls in their page order (local relay first on
+// boards with one). The chosen one is saved as its id; default the first.
+int sw_targets(int* out) {
+  int n = 0;
+  for (int p = 0; p < page_n; ++p) {
+    if (pages[p].section != kSecOther) continue;
+    for (int r = 0; r < pages[p].nrows; ++r) {
+      if (pages[p].rows[r].shutter) continue;
+      if (pages[p].rows[r].a != -1) out[n++] = pages[p].rows[r].a;
+      if (pages[p].rows[r].b != -1) out[n++] = pages[p].rows[r].b;
+    }
+  }
+  return n;
+}
+
+const char* sw_id(int index) { return index == kLocalRelay ? "relay" : controls[index].action; }
+
+int sw_current(int* list, int* n_out) {
+  int n = sw_targets(list);
+  *n_out = n;
+  const char* ids[kLoxoneControlCap + 1];
+  for (int i = 0; i < n; ++i) ids[i] = sw_id(list[i]);
+  char saved[40];
+  settings_load_sw_target(saved, sizeof(saved));
+  int k = swt::pick(ids, n, saved);
+  return k < 0 ? -1 : list[k];
+}
+
+bool sw_is_on(int index) {
+  if (index == kLocalRelay) return panel_relay_is_on();
+  return index >= 0 && known[index] && known_on[index];
+}
+
+void sw_home_refresh() {
+  if (sw_btn == nullptr) return;
+  int list[kLoxoneControlCap + 1], n = 0;
+  int t = sw_current(list, &n);
+  bool on = t != -1 && sw_is_on(t);
+  uint32_t ic = t == -1 ? kTextDim : on ? kGreen : (g_theme->icon_mono ? g_theme->icon : kSectionAccent[3]);
+  if (sw_icon != nullptr) lv_obj_set_style_text_color(sw_icon, lv_color_hex(ic), 0);
+  lv_obj_set_style_border_color(sw_btn, lv_color_hex(on ? kGreen : g_theme->border), 0);
+  if (set_sw_val != nullptr) {
+    lv_label_set_text(set_sw_val, t == -1 ? "kein Schalter" : t == kLocalRelay ? "Relais" : controls[t].name);
+  }
+}
+
+void sw_cycle_target() {
+  int list[kLoxoneControlCap + 1], n = 0;
+  int t = sw_current(list, &n);
+  if (n <= 0) {
+    sw_home_refresh();
+    return;
+  }
+  int k = 0;
+  for (int i = 0; i < n; ++i) if (list[i] == t) k = i;
+  k = (k + 1) % n;
+  console_printf("Switch target %d of %d saved=%d\n", k + 1, n, settings_save_sw_target(sw_id(list[k])) ? 1 : 0);
+  sw_home_refresh();
+}
+
+void queue_command(int index, const char* command);
+
+void sw_toggle() {
+  if (!swt::may_fire(gesture_consumed, command_pending)) return;
+  int list[kLoxoneControlCap + 1], n = 0;
+  int t = sw_current(list, &n);
+  if (t == -1) {
+    ui_set_status("Kein Schalter");
+    return;
+  }
+  if (t == kLocalRelay) {
+    panel_relay_set(!panel_relay_is_on());
+    sw_home_refresh();
+    return;
+  }
+  const LoxoneControl& ctrl = controls[t];
+  queue_command(t, swt::command(ctrl.kind, known[t], known_on[t]));
 }
 
 void go_home() {
@@ -583,7 +737,11 @@ void swipe_page(int dir);
 // where its own rightward "back" swipe went before.
 void back_level() {
   if (message_open || nav == Nav::Home) return;
-  if (nav == Nav::Category || nav == Nav::Weather || nav == Nav::Cameras || nav == Nav::Transit ||
+  if (nav == Nav::Category) {
+    open_lox_menu();
+    return;
+  }
+  if (nav == Nav::LoxMenu || nav == Nav::Weather || nav == Nav::Cameras || nav == Nav::Transit ||
       nav == Nav::Calendar || nav == Nav::Rain || nav == Nav::Energy || nav == Nav::Co4) {
     go_home();
     return;
@@ -681,7 +839,15 @@ void swipe_page(int dir) {
     }
     return;
   }
+  if (nav == Nav::LoxMenu) {
+    if (dir < 0) go_home();
+    return;
+  }
   if (nav != Nav::Category) {
+    return;
+  }
+  if (dir < 0) {  // one scrolling page per category: a back swipe goes to the menu
+    open_lox_menu();
     return;
   }
   int count = section_pages[current_section];
@@ -879,7 +1045,17 @@ void on_category(lv_event_t* event) {
     cam_enter();
     return;
   }
-  if (which < kSecFav || which > kSecOther) {
+  if (which == 6) {
+    console_printf("Activate Loxone menu\n");
+    open_lox_menu();
+    return;
+  }
+  if (which == 7) {
+    console_printf("Activate switch button\n");
+    sw_toggle();
+    return;
+  }
+  if (which < kSecFav || which > kSecShutter) {
     return;
   }
   console_printf("Activate category %d\n", which);
@@ -979,8 +1155,11 @@ void refresh_visible() {
   }
   if (nav == Nav::Category) {
     refresh_category();
+  } else if (nav == Nav::LoxMenu) {
+    lox_menu_refresh();
   } else {
     fill_home_cards();
+    sw_home_refresh();
   }
 }
 

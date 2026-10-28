@@ -50,6 +50,7 @@ jobs:
           g++ -std=c++17 -Wall -I main tools/test_pv.cpp main/pv.cpp -o /tmp/tp && /tmp/tp
           g++ -std=c++17 -Wall -I main tools/test_waste_window.cpp main/waste_window.cpp -o /tmp/tww && TZ=Europe/Zurich /tmp/tww
           g++ -std=c++17 -Wall -I main tools/test_weather_derive.cpp main/weather_derive.cpp -o /tmp/tw && /tmp/tw
+          g++ -std=c++17 -Wall -I main tools/test_switch_target.cpp -o /tmp/tsw && /tmp/tsw
 
   build:
     runs-on: ubuntu-latest

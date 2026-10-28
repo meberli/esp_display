@@ -123,10 +123,8 @@ void on_c4_empty_btn(lv_event_t*) {
   }
 }
 
-void c4_dots(lv_obj_t* root, int active) {
-  for (int i = 0; i < 2; ++i)
-    make_bar(root, 228 + i * 16, 452, 8, 8, i == active ? kText : kTextDim, i == active ? LV_OPA_COVER : LV_OPA_50);
-}
+// The Energie pages (3) and Co4 (2) are one swipe chain: five dots on each.
+void c4_dots(lv_obj_t* root, int active) { dots_set(make_dots(root), 5, 3 + active); }
 
 void c4_build_common(lv_obj_t* r, int page) {
   // Co4 design: the title is a 60 px header bar (style_header), the icon sits on
@@ -312,7 +310,8 @@ void build_co4_screens(lv_obj_t* screen) {
     lv_obj_set_x(l, h == 24 ? 396 : 18 + h * kC4ChartW / 24);
   }
   c4_peak = en_lbl(c, &font_inter_14, kTextDim, 0, 12, "");
-  lv_obj_set_width(c4_peak, 150);
+  lv_obj_set_width(c4_peak, 200);  // one line ("max 0.1 kW 14:00"), never wraps
+  lv_label_set_long_mode(c4_peak, LV_LABEL_LONG_CLIP);
   lv_obj_set_x(c4_peak, 90);
   c = en_card(c4_body[0], 260, 112);
   const char* at[2] = {"Autarkie", "Eigenverbrauch"};
@@ -402,11 +401,17 @@ void c4_bar_pair(lv_obj_t* a, lv_obj_t* b, int base, int hmax, float va, float v
 
 void co4_refresh_heute(int64_t now_ms) {
   const Co4Curve& day = co4_d->day;
+  const Co4Series pvk = c4_pv_key(day.v[kCo4Pv], day.n);
+  const Co4Series map[4] = {pvk, kCo4Bezug, kCo4Einspeisung, kCo4BatEntladen};
+  // Y range only from the four plotted series (all kW), so a series that is
+  // not drawn cannot squash or stretch the axis.
   float vmax = 0, vmin = 0;  // negative Bezug: the axis goes below 0
-  for (int s = 0; s < kCo4SeriesN; ++s)
+  for (int k = 0; k < 4; ++k)
     for (int i = 0; i < day.n; ++i) {
-      if (day.v[s][i] > vmax) vmax = day.v[s][i];
-      if (day.v[s][i] < vmin) vmin = day.v[s][i];
+      const float x = day.v[map[k]][i];
+      if (x != x) continue;
+      if (x > vmax) vmax = x;
+      if (x < vmin) vmin = x;
     }
   const float lim = 300.0f;  // x100 must fit lv_coord_t
   vmax = fminf(vmax, lim);
@@ -414,8 +419,6 @@ void co4_refresh_heute(int64_t now_ms) {
   const int top = vmax > 0 ? static_cast<int>(vmax * 100.0f * 1.1f) + 1 : 100;
   const int bot = vmin < 0 ? static_cast<int>(vmin * 100.0f * 1.1f) - 1 : 0;
   lv_chart_set_range(c4_chart, LV_CHART_AXIS_PRIMARY_Y, bot, top);
-  const Co4Series pvk = c4_pv_key(day.v[kCo4Pv], day.n);
-  const Co4Series map[4] = {pvk, kCo4Bezug, kCo4Einspeisung, kCo4BatEntladen};
   int peak_i = -1;
   for (int k = 0; k < 4; ++k) {
     for (int i = 0; i < kCo4MaxPoints; ++i) {
@@ -430,7 +433,7 @@ void co4_refresh_heute(int64_t now_ms) {
     char hm[8];
     fmt_hm(hm, sizeof(hm), (day.t0_ms + static_cast<int64_t>(peak_i) * day.step_ms) / 1000);
     char pk[48];  // LVGL's own printf has no %f (LV_SPRINTF_USE_FLOAT off)
-    snprintf(pk, sizeof(pk), "PV max %.1f kW \xC2\xB7 %s", static_cast<double>(day.v[pvk][peak_i]), hm);
+    snprintf(pk, sizeof(pk), "max %.1f kW %s", static_cast<double>(day.v[pvk][peak_i]), hm);
     lv_label_set_text(c4_peak, pk);
   } else {
     lv_label_set_text(c4_peak, "");
@@ -471,7 +474,7 @@ void co4_refresh_heute(int64_t now_ms) {
     else lv_label_set_text(c4_pct[i], "\xE2\x80\x93");
   }
   lv_label_set_text(c4_arc_sub[0], ok ? "vom Verbrauch aus PV" : "");
-  if (sok) lv_label_set_text_fmt(c4_arc_sub[1], dpk == kCo4Pv ? "der PV selbst genutzt\n%s" : "der Site-PV vor Ort\ngenutzt: %s", e1);
+  if (sok) lv_label_set_text_fmt(c4_arc_sub[1], dpk == kCo4Pv ? "PV genutzt\n%s" : "Site-PV genutzt\n%s", e1);
   else lv_label_set_text(c4_arc_sub[1], ok ? "Site-Werte fehlen" : "");
   const Co4SiteData& sd = co4_d->site;
   const Co4Totals* sb[1] = {&sd.days};

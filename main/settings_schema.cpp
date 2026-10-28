@@ -72,6 +72,7 @@ const KeySpec kSchema[] = {
     {"en_htwin", KeyType::Str, 1, 31, 0, 0},
     {"en_switch", KeyType::Str, 10, 10, 0, 0},
     {"pv_on", KeyType::U8, 0, 1, 0, 0},
+    {"sw_target", KeyType::Str, 0, 39, 0, 0},
     {"pv_ip", KeyType::Str, 7, 15, kKeyHost, 0},
     {"pv_port", KeyType::Str, 1, 5, kKeyDigits, 0},  // legacy (Grott stick), unused since cfg_ver 6
     {"pv_gw", KeyType::Str, 7, 15, kKeyHost, 0},

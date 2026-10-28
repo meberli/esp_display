@@ -35,9 +35,10 @@ def main():
     m = re.search(r"saver=(\d)", s0); saver0 = int(m.group(1)) if m else 0
     m = re.search(r" to=(\d+)", s0); to0 = int(m.group(1)) if m else 120
     shot("home"); check("home", "home" in state())
+    tap("cat:loxone"); shot("loxone_menu")
     tap("cat:licht"); shot("licht"); check("licht", "Licht" in state()); home()
-    tap("cat:storen"); shot("storen"); home()
-    tap("cat:schalter"); shot("schalter"); home()
+    tap("cat:loxone"); tap("cat:storen"); shot("storen"); home()
+    # cat:schalter is never tapped: it switches a real device.
     tap("day:0"); shot("weather"); check("weather", "weather" in state())
     p.swipe(400, 300, 100, 300); time.sleep(0.8); shot("weather_tomorrow"); home()
     tap("cat:settings"); shot("settings"); check("settings", "settings" in state())

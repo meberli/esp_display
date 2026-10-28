@@ -122,7 +122,7 @@ def main():
     shot("off_hint")
 
     # Waking tap on a home tile: no control, no category
-    x, y = p.pos("cat:licht")
+    x, y = p.pos("cat:loxone")
     t.tap(x, y)
     p.cmd("SCRTO 0")  # stay on for the screenshot and the next steps
     st = t.state()

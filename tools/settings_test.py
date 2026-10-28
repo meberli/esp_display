@@ -55,7 +55,7 @@ def main():
     if t.state()["screen"] != "home":
         t.go_home()
     shot(a.prefix + "_home")
-    for key in ("cat:fav", "cat:licht", "cat:storen", "cat:schalter", "cat:settings"):
+    for key in ("cat:loxone", "cat:schalter", "cat:kameras", "cat:settings"):
         x, y = p.pos(key)
         check(f"home button {key} visible", 0 < x < 480 and 200 < y < 480, (x, y))
 

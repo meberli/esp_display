@@ -817,6 +817,7 @@ void on_settings_row(lv_event_t* e) {
   if (which == 9) open_enset();
   if (which == 10) open_play();
   if (which == 11) open_co4set();
+  if (which == 12) sw_cycle_target();
 }
 
 void on_msg_wifi(lv_event_t*) {
@@ -981,6 +982,7 @@ void build_settings_screens(lv_obj_t* screen) {
       {"Kalender", ICON_EVENT, kPurple, &set_cal_val, "set:cal", 6},
       {"Kameras", ICON_VIDEOCAM, kTeal, &set_cam_val, "set:cams", 4},
       {"Erinnerungen", ICON_NOTIFY, kAmber, &set_rem_val, "set:rem", 7},
+      {"Schalter-Taste", ICON_TOGGLE, kGreen, &set_sw_val, "set:swtarget", 12},
   };
   static const SetLeaf g_en[] = {
       {"Co4", ICON_BOLT, kGreen, &set_co4_val, "set:co4", 11},
@@ -994,7 +996,7 @@ void build_settings_screens(lv_obj_t* screen) {
   const Group groups[kSetGroups] = {
       {"Netzwerk & Zeit", "WLAN \xC2\xB7 Zeitserver \xC2\xB7 Zeitzone", ICON_WIFI3, kAccent, "set:g:net", g_net, 2},
       {"Anzeige", "Ausschalten \xC2\xB7 Bildschirmschoner \xC2\xB7 Design", ICON_SCREEN, kPurple, "set:disp", nullptr, 0},
-      {"Orte & Infos", "Wetter \xC2\xB7 \xC3\x96V \xC2\xB7 Kalender \xC2\xB7 Kameras \xC2\xB7 Erinnerungen", ICON_PLACE, kAmber, "set:g:info", g_info, 5},
+      {"Orte & Infos", "Wetter \xC2\xB7 \xC3\x96V \xC2\xB7 Kalender \xC2\xB7 Kameras \xC2\xB7 Erinnerungen \xC2\xB7 Schalter", ICON_PLACE, kAmber, "set:g:info", g_info, 6},
       {"Energie-Quellen", "Co4 \xC2\xB7 whatwatt Go \xC2\xB7 PV", ICON_BOLT, kGreen, "set:g:energy", g_en, 2},
       {"System", "Info \xC2\xB7 Update \xC2\xB7 Diagnose \xC2\xB7 Playground", ICON_MEMORY, kOrange, "set:g:sys", g_sys, 2},
   };

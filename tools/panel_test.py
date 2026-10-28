@@ -177,7 +177,8 @@ def rgb565_to_rgb888(data):
 
 
 # Home category buttons by harness name (positions come from POS, not constants).
-CARD_NAMES = [("favoriten", "cat:fav"), ("licht", "cat:licht"), ("storen", "cat:storen"), ("schalter", "cat:schalter")]
+# cat:schalter is left out on purpose: tapping it switches a real device.
+CARD_NAMES = [("loxone", "cat:loxone"), ("kameras", "cat:kameras")]
 
 
 def cards(p):

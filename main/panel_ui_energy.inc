@@ -140,10 +140,7 @@ void en_set_bar(lv_obj_t* b, int base, int h, bool up) {
 }
 
 void en_dots(lv_obj_t* root, int active) {
-  for (int i = 0; i < 3; ++i) {
-    lv_obj_t* d = make_bar(root, 220 + i * 16, 452, 8, 8, i == active ? kText : kTextDim, i == active ? LV_OPA_COVER : LV_OPA_50);
-    (void)d;
-  }
+  dots_set(make_dots(root), 5, active);  // 3 Energie pages + 2 Co4 pages (one swipe chain)
 }
 
 const char* en_wday(int32_t ymd) {
@@ -700,24 +697,14 @@ void energy_chip_refresh() {
     snprintf(w, sizeof(w), "%d W", static_cast<int>(net < 0 ? net - 0.5f : net + 0.5f));
   }
   lv_label_set_text(chip_en_main, w);
-  // Second line: yesterday's water (the meter reports once a day); longest form that fits.
+  // Second line: today's grid import in kWh (the energy source), never water.
   if (chip_en_sub != nullptr) {
-    const float yl = v.water_on ? energy_yesterday_water_l(v.h) : -1;
-    if (yl < 0) {
-      lv_label_set_text(chip_en_sub, "");
-    } else {
-      const int L = static_cast<int>(yl + 0.5f);
-      char t[3][32];
-      snprintf(t[0], sizeof(t[0]), "Wasser gestern: %d L", L);
-      snprintf(t[1], sizeof(t[1]), "Wasser gest. %d L", L);
-      snprintf(t[2], sizeof(t[2]), "gestern %d L", L);
-      int pick = 2;
-      for (int k = 0; k < 2; ++k) {
-        lv_point_t sz;
-        lv_txt_get_size(&sz, t[k], &font_inter_14, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-        if (sz.x <= lv_obj_get_width(chip_en_sub)) { pick = k; break; }
-      }
-      lv_label_set_text(chip_en_sub, t[pick]);
+    const float kwh = v.have ? energy_today_in(v.h) : -1.f;
+    if (kwh < 0) lv_label_set_text(chip_en_sub, "");
+    else {
+      char t[24];  // snprintf: LVGL's printf has no %f
+      snprintf(t, sizeof(t), "heute %.1f kWh", static_cast<double>(kwh));
+      lv_label_set_text(chip_en_sub, t);
     }
   }
 }

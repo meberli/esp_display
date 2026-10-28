@@ -217,6 +217,18 @@ void fmt_day(char* out, size_t n, int64_t t) {
   }
 }
 
+// Short form for the 136 px home chip: "Heute", "Morgen", "Sa" within a week, else "31.10.".
+void fmt_day_short(char* out, size_t n, int64_t t) {
+  int off = day_offset(t);
+  if (off == 0) { snprintf(out, n, "Heute"); return; }
+  if (off == 1) { snprintf(out, n, "Morgen"); return; }
+  time_t tt = static_cast<time_t>(t);
+  struct tm lt;
+  localtime_r(&tt, &lt);
+  if (off > 1 && off < 7) snprintf(out, n, "%s", kWeekdayShort[lt.tm_wday]);
+  else snprintf(out, n, "%d.%d.", lt.tm_mday, lt.tm_mon + 1);
+}
+
 uint32_t level_color(uint8_t level) {
   switch (level) {
     case 2: return 0xFFE066;  // yellow
@@ -230,7 +242,7 @@ uint32_t level_color(uint8_t level) {
 
 uint32_t line_color(const Departure& d) {
   if (d.bus) return 0xFFC857;
-  if (d.line[0] == 'S' && d.line[1] >= '0' && d.line[1] <= '9') return 0x7CC4FF;
+  if (d.line[0] == 'S' && d.line[1] >= '0' && d.line[1] <= '9') return 0x4FA3E8;  // solid mid blue
   if (strncmp(d.line, "IC", 2) == 0 || strncmp(d.line, "EC", 2) == 0 || strncmp(d.line, "RJ", 2) == 0) return 0xFF7A7A;
   if (strncmp(d.line, "IR", 2) == 0 || strncmp(d.line, "RE", 2) == 0) return 0xFFA94D;
   return 0xB4A8FF;
@@ -252,6 +264,8 @@ void tr_refresh_view() {
     int r = shown++;
     show(tr_row[r]);
     lv_label_set_text(tr_line[r], d.line);
+    lv_obj_set_style_text_font(tr_line[r], strlen(d.line) > 4 ? &font_inter_14 : &font_inter_sb16, 0);
+    lv_obj_center(tr_line[r]);
     lv_obj_set_style_bg_color(tr_badge[r], lv_color_hex(line_color(d)), 0);
     lv_label_set_text(tr_to[r], d.to);
     int mins = static_cast<int>((real - now + 59) / 60);
@@ -414,11 +428,15 @@ void rain_refresh() {
     if (first < 0) {
       lv_label_set_text(rain_sum, "Kein Regen in der n\xC3\xA4" "chsten Stunde");
     } else if (first == 0) {
-      lv_label_set_text_fmt(rain_sum, "Regen jetzt, bis %.1f mm/h", static_cast<double>(max1h));
+      char t[48];  // snprintf: LVGL's printf has no %f
+      snprintf(t, sizeof(t), "Regen jetzt, bis %.1f mm/h", static_cast<double>(max1h));
+      lv_label_set_text(rain_sum, t);
     } else {
       char hm[8];
       fmt_hm(hm, sizeof(hm), meteo.rain_start + first * 600);
-      lv_label_set_text_fmt(rain_sum, "Regen ab %s, bis %.1f mm/h", hm, static_cast<double>(max1h));
+      char t[48];
+      snprintf(t, sizeof(t), "Regen ab %s, bis %.1f mm/h", hm, static_cast<double>(max1h));
+      lv_label_set_text(rain_sum, t);
     }
   }
   unreg_prefix("warn:");
@@ -557,7 +575,7 @@ void home_chips_refresh() {
   if (cal->n_events > 0) {
     const CalEvent& e = cal->events[0];
     char day[24], hm[8];
-    fmt_day(day, sizeof(day), e.start);
+    fmt_day_short(day, sizeof(day), e.start);
     fmt_hm(hm, sizeof(hm), e.start);
     if (e.all_day) lv_label_set_text(chip_cal_top, day);
     else lv_label_set_text_fmt(chip_cal_top, "%s %s", day, hm);
@@ -565,7 +583,7 @@ void home_chips_refresh() {
   } else if (cal->n_waste > (waste_done_today(cal->waste[0]) ? 1 : 0)) {
     const CalEvent& w = cal->waste[waste_done_today(cal->waste[0]) ? 1 : 0];
     char day[24];
-    fmt_day(day, sizeof(day), w.start);
+    fmt_day_short(day, sizeof(day), w.start);
     lv_label_set_text_fmt(chip_cal_top, "Abfuhr %s", day);
     lv_label_set_text(chip_cal_main, w.title);
   } else {
@@ -597,13 +615,14 @@ lv_obj_t* make_chip(lv_obj_t* parent, int x, int which, const char* key, uint32_
   lv_label_set_text(*ic, icon);
   lv_obj_set_pos(*ic, 12, 12);
   *top = make_label(c, &font_inter_14, lv_color_hex(kTextDim));
-  lv_obj_set_pos(*top, 42, 15);
-  lv_obj_set_width(*top, w - 52);
+  lv_obj_set_pos(*top, 40, 15);
+  lv_obj_set_width(*top, w - 46);
   lv_label_set_long_mode(*top, LV_LABEL_LONG_DOT);
-  *main = make_label(c, &font_inter_sb16, lv_color_hex(kText));
-  lv_obj_set_pos(*main, 12, 44);
-  lv_obj_set_width(*main, w - 22);
-  lv_obj_set_height(*main, 20);
+  // Two lines of 14 px text, cut with "..." only after the second line.
+  *main = make_label(c, &font_inter_14, lv_color_hex(kText));
+  lv_obj_set_pos(*main, 12, 38);
+  lv_obj_set_width(*main, w - 20);
+  lv_obj_set_height(*main, 34);
   lv_label_set_long_mode(*main, LV_LABEL_LONG_DOT);
   return c;
 }
@@ -616,6 +635,8 @@ void build_home_info(lv_obj_t* weather_card) {
   lv_obj_t* en_icon = nullptr;
   lv_obj_t* en_tile = make_chip(home_root, 320, 3, "home:energy", kAmber, ICON_BOLT, &en_icon, &chip_en_top, &chip_en_main);
   lv_obj_set_y(chip_en_main, 36);
+  lv_obj_set_style_text_font(chip_en_main, &font_inter_sb16, 0);  // one line: the net watts
+  lv_obj_set_height(chip_en_main, 20);
   chip_en_sub = make_label(en_tile, &font_inter_14, lv_color_hex(kTextDim));
   lv_obj_set_pos(chip_en_sub, 12, 56);
   lv_obj_set_width(chip_en_sub, 136 - 22);
@@ -1091,11 +1112,18 @@ void build_info_screens(lv_obj_t* screen) {
     lv_obj_set_style_radius(badge, 8, 0);
     lv_obj_set_style_border_width(badge, 0, 0);
     lv_obj_set_style_bg_opa(badge, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_grad_dir(badge, LV_GRAD_DIR_NONE, 0);  // one solid colour, no theme gradient
+    lv_obj_set_style_bg_dither_mode(badge, LV_DITHER_NONE, 0);
+    lv_obj_set_style_shadow_width(badge, 0, 0);
+    lv_obj_set_style_outline_width(badge, 0, 0);
     lv_obj_set_style_pad_all(badge, 0, 0);
     lv_obj_clear_flag(badge, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_clear_flag(badge, LV_OBJ_FLAG_SCROLLABLE);
     tr_badge[r] = badge;
     tr_line[r] = make_label(badge, &font_inter_sb16, lv_color_hex(0x0B0F1A));
+    lv_obj_set_width(tr_line[r], 54);  // badge is a fixed 58 px; long names are cut with "..."
+    lv_label_set_long_mode(tr_line[r], LV_LABEL_LONG_DOT);
+    lv_obj_set_style_text_align(tr_line[r], LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_center(tr_line[r]);
     tr_to[r] = make_label(row, &font_inter_sb16, lv_color_hex(kText));
     lv_obj_set_pos(tr_to[r], 80, 4);
