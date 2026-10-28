@@ -299,7 +299,7 @@ static void test_bff() {
   CHECK(co4_bff_parse_stats(nr, strlen(nr), &c.v[0][0], 96, &c.n, &partial, err, sizeof(err)) == Co4BffRc::NotReady);
   const char ze[] = "{\"errors\":[{\"message\":\"Zone 9999 not exist\"}]}";
   CHECK(co4_bff_parse_stats(ze, strlen(ze), &c.v[0][0], 96, &c.n, &partial, err, sizeof(err)) == Co4BffRc::Error);
-  CHECK(strstr(err, "nicht gefunden") != nullptr);
+  CHECK(strstr(err, "Zone unbekannt") != nullptr);
   const char ge[] = "{\"errors\":[{\"message\":\"internal\"}]}";
   CHECK(co4_bff_parse_stats(ge, strlen(ge), &c.v[0][0], 96, &c.n, &partial, err, sizeof(err)) == Co4BffRc::Error);
   CHECK(strcmp(err, "Co4 meldet einen Fehler") == 0);

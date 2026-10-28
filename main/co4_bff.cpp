@@ -40,7 +40,7 @@ bool error_answer(JsonDocument& doc, char* err, size_t err_n) {
     // with "... not exist" / "not found": tell the user to pick the zone again.
     const char* m = doc["errors"][0]["message"] | "";
     if (strstr(m, "not exist") != nullptr || strstr(m, "not found") != nullptr)
-      snprintf(err, err_n, "Zone bei Co4 nicht gefunden \xE2\x80\x93 bitte Zone neu w\xC3\xA4hlen");
+      snprintf(err, err_n, "Zone unbekannt \xE2\x80\x93 bitte Zone neu w\xC3\xA4hlen");
     else
       snprintf(err, err_n, "Co4 meldet einen Fehler");
     return true;
