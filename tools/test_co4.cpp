@@ -386,28 +386,7 @@ static void test_site() {
   CHECK(isnan(d.days.v[kCo4BatLaden][0]));
 }
 
-// Zone curve gaps: interior nulls -> 0, trailing (not computed) stay NAN,
-// series Co4 never delivered stay NAN.
-static void test_gaps() {
-  static float v[kCo4SeriesN][8];
-  for (int k = 0; k < kCo4SeriesN; ++k)
-    for (int i = 0; i < 8; ++i) v[k][i] = NAN;
-  v[kCo4Bezug][1] = 1;
-  v[kCo4Bezug][4] = 2;
-  v[kCo4Eigen][3] = 3;
-  co4_bff_fill_gaps(&v[0][0], 8, 6);
-  CHECK(v[kCo4Bezug][0] == 0 && v[kCo4Bezug][2] == 0 && v[kCo4Bezug][4] == 2 && v[kCo4Bezug][3] == 0);
-  CHECK(isnan(v[kCo4Bezug][5]) && isnan(v[kCo4Bezug][6]));
-  CHECK(v[kCo4Eigen][0] == 0 && v[kCo4Eigen][4] == 0 && isnan(v[kCo4Eigen][5]));
-  CHECK(isnan(v[kCo4Pv][0]) && isnan(v[kCo4Einspeisung][2]));
-  float sum = 0;
-  for (int i = 0; i < 6; ++i)
-    if (!isnan(v[kCo4Bezug][i])) sum += v[kCo4Bezug][i];
-  CHECK(sum == 3);  // energy unchanged
-}
-
 int main() {
-  test_gaps();
   test_fixture();
   test_ratio();
   test_tree();

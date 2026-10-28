@@ -496,7 +496,6 @@ bool bff_fetch(const char* zone, const char* bearer, int64_t now_ms, Co4Data* ou
   Co4BffWindow win[3];
   co4_bff_windows(now_ms, win);
   if (!bff_block(zone, bearer, win[0], &out->day, err, err_n)) return false;
-  co4_bff_fill_gaps(&out->day.v[0][0], kCo4MaxPoints, out->day.n);
   for (int s = 0; s < kCo4SeriesN; ++s) co4_bff_energy_to_power(out->day.v[s], out->day.n, out->day.step_ms);
   snprintf(out->day.unit, sizeof(out->day.unit), "kW");
   if (!bff_block(zone, bearer, win[1], &out->days, err, err_n)) return false;

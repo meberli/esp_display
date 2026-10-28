@@ -75,12 +75,6 @@ bool co4_bff_parse_zones(const char* json, size_t len, const char* site_niid, Co
 Co4BffRc co4_bff_parse_site_stats(const char* json, size_t len, float* v, int cap, uint16_t* n, bool* partial,
                                   char* err, size_t err_n);
 
-// Zone 15-min curve: Co4 leaves blocks without zone energy null (the 1D total
-// equals the sum of the non-null blocks). Up to the last block that has any
-// value, null blocks of a delivered series become 0 so the line is continuous;
-// trailing blocks (not computed yet) stay NAN. v is [kCo4SeriesN][cap].
-void co4_bff_fill_gaps(float* v, int cap, int n);
-
 // zevGetZone answer -> site niid (decimal). false if missing.
 bool co4_bff_parse_zone_site(const char* json, size_t len, char* site, size_t site_n, char* err, size_t err_n);
 

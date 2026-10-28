@@ -192,6 +192,19 @@ float c4_vsum(const float* v, int from, int to, bool* has) {
   return s;
 }
 
+// Gaps stay as Co4 delivers them (null block = no point). A value with an empty
+// block on both sides would draw no line at all: only such points get a dot.
+void on_c4_chart_draw(lv_event_t* e) {
+  lv_obj_draw_part_dsc_t* d = lv_event_get_draw_part_dsc(e);
+  if (d->part != LV_PART_ITEMS || d->type != LV_CHART_DRAW_PART_LINE_AND_POINT || d->rect_dsc == nullptr) return;
+  const lv_chart_series_t* ser = static_cast<const lv_chart_series_t*>(d->sub_part_ptr);
+  const int i = static_cast<int>(d->id);
+  if (ser == nullptr || i < 0 || i >= kCo4MaxPoints) return;
+  const bool prev = i > 0 && ser->y_points[i - 1] != LV_CHART_POINT_NONE;
+  const bool next = i + 1 < kCo4MaxPoints && ser->y_points[i + 1] != LV_CHART_POINT_NONE;
+  if (prev || next) d->rect_dsc->bg_opa = LV_OPA_TRANSP;
+}
+
 // Zone blocks have no PV production, only the PV energy the ZEV allocated to the
 // zone (kCo4Eigen). That is what "PV" shows for a zone.
 Co4Series c4_pv_key(const float* pv, int n) {
@@ -283,7 +296,8 @@ void build_co4_screens(lv_obj_t* screen) {
   lv_obj_set_style_pad_all(c4_chart, 0, 0);
   lv_obj_set_style_line_color(c4_chart, lv_color_hex(kBorder), LV_PART_MAIN);
   lv_obj_set_style_line_width(c4_chart, 2, LV_PART_ITEMS);
-  lv_obj_set_style_size(c4_chart, 0, LV_PART_INDICATOR);
+  lv_obj_set_style_size(c4_chart, 4, LV_PART_INDICATOR);  // dots only for isolated values
+  lv_obj_add_event_cb(c4_chart, on_c4_chart_draw, LV_EVENT_DRAW_PART_BEGIN, nullptr);
   lv_obj_clear_flag(c4_chart, LV_OBJ_FLAG_CLICKABLE);
   const uint32_t sc[4] = {kGreen, kAmber, kAccent, kC4Bat};
   for (int i = 0; i < 4; ++i) {
