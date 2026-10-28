@@ -799,6 +799,7 @@ void enset_summary() {
 }
 
 void open_enset() {
+  set_group = 3;  // back goes to Energie-Quellen
   nav = Nav::EnSet;
   hide_settings();
   enset_refresh();

@@ -86,7 +86,7 @@ def main():
 
     # Settings screen
     tapn(p, "cat:settings")
-    tapn(p, "set:rem")
+    tapn(p, "set:g:info", 0.8); tapn(p, "set:rem")
     s = state(p)
     check(s.startswith("STATE remset on=1"), "Erinnerungen settings: " + s)
     tapn(p, "rem:lead")

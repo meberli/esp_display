@@ -189,6 +189,7 @@ void rem_tick(bool force) {
 }
 
 void on_rem_ok(lv_event_t*) {
+  if (gesture_consumed) return;
   if (rem_n == 0) return;
   bool ok = settings_reminder_ack(rem_q[0].key);
   console_printf("Reminder acknowledged saved=%d\n", ok ? 1 : 0);

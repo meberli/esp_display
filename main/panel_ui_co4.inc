@@ -608,6 +608,18 @@ void co4_enter(int page) {
   co4_refresh();
 }
 
+// Home Energie tile: Co4 when it is set up (logged in, zone chosen), else
+// the whatwatt Go / PV pages when that source is on, else the Co4 page with
+// its "not connected" hint and setup button (Einstellungen > Energie-Quellen).
+void energy_home_open() {
+  co4_get(co4_v);
+  const bool co4_ok = co4_v->state == Co4State::LoggedIn && co4_v->zone_set;
+  const bool direct = settings_load_energy().on || settings_load_pv_on();
+  console_printf("Energie tile: source=%s\n", co4_ok ? "co4" : direct ? "direct" : "none");
+  if (co4_ok || !direct) co4_enter(0);
+  else energy_enter(0);
+}
+
 void co4_swipe(int dir) {
   int next = co4_page + dir;
   if (next < 0) {
@@ -689,6 +701,7 @@ void co4set_summary() {
 }
 
 void open_co4set() {
+  set_group = 3;  // back goes to Energie-Quellen
   nav = Nav::Co4Set;
   hide_settings();
   co4set_refresh();
@@ -706,8 +719,6 @@ void on_co4set_row(lv_event_t* e) {
     if (co4_v->state != Co4State::Code && co4_v->state != Co4State::Starting) co4_login();
   } else if (row == 1) {
     co4_open_zones();
-  } else if (row == 2) {
-    co4_enter(0);
   } else if (row == 3) {
     show(co4_confirm);
     lv_obj_move_foreground(co4_confirm);
@@ -993,7 +1004,7 @@ void build_co4set_screen(lv_obj_t* screen) {
   const Row rows[kCo4SetRows] = {
       {"Co4-Konto", ICON_ROUTER, kAccent, "co4:acct"},
       {"Zone", ICON_PLACE, kGreen, "co4:zone"},
-      {"Co4 Energie \xC3\xB6" "ffnen", ICON_BOLT, kGreen, "co4:open"},
+      {"Datenstatus", ICON_BOLT, kGreen, "co4:status"},  // status only: the dashboard opens from the home Energie tile
   };
   for (int i = 0; i < kCo4SetRows; ++i)
     make_value_row(list, 0, rows[i].name, rows[i].icon, rows[i].color, on_co4set_row, i, rows[i].key, &co4set_val[i]);

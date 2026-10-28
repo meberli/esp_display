@@ -39,6 +39,7 @@
 #include "pv_task.h"
 #include "energy_mix.h"
 #include "panel_hw.h"
+#include "touch_gesture.h"
 #include "board_pins.h"
 #include "weather_derive.h"
 #include <esp_heap_caps.h>
@@ -151,6 +152,10 @@ lv_obj_t* card_btn[6] = {};
 lv_obj_t* weather_place = nullptr;
 // Settings screens
 lv_obj_t* set_root = nullptr;
+constexpr int kSetGroups = 5;
+constexpr int kSetGroupDisplay = 1;
+lv_obj_t* set_grp_root[kSetGroups] = {};
+int set_group = -1;  // open settings group, -1: top level
 lv_obj_t* set_wifi_val = nullptr;
 lv_obj_t* set_loc_val = nullptr;
 lv_obj_t* set_disp_val = nullptr;
@@ -389,6 +394,10 @@ LoxoneCommandRequest pending = {};
 bool retry_pending = false;
 
 bool gesture_consumed = false;
+bool touch_edge = false;  // started in the right back-edge zone (decided at touch-down)
+bool touch_stop = false;        // this touch only stops a glide (no click)
+uint32_t last_gesture_end = 0;  // ms of the last non-tap release
+constexpr uint32_t kScrollStopMs = 250;
 lv_coord_t gesture_x0 = 0;
 lv_coord_t gesture_y0 = 0;
 
@@ -542,6 +551,11 @@ void ui_describe(char* out, size_t n) {
   }
 }
 
+bool nav_has_pages() {
+  return nav == Nav::Category || nav == Nav::Weather || nav == Nav::Cameras || nav == Nav::Transit ||
+         nav == Nav::Energy || nav == Nav::Co4 || nav == Nav::Rain;
+}
+
 void ui_touch_sample(bool pressed, int x, int y) {
   if (pressed) {
     if (!touch_down) {
@@ -550,7 +564,19 @@ void ui_touch_sample(bool pressed, int x, int y) {
       touch_max_move = 0;
       gesture_x0 = x;
       gesture_y0 = y;
-      gesture_consumed = false;
+      // A touch that lands while a list still glides (scroll throw), or right
+      // after a scroll/swipe, only stops the motion: it never clicks.
+      lv_indev_t* in = lv_indev_get_next(nullptr);
+      touch_stop = (in != nullptr && lv_indev_get_scroll_obj(in) != nullptr) ||
+                   (last_gesture_end != 0 && now_ms() - last_gesture_end < kScrollStopMs);
+      gesture_consumed = touch_stop;
+      // Right-edge back: decided here, once. Such a touch is back-only: no
+      // click, no scroll, no page swipe (LVGL gets nothing until release).
+      touch_edge = touch::starts_in_back_edge(x, nav_has_pages());
+      if (touch_edge) {
+        gesture_consumed = true;
+        if (in != nullptr) lv_indev_wait_release(in);
+      }
     }
     int m = abs(x - gesture_x0);
     int my = abs(y - gesture_y0);

@@ -15,7 +15,7 @@ def check(ok, what):
     if not ok: FAILS.append(what)
 
 def web_on(p):
-    home(p); tapn(p, "cat:settings"); tapn(p, "set:maint", 1.0)
+    home(p); tapn(p, "cat:settings"); tapn(p, "set:g:sys", 0.8); tapn(p, "set:maint", 1.0)
     s = state(p)
     if "web=1" not in s:
         tapn(p, "maint:web", 1.0); s = state(p)
@@ -55,7 +55,7 @@ def main():
     check(st == 200 and b"zz_future" in r, f"valid restore (same values) -> {st} {r.decode(errors='replace')[:100]}")
     time.sleep(12)  # restart: the harness does not answer while booting
     wait(p, lambda s: "STATE home" in s, 120)
-    home(p); tapn(p, "cat:settings"); tapn(p, "set:maint", 1.0)
+    home(p); tapn(p, "cat:settings"); tapn(p, "set:g:sys", 0.8); tapn(p, "set:maint", 1.0)
     check("web=0" in state(p), "after restart web is off")
     print("RESULT", "OK" if not FAILS else f"{len(FAILS)} FAIL")
 

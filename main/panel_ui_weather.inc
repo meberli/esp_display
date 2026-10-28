@@ -517,6 +517,7 @@ void refresh_category() {
 
 void hide_settings() {
   hide(set_root);
+  for (lv_obj_t* g : set_grp_root) hide(g);
   hide(wl_root);
   hide(wp_root);
   hide(loc_root);
@@ -535,6 +536,7 @@ void settings_back();
 
 void show_home() {
   nav = Nav::Home;
+  set_group = -1;
   page = -1;
   hide(cat_root);
   hide(wx_root);
@@ -574,10 +576,28 @@ void go_home() {
   show_home();
 }
 
+void swipe_page(int dir);
+
+// Back one level (right-edge swipe). Home: nothing. Views opened from home
+// go home; settings groups go to the top level; every settings screen goes
+// where its own rightward "back" swipe went before.
 void back_level() {
-  if (nav == Nav::Category) {
+  if (message_open || nav == Nav::Home) return;
+  if (nav == Nav::Category || nav == Nav::Weather || nav == Nav::Cameras || nav == Nav::Transit ||
+      nav == Nav::Calendar || nav == Nav::Rain || nav == Nav::Energy || nav == Nav::Co4) {
     go_home();
+    return;
   }
+  if (nav == Nav::Settings) {
+    if (set_group >= 0) {
+      set_group = -1;
+      open_settings();
+    } else {
+      go_home();
+    }
+    return;
+  }
+  swipe_page(-1);
 }
 
 void refresh_weather_day();
@@ -642,6 +662,13 @@ void swipe_page(int dir) {
     if (dir < 0) settings_back();
     return;
   }
+  if (nav == Nav::Settings) {
+    if (dir < 0 && set_group >= 0) {  // group -> top level
+      set_group = -1;
+      open_settings();
+    }
+    return;
+  }
   if (nav == Nav::Weather) {
     if (wx_day == 0 && dir < 0) {  // before "Heute": warnings and the rain nowcast
       rain_enter();
@@ -675,8 +702,8 @@ void swipe_page(int dir) {
 // A touch is a tap only if it never moved more than kTapSlop px from where it
 // started and lasted at most kTapMaxMs. Anything else is a gesture and no
 // widget handler acts on it (gesture_consumed). Swipes need kSwipe px.
-constexpr int kTapSlop = 12;
-constexpr uint32_t kTapMaxMs = 1000;
+constexpr int kTapSlop = 10;
+constexpr uint32_t kTapMaxMs = 700;
 
 bool touch_down = false;
 uint32_t touch_t0 = 0;
@@ -705,27 +732,29 @@ void finish_touch() {
   int dy = touch_y - gesture_y0;
   int adx = abs(dx);
   int ady = abs(dy);
-  bool tap = touch_max_move <= kTapSlop && now_ms() - touch_t0 <= kTapMaxMs;
+  bool tap = !touch_stop && touch_max_move <= kTapSlop && now_ms() - touch_t0 <= kTapMaxMs;
+  if (!tap) last_gesture_end = now_ms();
   gesture_consumed = !tap;
   intptr_t g = 0;
-  if (adx >= kSwipe || ady >= kSwipe) {
-    // Home is the only edge gesture: swipe up from the bottom edge. There is
-    // no right-edge "back" any more: a left swipe that starts near the right
-    // edge (where a thumb naturally starts) used to go home instead of
-    // paging. Horizontal swipes page from any start position.
+  if (touch_edge) {
+    if (touch::back_fires(dx, dy)) g = 2;  // edge touch: back or nothing
+  } else if (adx >= kSwipe || ady >= kSwipe) {
+    // Swipe up from the bottom edge goes home. Right-edge back is handled
+    // above and only for touches that started in that narrow zone; all
+    // other horizontal swipes page.
     if (gesture_y0 >= kScreen - kEdge && dy <= -kSwipe && ady > adx) {
       g = 1;
     } else if ((nav == Nav::Weather || nav == Nav::Cameras || nav == Nav::Transit) && dy <= -kSwipe && ady > adx + 8) {
       g = 1;  // the day view has no vertical use, so any upward swipe goes home
-    } else if (adx >= kSwipe && adx > ady + 8) {
-      g = dx < 0 ? 3 : 4;
+    } else {
+      g = touch::page_swipe(dx, dy);  // never back: that needs an edge start
     }
   }
-  console_printf("Touch %s from %d,%d to %d,%d dx=%d dy=%d move=%d %ums%s\n", tap ? "tap" : "gesture",
+  console_printf("Touch %s%s from %d,%d to %d,%d dx=%d dy=%d move=%d %ums%s\n", tap ? "tap" : "gesture", touch_edge ? " (edge)" : touch_stop ? " (scroll-stop)" : "",
                 static_cast<int>(gesture_x0), static_cast<int>(gesture_y0), static_cast<int>(touch_x),
                 static_cast<int>(touch_y), dx, dy, touch_max_move,
                 static_cast<unsigned>(now_ms() - touch_t0),
-                g == 1 ? " home" : g == 3 ? " next" : g == 4 ? " prev" : "");
+                g == 1 ? " home" : g == 2 ? " back" : g == 3 ? " next" : g == 4 ? " prev" : "");
   if (g != 0) {
     // Not from inside the input read; let LVGL finish this release first.
     lv_async_call(run_gesture, reinterpret_cast<void*>(g));

@@ -77,7 +77,7 @@ def main():
 
     # clean start: back to the 5 default cameras (NVS keeps earlier additions)
     tapn(p, "cat:settings")
-    tapn(p, "set:cams")
+    tapn(p, "set:g:info", 0.8); tapn(p, "set:cams")
     remove_extra(p)
     p.swipe(120, 240, 400, 240, 250)
     time.sleep(0.5)
@@ -105,7 +105,7 @@ def main():
 
     tapn(p, "cat:settings")
     shot("settings")
-    tapn(p, "set:cams")
+    tapn(p, "set:g:info", 0.8); tapn(p, "set:cams")
     s = state(p)
     check("camset 5" in s, "camera settings list: " + s)
     shot("camset")

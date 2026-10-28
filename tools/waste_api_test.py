@@ -49,7 +49,7 @@ def wait_log(p, pattern, secs):
 def open_calset(p):
     home(p)
     tapn(p, "cat:settings")
-    tapn(p, "set:cal")
+    tapn(p, "set:g:info", 0.8); tapn(p, "set:cal")
 
 
 def set_text(p, row, value):

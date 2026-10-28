@@ -503,6 +503,7 @@ void home_warn_refresh() {
 
 void energy_chip_refresh();
 void energy_enter(int page);
+void energy_home_open();
 void home_chips_refresh() {
   if (chip_tr_main == nullptr) return;
   energy_chip_refresh();
@@ -579,7 +580,7 @@ void on_info_tap(lv_event_t* e) {
   console_printf("Activate info %d\n", which);
   if (which == 0) tr_enter(0);
   else if (which == 1) calv_enter();
-  else if (which == 3) energy_enter(0);
+  else if (which == 3) energy_home_open();
   else rain_enter();
 }
 
@@ -1266,6 +1267,7 @@ void build_info_screens(lv_obj_t* screen) {
 }
 
 void on_web_confirm(lv_event_t* e) {
+  if (gesture_consumed) return;
   bool allow = lv_event_get_user_data(e) != nullptr;
   maint_secrets_answer(allow);
   hide(web_confirm);

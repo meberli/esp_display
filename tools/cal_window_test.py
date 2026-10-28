@@ -81,7 +81,7 @@ def run(p, lead0, from0):
     p.cmd("REMDROP", expect=("OK",))
     # Settings rows step
     home(p)
-    tapn(p, "cat:settings"); tapn(p, "set:rem", 1.0)
+    tapn(p, "cat:settings"); tapn(p, "set:g:info", 0.8); tapn(p, "set:rem", 1.0)
     p.cmd(f"CALLEAD {lead0}", expect=("CALLEAD",)); p.cmd(f"CALFROM {from0}", expect=("CALFROM",))
     time.sleep(0.8)
     p.shot("v12shots/v12_remset.png")

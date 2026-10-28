@@ -593,7 +593,8 @@ void open_settings() {
   camset_value();
   enset_summary();
   co4set_summary();
-  show(set_root);
+  if (set_group >= 0 && set_group < kSetGroups && set_grp_root[set_group] != nullptr) show(set_grp_root[set_group]);
+  else show(set_root);
 }
 
 void settings_back() {
@@ -870,6 +871,7 @@ lv_obj_t* design_confirm = nullptr;
 uint8_t design_pending = 0;
 
 void on_design_confirm(lv_event_t* e) {
+  if (gesture_consumed) return;
   hide(design_confirm);
   if (lv_event_get_user_data(e) == nullptr) return;  // Abbrechen
   settings_save_design(design_pending);
@@ -929,35 +931,88 @@ void build_design_confirm(lv_obj_t* screen) {
   hide(design_confirm);
 }
 
+// Settings menu: few top-level entries, related screens grouped. The leaf
+// screens, their widget keys and their NVS keys are unchanged; only the way
+// to them got one level more. "Anzeige" has a single screen and opens it
+// directly. Energy *data* is not shown from here: it lives on the home
+// Energie tile (Co4 if set up, else whatwatt Go); only its setup is here.
+struct SetLeaf { const char* name; const char* icon; uint32_t color; lv_obj_t** val; const char* key; int id; };
+
+void make_set_row(lv_obj_t* list, const char* name, const char* icon, uint32_t color, lv_obj_t** val, const char* key,
+                  lv_event_cb_t cb, int id) {
+  lv_obj_t* row = make_row(list, 72, icon, color, cb, id);
+  reg(key, row);
+  lv_obj_t* l = make_label(row, &font_inter_sb16, lv_color_hex(kText));
+  lv_label_set_text(l, name);
+  lv_obj_align(l, LV_ALIGN_TOP_LEFT, 56, 13);
+  lv_obj_t* v = make_label(row, &font_inter_14, lv_color_hex(kTextDim));
+  lv_obj_set_width(v, 320);
+  lv_label_set_long_mode(v, LV_LABEL_LONG_DOT);
+  lv_obj_align(v, LV_ALIGN_BOTTOM_LEFT, 56, -13);
+  if (val != nullptr) *val = v;
+  else lv_label_set_text(v, "");
+  lv_obj_t* chev = make_label(row, &font_icons_24, lv_color_hex(kTextDim));
+  lv_label_set_text(chev, ICON_CHEVRON);
+  lv_obj_align(chev, LV_ALIGN_RIGHT_MID, -14, 0);
+}
+
+void on_set_group(lv_event_t* e) {
+  if (gesture_consumed) return;
+  int g = static_cast<int>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e)));
+  console_printf("Activate settings group %d\n", g);
+  if (g == kSetGroupDisplay) {
+    open_display();
+    return;
+  }
+  set_group = g;
+  open_settings();
+}
+
 void build_settings_screens(lv_obj_t* screen) {
   set_root = make_screen_root(screen, "Einstellungen");
-  // Scrollable list: eight rows do not fit on one screen.
   lv_obj_t* set_list = make_list(set_root, 56, 404);
-  constexpr int kRows = 12;
-  // Row order on screen; the callback gets the row id (Wartung stays 8, Energie is 9).
-  const char* names[kRows] = {"WLAN", "Wetter-Ort", "Bildschirm", "Uhrzeit", "Kameras", "\xC3\x96V", "Kalender",
-                              "Erinnerungen", "Energie", "Co4 Energie", "Wartung", "Playground"};
-  const char* icons[kRows] = {ICON_WIFI3, ICON_PLACE, ICON_SCREEN, ICON_SCHEDULE, ICON_VIDEOCAM, ICON_TRAIN,
-                              ICON_EVENT, ICON_NOTIFY, ICON_BOLT, ICON_BOLT, ICON_MEMORY, ICON_ROUTER};
-  const uint32_t colors[kRows] = {kAccent, kAmber, kPurple, kGreen, kTeal, kAccent, kPurple, kAmber, kAmber, kGreen, kOrange, kTeal};
-  lv_obj_t** vals[kRows] = {&set_wifi_val, &set_loc_val, &set_disp_val, &set_time_val, &set_cam_val,
-                            &set_tr_val,   &set_cal_val, &set_rem_val,  &set_en_val,   &set_co4_val, &set_maint_val, &set_play_val};
-  const char* keys[kRows] = {"set:wifi", "set:loc", "set:disp", "set:time", "set:cams",
-                             "set:oev",  "set:cal", "set:rem",  "set:energy", "set:co4", "set:maint", "set:play"};
-  const int ids[kRows] = {0, 1, 2, 3, 4, 5, 6, 7, 9, 11, 8, 10};
-  for (int i = 0; i < kRows; ++i) {
-    lv_obj_t* row = make_row(set_list, 72, icons[i], colors[i], on_settings_row, ids[i]);
-    reg(keys[i], row);
-    lv_obj_t* name = make_label(row, &font_inter_sb16, lv_color_hex(kText));
-    lv_label_set_text(name, names[i]);
-    lv_obj_align(name, LV_ALIGN_TOP_LEFT, 56, 13);
-    *vals[i] = make_label(row, &font_inter_14, lv_color_hex(kTextDim));
-    lv_obj_set_width(*vals[i], 320);
-    lv_label_set_long_mode(*vals[i], LV_LABEL_LONG_DOT);
-    lv_obj_align(*vals[i], LV_ALIGN_BOTTOM_LEFT, 56, -13);
-    lv_obj_t* chev = make_label(row, &font_icons_24, lv_color_hex(kTextDim));
-    lv_label_set_text(chev, ICON_CHEVRON);
-    lv_obj_align(chev, LV_ALIGN_RIGHT_MID, -14, 0);
+  static const SetLeaf g_net[] = {
+      {"WLAN", ICON_WIFI3, kAccent, &set_wifi_val, "set:wifi", 0},
+      {"Uhrzeit", ICON_SCHEDULE, kGreen, &set_time_val, "set:time", 3},
+  };
+  static const SetLeaf g_info[] = {
+      {"Wetter-Ort", ICON_PLACE, kAmber, &set_loc_val, "set:loc", 1},
+      {"\xC3\x96V", ICON_TRAIN, kAccent, &set_tr_val, "set:oev", 5},
+      {"Kalender", ICON_EVENT, kPurple, &set_cal_val, "set:cal", 6},
+      {"Kameras", ICON_VIDEOCAM, kTeal, &set_cam_val, "set:cams", 4},
+      {"Erinnerungen", ICON_NOTIFY, kAmber, &set_rem_val, "set:rem", 7},
+  };
+  static const SetLeaf g_en[] = {
+      {"Co4", ICON_BOLT, kGreen, &set_co4_val, "set:co4", 11},
+      {"whatwatt Go & PV", ICON_BOLT, kAmber, &set_en_val, "set:energy", 9},
+  };
+  static const SetLeaf g_sys[] = {
+      {"Wartung & Update", ICON_MEMORY, kOrange, &set_maint_val, "set:maint", 8},
+      {"Playground", ICON_ROUTER, kTeal, &set_play_val, "set:play", 10},
+  };
+  struct Group { const char* name; const char* sub; const char* icon; uint32_t color; const char* key; const SetLeaf* leaf; int n; };
+  const Group groups[kSetGroups] = {
+      {"Netzwerk & Zeit", "WLAN \xC2\xB7 Zeitserver \xC2\xB7 Zeitzone", ICON_WIFI3, kAccent, "set:g:net", g_net, 2},
+      {"Anzeige", "Ausschalten \xC2\xB7 Bildschirmschoner \xC2\xB7 Design", ICON_SCREEN, kPurple, "set:disp", nullptr, 0},
+      {"Orte & Infos", "Wetter \xC2\xB7 \xC3\x96V \xC2\xB7 Kalender \xC2\xB7 Kameras \xC2\xB7 Erinnerungen", ICON_PLACE, kAmber, "set:g:info", g_info, 5},
+      {"Energie-Quellen", "Co4 \xC2\xB7 whatwatt Go \xC2\xB7 PV", ICON_BOLT, kGreen, "set:g:energy", g_en, 2},
+      {"System", "Info \xC2\xB7 Update \xC2\xB7 Diagnose \xC2\xB7 Playground", ICON_MEMORY, kOrange, "set:g:sys", g_sys, 2},
+  };
+  for (int g = 0; g < kSetGroups; ++g) {
+    lv_obj_t* sub = nullptr;
+    make_set_row(set_list, groups[g].name, groups[g].icon, groups[g].color, g == kSetGroupDisplay ? &set_disp_val : &sub,
+                 groups[g].key, on_set_group, g);
+    if (sub != nullptr) lv_label_set_text(sub, groups[g].sub);
+    if (groups[g].leaf == nullptr) continue;
+    set_grp_root[g] = make_screen_root(screen, groups[g].name);
+    lv_obj_t* list = make_list(set_grp_root[g], 56, 404);
+    for (int i = 0; i < groups[g].n; ++i) {
+      const SetLeaf& L = groups[g].leaf[i];
+      make_set_row(list, L.name, L.icon, L.color, L.val, L.key, on_settings_row, L.id);
+    }
+    lv_obj_t* gp = lv_obj_create(list);
+    lv_obj_set_size(gp, 10, 8);
+    style_plain(gp);
   }
   lv_obj_t* pad = lv_obj_create(set_list);  // room above the home bar at the end of the list
   lv_obj_set_size(pad, 10, 8);

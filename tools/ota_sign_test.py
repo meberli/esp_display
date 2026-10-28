@@ -14,7 +14,7 @@ from info_test import state, tapn, home
 from web_auth_test import req, check, FAILS
 
 def web_on(p):
-    home(p); tapn(p, "cat:settings"); tapn(p, "set:maint", 1.0)
+    home(p); tapn(p, "cat:settings"); tapn(p, "set:g:sys", 0.8); tapn(p, "set:maint", 1.0)
     s = state(p)
     if "web=1" not in s:
         tapn(p, "maint:web", 1.0); s = state(p)

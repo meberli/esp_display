@@ -21,7 +21,7 @@ def energy(p):
     return dict(kv.split("=", 1) for kv in line.split()[1:] if "=" in kv), line
 
 def set_host(p, host):
-    home(p); tapn(p, "cat:settings", 0.8); tapn(p, "set:energy", 1.0); tapn(p, "en:host", 0.8)
+    home(p); tapn(p, "cat:settings", 0.8); tapn(p, "set:g:energy", 0.8); tapn(p, "set:energy", 1.0); tapn(p, "en:host", 0.8)
     tapn(p, "text:ta", 0.6)
     p.cmd("TYPE " + host)
     p.cmd("ENTER")
@@ -37,7 +37,7 @@ def main():
     os.makedirs("v12shots", exist_ok=True)
     e, _ = energy(p)
     print("initial", e.get("on"), e.get("err"))
-    home(p); tapn(p, "cat:settings", 0.8); tapn(p, "set:energy", 1.0)
+    home(p); tapn(p, "cat:settings", 0.8); tapn(p, "set:g:energy", 0.8); tapn(p, "set:energy", 1.0)
     p.shot("v12shots/v12_enset.png")  # before the address is set: no address on screen
     set_host(p, host)
     check("enset" in state(p), "back on Einstellungen > Energie after saving")
@@ -81,7 +81,7 @@ def main():
     p.swipe(200, 240, 440, 240, 300); time.sleep(1.0)
     check("energy page=0" in state(p), "swipe right x2 -> Strom")
     # Poll interval stepping (10 -> 30 -> 60 -> 5 -> 10)
-    home(p); tapn(p, "cat:settings", 0.8); tapn(p, "set:energy", 1.0)
+    home(p); tapn(p, "cat:settings", 0.8); tapn(p, "set:g:energy", 0.8); tapn(p, "set:energy", 1.0)
     for _ in range(4): tapn(p, "en:poll", 0.6)
     check("enset" in state(p), "poll stepping stays on the page")
     # Stale: unreachable address -> stale within ~70 s, then back

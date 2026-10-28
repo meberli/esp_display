@@ -15,7 +15,7 @@ def maint_state(p):
 def open_maint(p):
     home(p)
     tapn(p, "cat:settings")
-    tapn(p, "set:maint", 1.0)
+    tapn(p, "set:g:sys", 0.8); tapn(p, "set:maint", 1.0)
 
 
 def run_check(p, timeout=40):
