@@ -37,6 +37,7 @@
 #include "co4_task.h"
 #include "co4_chart_plot.h"
 #include "radar.h"
+#include "ui_text.h"
 #include "energy_task.h"
 #include "espnow_play.h"
 #include "pv_task.h"

@@ -1055,7 +1055,12 @@ void maint_refresh() {
   MaintStatus s;
   maint_collect(&s);
   char b[64];
-  if (s.wifi) snprintf(b, sizeof(b), "%s \xC2\xB7 %d dBm%s", s.ssid, s.rssi, s.rssi < -80 ? " (schwach)" : "");
+  if (s.wifi) {
+    char rs[24];
+    snprintf(rs, sizeof(rs), "%d dBm%s", s.rssi, s.rssi < -80 ? " (schwach)" : "");
+    const char* parts[] = {s.ssid, rs};
+    ui_text::join(b, sizeof(b), parts, 2);
+  }
   else snprintf(b, sizeof(b), "nicht verbunden");
   lv_label_set_text(maint_val[0], b);
   lv_label_set_text(maint_val[1], s.ip[0] != '\0' ? s.ip : "-");
@@ -1068,7 +1073,10 @@ void maint_refresh() {
   lv_label_set_text(maint_val[3], b);
   snprintf(b, sizeof(b), "%u KB", static_cast<unsigned>(s.free_psram / 1024));
   lv_label_set_text(maint_val[4], b);
-  snprintf(b, sizeof(b), "%s \xC2\xB7 %s", s.version, s.partition);
+  {
+    const char* parts[] = {s.version, s.partition};
+    ui_text::join(b, sizeof(b), parts, 2);
+  }
   lv_label_set_text(maint_val[5], b);
   if (!s.ntp_synced) snprintf(b, sizeof(b), "nicht synchronisiert");
   else snprintf(b, sizeof(b), "synchronisiert (vor %u min)", static_cast<unsigned>(s.ntp_age_s / 60));
@@ -1115,7 +1123,9 @@ void maint_refresh() {
   bool own = false;
   settings_load_text(kUrlOta, v, sizeof(v), &own);
   const char* tail = strrchr(v, '/');
-  lv_label_set_text_fmt(maint_url_val, "%s%s", v[0] != '\0' ? v : "nicht gesetzt", own ? "" : " (Standard)");
+  char shown[64];
+  ui_text::url_short(shown, sizeof(shown), v);  // full URL stays on the edit screen
+  lv_label_set_text_fmt(maint_url_val, "%s%s", v[0] != '\0' ? shown : "nicht gesetzt", own ? "" : " (Standard)");
   (void)tail;
   if (set_maint_val != nullptr) lv_label_set_text_fmt(set_maint_val, "%s \xC2\xB7 %s", s.version, s.ip[0] ? s.ip : "-");
 }

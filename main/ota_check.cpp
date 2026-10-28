@@ -1,5 +1,6 @@
 #include "diag.h"
 #include "ota_check.h"
+#include "ota_ver.h"
 #include "ota_board.h"
 
 #include <ArduinoJson.h>
@@ -18,25 +19,6 @@
 namespace {
 char g_override[32] = "";
 
-struct Ver {
-  long n[3];
-  bool suffix;
-};
-
-Ver parse(const char* s) {
-  Ver v = {{0, 0, 0}, false};
-  if (s == nullptr) return v;
-  if (*s == 'v' || *s == 'V') ++s;
-  for (int i = 0; i < 3; ++i) {
-    char* end = nullptr;
-    v.n[i] = strtol(s, &end, 10);
-    s = end;
-    if (*s != '.') break;
-    ++s;
-  }
-  v.suffix = *s == '-' || *s == '+';
-  return v;
-}
 
 void ascii_line(const char* body, char* out, size_t n) {
   // First meaningful line of GitHub release notes: skip headings, empty lines
@@ -204,14 +186,7 @@ bool check_image(const char* url, OtaCheck* out) {
 }
 }  // namespace
 
-int ota_ver_cmp(const char* a, const char* b) {
-  Ver x = parse(a), y = parse(b);
-  for (int i = 0; i < 3; ++i) {
-    if (x.n[i] != y.n[i]) return x.n[i] < y.n[i] ? -1 : 1;
-  }
-  if (x.suffix != y.suffix) return x.suffix ? -1 : 1;
-  return 0;
-}
+int ota_ver_cmp(const char* a, const char* b) { return ota_ver::cmp(a, b); }
 
 const char* ota_running_version() {
   return g_override[0] != '\0' ? g_override : esp_app_get_description()->version;
@@ -231,7 +206,7 @@ bool ota_check(const char* cfg_url, bool own, OtaCheck* out) {
   char api[160];
   bool ok = (!own && github_api(cfg_url, api, sizeof(api))) ? check_github(api, out) : check_image(cfg_url, out);
   out->ok = ok;
-  if (ok) out->cmp = ota_ver_cmp(out->version, ota_running_version());
+  if (ok) out->cmp = ota_ver::offer_cmp(out->version, ota_running_version());
   console_printf("OTA check: running %s, offered %s -> %s\n", ota_running_version(), ok ? out->version : "-",
                  !ok ? out->err : out->cmp > 0 ? "update available" : out->cmp == 0 ? "up to date" : "older");
   return ok;
