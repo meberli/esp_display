@@ -21,6 +21,11 @@ lv_obj_t* c4_empty_text[2] = {};
 lv_obj_t* c4_empty_btn[2] = {};
 lv_obj_t* c4_empty_btn_lbl[2] = {};
 lv_obj_t* c4_chart = nullptr;
+// One trailing empty slot: LVGL draws a point's dot only when it visits the next
+// slot, so without it an isolated last value would never show.
+constexpr int kC4Pts = kCo4MaxPoints + 1;
+Co4PlotShape g_c4_shape[4] = {};  // shape of the drawn day chart (no values), for DIAGCO4
+bool g_c4_shape_set = false;
 lv_chart_series_t* c4_ser[4] = {};  // PV, Bezug, Einspeisung, Batterie (only if delivered)
 lv_obj_t* c4_sum = nullptr;
 lv_obj_t* c4_peak = nullptr;
@@ -197,10 +202,14 @@ void on_c4_chart_draw(lv_event_t* e) {
   if (d->part != LV_PART_ITEMS || d->type != LV_CHART_DRAW_PART_LINE_AND_POINT || d->rect_dsc == nullptr) return;
   const lv_chart_series_t* ser = static_cast<const lv_chart_series_t*>(d->sub_part_ptr);
   const int i = static_cast<int>(d->id);
-  if (ser == nullptr || i < 0 || i >= kCo4MaxPoints) return;
-  const bool prev = i > 0 && ser->y_points[i - 1] != LV_CHART_POINT_NONE;
-  const bool next = i + 1 < kCo4MaxPoints && ser->y_points[i + 1] != LV_CHART_POINT_NONE;
-  if (prev || next) d->rect_dsc->bg_opa = LV_OPA_TRANSP;
+  if (ser == nullptr || i < 0 || i >= kC4Pts) return;
+  // rect_dsc is one descriptor LVGL reuses for every point of the series: set
+  // the opacity both ways, else after the first line point all dots stay hidden.
+  const bool dot = co4_plot_dot(ser->y_points, kC4Pts, i);
+  d->rect_dsc->bg_opa = dot ? LV_OPA_COVER : LV_OPA_TRANSP;
+  d->rect_dsc->border_width = 0;
+  d->rect_dsc->shadow_width = 0;
+  d->rect_dsc->outline_width = 0;
 }
 
 // Zone blocks have no PV production, only the PV energy the ZEV allocated to the
@@ -286,7 +295,7 @@ void build_co4_screens(lv_obj_t* screen) {
   lv_obj_set_pos(c4_chart, 18, 60);
   lv_obj_set_size(c4_chart, kC4ChartW, kC4ChartH);
   lv_chart_set_type(c4_chart, LV_CHART_TYPE_LINE);
-  lv_chart_set_point_count(c4_chart, kCo4MaxPoints);
+  lv_chart_set_point_count(c4_chart, kC4Pts);
   lv_chart_set_div_line_count(c4_chart, 3, 0);
   lv_chart_set_update_mode(c4_chart, LV_CHART_UPDATE_MODE_SHIFT);
   lv_obj_set_style_bg_opa(c4_chart, LV_OPA_TRANSP, 0);
@@ -421,13 +430,19 @@ void co4_refresh_heute(int64_t now_ms) {
   lv_chart_set_range(c4_chart, LV_CHART_AXIS_PRIMARY_Y, bot, top);
   int peak_i = -1;
   for (int k = 0; k < 4; ++k) {
-    for (int i = 0; i < kCo4MaxPoints; ++i) {
+    for (int i = 0; i < kC4Pts; ++i) {
       float x = i < day.n ? day.v[map[k]][i] : NAN;
       c4_ser[k]->y_points[i] = x == x ? static_cast<lv_coord_t>(lroundf(fmaxf(-lim, fminf(lim, x)) * 100.0f))
                                       : LV_CHART_POINT_NONE;
       if (k == 0 && x == x && (peak_i < 0 || x > day.v[pvk][peak_i])) peak_i = i;
     }
   }
+  for (int k = 0; k < 4; ++k) {
+    auto none = [](int, int, int, int, int) {};
+    auto nodot = [](int, int, int) {};
+    g_c4_shape[k] = co4_plot(c4_ser[k]->y_points, kC4Pts, kC4ChartW, kC4ChartH, bot, top, none, nodot);
+  }
+  g_c4_shape_set = true;
   lv_chart_refresh(c4_chart);
   if (peak_i >= 0 && day.v[pvk][peak_i] > 0) {
     char hm[8];

@@ -31,6 +31,7 @@
 #include "esp_ota_ops.h"
 #include <time.h>
 #include "co4_task.h"
+#include "radar.h"
 
 namespace {
 std::atomic<uint32_t> svc_ok[kSvcCount], svc_err[kSvcCount];
@@ -69,12 +70,17 @@ void health() {
     u += snprintf(svc + u, sizeof(svc) - u, "%s%s=%lu/%lu", i ? " " : "", kSvcName[i], (unsigned long)svc_err[i].load(),
                   (unsigned long)(svc_ok[i].load() + svc_err[i].load()));
   const esp_partition_t* run = esp_ota_get_running_partition();
-  console_printf("DIAG health up=%lus reset=%s wifi=%ddBm drops=%lu ntp=%s age=%lds | err/req %s | pv %s%s ok=%lu err=%lu | %s %s\n",
+  // Free stack (high-water mark, bytes) of the busiest network tasks; -1 = not running.
+  auto hw = [](const char* name) -> long {
+    TaskHandle_t t = xTaskGetHandle(name);
+    return t != nullptr ? static_cast<long>(uxTaskGetStackHighWaterMark(t)) : -1L;
+  };
+  console_printf("DIAG health up=%lus reset=%s wifi=%ddBm drops=%lu ntp=%s age=%lds | err/req %s | pv %s%s ok=%lu err=%lu | stk net=%ld tcpip=%ld radar=%ld | %s %s\n",
                  (unsigned long)up, reset_name(esp_reset_reason()), rssi, (unsigned long)wifi_drops.load(),
                  clock_synced() ? "ok" : "no", last > 0 ? (long)(up - last) : -1L, svc,
                  !pv.enabled ? "off" : (pv.have && !pv.stale) ? "live" : pv.asleep ? "asleep" : pv.down ? "down" : "connecting",
                  pv.have && pv.stale ? " stale" : "", (unsigned long)pv.ok, (unsigned long)pv.errors,
-                 esp_app_get_description()->version, run != nullptr ? run->label : "?");
+                 hw("net"), hw("tcpip"), hw("radar"), esp_app_get_description()->version, run != nullptr ? run->label : "?");
 }
 
 void fmt_local(int64_t ts, char* out, size_t n) {
@@ -172,7 +178,7 @@ void stacks(bool warn_only) {
   // the driver scans one frame out of a stale bounce buffer + DMA restart: the bottom part of
   // the screen is drawn shifted for one frame (the "tear"). So only look up our own tasks
   // (short lock in xTaskGetHandle) and scan their stacks without holding the lock.
-  static const char* const kNames[] = {"ui", "net", "lox", "diag", "httpd", "energy", "pv", "co4en", "tcpip", "wifi"};
+  static const char* const kNames[] = {"ui", "net", "lox", "diag", "httpd", "energy", "pv", "co4en", "tcpip", "wifi", "radar", "co4"};
   UBaseType_t n = 0;
   for (const char* nm : kNames) {
     TaskHandle_t h = xTaskGetHandle(nm);
@@ -362,9 +368,14 @@ void handle(const char* line) {
     energy_dump();
   } else if (strcmp(line, "DIAGHEALTH") == 0) {
     health();
+    char rb[120];
+    radar_diag(rb, sizeof rb);
+    console_puts(rb);
   } else if (strcmp(line, "DIAGCO4") == 0) {
     char buf[200];
     co4_diag(buf, sizeof buf);  // tokens only as set/unset
+    console_puts(buf);
+    ui_co4_chart_shape(buf, sizeof buf);
     console_puts(buf);
   } else if (strcmp(line, "DIAGCO4EN") == 0) {
     play_diag();  // state and counters only, never keys

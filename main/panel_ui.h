@@ -165,3 +165,7 @@ void ui_saver_runtime(int saver);              // DIAGSAVER: not saved to NVS
 // Test harness: scroll every container of the visible page to its end and check
 // that the bottom-most clickable widget is visible and tappable.
 bool ui_scroll_check(char* out, size_t n);
+
+// DIAGCO4: shape of the drawn day chart per series (valid points, runs, isolated
+// dots, segments, steepest segment in px) - never values.
+void ui_co4_chart_shape(char* out, size_t n);

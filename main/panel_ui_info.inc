@@ -74,6 +74,18 @@ lv_obj_t* rain_range[kRainSteps] = {};
 lv_obj_t* rain_sum = nullptr;
 lv_obj_t* rain_list = nullptr;
 lv_obj_t* rain_status = nullptr;
+// Radar card (RainViewer): frames only while the Regen window is open.
+lv_obj_t* radar_img = nullptr;
+lv_obj_t* radar_time = nullptr;
+lv_obj_t* radar_msg = nullptr;
+lv_timer_t* radar_timer = nullptr;
+lv_img_dsc_t radar_dsc;
+uint32_t radar_gen = 0;
+int radar_n = 0;        // frames announced so far
+int radar_expect = 0;   // frames the index listed
+int radar_shown = -1;   // frame on screen
+int radar_ticks = 0;    // 100 ms ticks since open
+bool radar_failed = false;
 constexpr int kRainChartH = 110;
 
 lv_obj_t* trset_root = nullptr;
@@ -132,6 +144,7 @@ void txt_go_back() {
 }
 
 void open_enset();
+void radar_stop();
 void info_hide_all() {
   hide(enset_root);
   hide(trset_root);
@@ -142,9 +155,11 @@ void info_hide_all() {
   hide(remset_root);
   play_hide();
   co4_hide_all();
+  radar_stop();
 }
 
 void info_hide_views() {
+  radar_stop();
   hide(tr_root);
   hide(calv_root);
   hide(rain_root);
@@ -396,7 +411,7 @@ void calv_enter() {
   calv_refresh();
 }
 
-// --- Regen / Warnungen (weather pager page before "Heute") ------------------
+// --- Regen / Warnungen + Radar (own window, before "Heute" in the weather pager) ---
 
 void rain_refresh() {
   if (rain_root == nullptr) return;
@@ -496,10 +511,91 @@ void rain_refresh() {
   }
 }
 
+void radar_show_frame(int k) {
+  int64_t t = 0;
+  const uint8_t* px = radar_frame(radar_gen, k, &t);
+  if (px == nullptr) return;
+  radar_dsc.data = px;
+  lv_img_cache_invalidate_src(&radar_dsc);
+  lv_img_set_src(radar_img, &radar_dsc);
+  lv_obj_invalidate(radar_img);
+  show(radar_img);
+  hide(radar_msg);
+  radar_shown = k;
+  char hm[8];
+  fmt_hm(hm, sizeof(hm), t);
+  lv_label_set_text_fmt(radar_time, "Radar %s  (%d/%d)", hm, k + 1, radar_expect > 0 ? radar_expect : radar_n);
+}
+
+void radar_fail() {
+  radar_failed = true;
+  if (radar_n > 0) return;  // keep what arrived
+  lv_label_set_text(radar_msg, "Radar nicht verf\xC3\xBC" "gbar");
+  show(radar_msg);
+  lv_label_set_text(radar_time, "Radar");
+}
+
+// 100 ms: drain the radar queue, animate (500 ms per frame, pause on the newest).
+void radar_tick(lv_timer_t*) {
+  RadarEvent ev;
+  while (radar_take(&ev)) {
+    if (ev.gen != radar_gen) continue;
+    if (ev.idx < 0) {
+      radar_fail();
+      continue;
+    }
+    radar_expect = ev.n;
+    if (ev.idx + 1 > radar_n) radar_n = ev.idx + 1;
+    if (radar_shown < 0) radar_show_frame(ev.idx);
+  }
+  ++radar_ticks;
+  if (radar_n == 0 && !radar_failed && radar_ticks > 200) radar_fail();  // 20 s
+  if (radar_n > 1 && radar_ticks % 5 == 0) {
+    // newest frame holds 3 steps
+    static int hold = 0;
+    if (radar_shown == radar_n - 1 && hold < 3) {
+      ++hold;
+      return;
+    }
+    hold = 0;
+    radar_show_frame(radar_shown + 1 >= radar_n ? 0 : radar_shown + 1);
+  }
+}
+
+void radar_stop() {
+  if (radar_timer == nullptr) return;
+  lv_timer_del(radar_timer);
+  radar_timer = nullptr;
+  if (radar_img != nullptr) {
+    hide(radar_img);
+    lv_img_set_src(radar_img, nullptr);
+  }
+  lv_img_cache_invalidate_src(nullptr);  // no cache entry may point at a freed frame
+  radar_dsc.data = nullptr;
+  radar_close();
+  radar_n = radar_expect = 0;
+  radar_shown = -1;
+}
+
+void radar_start() {
+  if (radar_img == nullptr) return;
+  radar_stop();
+  Location loc = settings_load_location();
+  radar_gen = radar_open(loc.lat, loc.lon);
+  radar_ticks = 0;
+  radar_failed = false;
+  lv_label_set_text(radar_msg, "Radar wird geladen\xE2\x80\xA6");
+  show(radar_msg);
+  lv_label_set_text(radar_time, "Radar");
+  radar_timer = lv_timer_create(radar_tick, 100, nullptr);
+}
+
 void rain_enter() {
   if (message_open || rain_root == nullptr) return;
   enter_view(Nav::Rain, rain_root);
+  lv_obj_scroll_to_y(rain_root, 0, LV_ANIM_OFF);
   rain_refresh();
+  radar_start();
 }
 
 // --- Home: warning pill + ÖV / Kalender chips ----------------------------------
@@ -1178,10 +1274,60 @@ void build_info_screens(lv_obj_t* screen) {
   lv_obj_t* unit = make_label(chart, &font_inter_14, lv_color_hex(kTextDim));
   lv_label_set_text(unit, "mm/h");
   lv_obj_align(unit, LV_ALIGN_TOP_RIGHT, -16, 12);
-  rain_list = make_list(rain_root, 258, 172);
-  lv_obj_add_flag(rain_list, LV_OBJ_FLAG_CLICKABLE);  // drags between cards scroll too
+  // The window scrolls: chart, source line, radar card, then the warnings.
+  make_page_scrollable(rain_root);
   rain_status = make_label(rain_root, &font_inter_14, lv_color_hex(kTextDim));
-  lv_obj_set_pos(rain_status, 24, 434);
+  lv_obj_set_pos(rain_status, 24, 254);
+  lv_obj_t* rc = lv_obj_create(rain_root);
+  lv_obj_set_pos(rc, kMargin, 280);
+  lv_obj_set_size(rc, kScreen - 2 * kMargin, 304);
+  style_glass(rc, 20);
+  lv_obj_clear_flag(rc, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_add_flag(rc, LV_OBJ_FLAG_CLICKABLE);  // drags on it scroll the page
+  lv_obj_set_style_pad_all(rc, 0, 0);
+  constexpr int kRx = (kScreen - 2 * kMargin - kRadarTile) / 2, kRy = 10;
+  lv_obj_t* bg = make_bar(rc, kRx, kRy, kRadarTile, kRadarTile, 0x0B1220, LV_OPA_COVER);
+  lv_obj_set_style_radius(bg, 10, 0);
+  memset(&radar_dsc, 0, sizeof(radar_dsc));
+  radar_dsc.header.cf = LV_IMG_CF_TRUE_COLOR_ALPHA;
+  radar_dsc.header.w = kRadarTile;
+  radar_dsc.header.h = kRadarTile;
+  radar_dsc.data_size = kRadarTile * kRadarTile * LV_IMG_PX_SIZE_ALPHA_BYTE;
+  radar_img = lv_img_create(rc);
+  lv_obj_set_pos(radar_img, kRx, kRy);
+  lv_obj_set_size(radar_img, kRadarTile, kRadarTile);
+  hide(radar_img);
+  // Rings around the location: zoom 7 at ~47 N is ~0.83 km/px -> 60 px ~ 50 km.
+  const int cx = kRx + kRadarTile / 2, cy = kRy + kRadarTile / 2;
+  static const int kRings[3] = {30, 60, 120};
+  for (int r : kRings) {
+    lv_obj_t* ring = lv_obj_create(rc);
+    style_plain(ring);
+    lv_obj_set_size(ring, 2 * r, 2 * r);
+    lv_obj_set_pos(ring, cx - r, cy - r);
+    lv_obj_set_style_radius(ring, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_opa(ring, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(ring, 1, 0);
+    lv_obj_set_style_border_color(ring, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_border_opa(ring, LV_OPA_30, 0);
+    lv_obj_clear_flag(ring, LV_OBJ_FLAG_CLICKABLE);
+  }
+  lv_obj_t* me = make_bar(rc, cx - 4, cy - 4, 8, 8, kAmber, LV_OPA_COVER);
+  lv_obj_set_style_radius(me, LV_RADIUS_CIRCLE, 0);
+  lv_obj_t* km = make_label(rc, &font_inter_14, lv_color_hex(kTextDim));
+  lv_label_set_text(km, "50 km");
+  lv_obj_set_pos(km, cx + 62, cy - 18);
+  radar_msg = make_label(rc, &font_inter_14, lv_color_hex(kTextDim));
+  lv_obj_align(radar_msg, LV_ALIGN_TOP_MID, 0, kRy + kRadarTile / 2 + 16);
+  radar_time = make_label(rc, &font_inter_14, lv_color_hex(kText));
+  lv_obj_set_pos(radar_time, 16, kRy + kRadarTile + 10);
+  lv_label_set_text(radar_time, "Radar");
+  lv_obj_t* attr = make_label(rc, &font_inter_14, lv_color_hex(kTextDim));
+  lv_label_set_text(attr, "RainViewer");
+  lv_obj_align(attr, LV_ALIGN_TOP_RIGHT, -16, kRy + kRadarTile + 10);
+  rain_list = make_list(rain_root, 594, LV_SIZE_CONTENT);
+  lv_obj_clear_flag(rain_list, LV_OBJ_FLAG_SCROLLABLE);  // the page scrolls
+  lv_obj_add_flag(rain_list, LV_OBJ_FLAG_CLICKABLE);  // drags between cards scroll too
   lv_obj_t* rn = wx_handle(rain_root, 470);
   (void)rn;
 
@@ -1377,7 +1523,8 @@ bool info_describe(char* out, size_t n) {
                cal != nullptr ? cal->n_waste : 0, cal_have ? 1 : 0, cal_inflight ? 1 : 0);
       return true;
     case Nav::Rain:
-      snprintf(out, n, "rain warnings=%d ok=%d loading=%d", meteo.n, meteo_have ? 1 : 0, meteo_inflight ? 1 : 0);
+      snprintf(out, n, "rain warnings=%d ok=%d loading=%d radar=%d/%d fail=%d", meteo.n, meteo_have ? 1 : 0,
+               meteo_inflight ? 1 : 0, radar_n, radar_expect, radar_failed ? 1 : 0);
       return true;
     case Nav::TransitSet:
       snprintf(out, n, "trset %s|%s", stations[0].id, stations[1].id);

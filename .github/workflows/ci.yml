@@ -51,6 +51,9 @@ jobs:
           g++ -std=c++17 -Wall -I main tools/test_waste_window.cpp main/waste_window.cpp -o /tmp/tww && TZ=Europe/Zurich /tmp/tww
           g++ -std=c++17 -Wall -I main tools/test_weather_derive.cpp main/weather_derive.cpp -o /tmp/tw && /tmp/tw
           g++ -std=c++17 -Wall -I main tools/test_switch_target.cpp -o /tmp/tsw && /tmp/tsw
+          g++ -std=c++17 -Wall -I main -I components/ArduinoJson/src tools/test_transit.cpp main/transit_parse.cpp -o /tmp/ttr && /tmp/ttr
+          g++ -std=c++17 -Wall -I main tools/test_co4_chart.cpp -o /tmp/tcc && /tmp/tcc
+          g++ -std=c++17 -Wall -I main -I components/ArduinoJson/src tools/test_radar.cpp main/radar_parse.cpp -o /tmp/trd && /tmp/trd
 
   build:
     runs-on: ubuntu-latest

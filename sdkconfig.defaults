@@ -118,6 +118,8 @@ CONFIG_LV_USE_TEXTAREA=y
 CONFIG_LV_USE_FLEX=y
 CONFIG_LV_USE_SWITCH=y
 CONFIG_LV_USE_QRCODE=y
+# Rain radar tiles (RainViewer PNG), decoded with LVGL's lodepng
+CONFIG_LV_USE_PNG=y
 # Diagnostics: per-task CPU load in the serial log (diag.cpp)
 CONFIG_FREERTOS_USE_TRACE_FACILITY=y
 CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y

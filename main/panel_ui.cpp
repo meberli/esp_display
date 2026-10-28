@@ -35,6 +35,8 @@
 #include "material_icons.h"
 #include "settings.h"
 #include "co4_task.h"
+#include "co4_chart_plot.h"
+#include "radar.h"
 #include "energy_task.h"
 #include "espnow_play.h"
 #include "pv_task.h"
@@ -576,6 +578,20 @@ void dots_set(lv_obj_t* s, int n, int active) {
 #include "panel_ui_co4.inc"
 
 }  // namespace
+
+void ui_co4_chart_shape(char* out, size_t n) {
+  if (!g_c4_shape_set) {
+    snprintf(out, n, "CO4CHART none");
+    return;
+  }
+  static const char* const kName[4] = {"pv", "bezug", "einsp", "bat"};
+  size_t o = snprintf(out, n, "CO4CHART");
+  for (int k = 0; k < 4 && o < n; ++k) {
+    const Co4PlotShape& s = g_c4_shape[k];
+    o += snprintf(out + o, n - o, " %s=v%d/r%d/i%d/s%d/dy%d", kName[k], s.valid, s.runs, s.isolated, s.segments,
+                  s.max_dy);
+  }
+}
 
 void ui_set_week(const WeatherDetailDay* days, int count) {
   if (count > kWxDays) count = kWxDays;
