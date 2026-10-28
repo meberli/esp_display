@@ -72,7 +72,11 @@ lv_obj_t* rain_root = nullptr;
 lv_obj_t* rain_bar[kRainSteps] = {};
 lv_obj_t* rain_range[kRainSteps] = {};
 lv_obj_t* rain_sum = nullptr;
-lv_obj_t* rain_list = nullptr;
+lv_obj_t* rain_dots = nullptr;
+lv_obj_t* warn_root = nullptr;
+lv_obj_t* warn_list = nullptr;
+lv_obj_t* warn_status = nullptr;
+lv_obj_t* warn_dots = nullptr;
 lv_obj_t* rain_status = nullptr;
 // Radar card (RainViewer): frames only while the Regen window is open.
 lv_obj_t* radar_img = nullptr;
@@ -86,6 +90,12 @@ int radar_expect = 0;   // frames the index listed
 int radar_shown = -1;   // frame on screen
 int radar_ticks = 0;    // 100 ms ticks since open
 bool radar_failed = false;
+// Outline map behind the radar (Natural Earth, embedded): PSRAM only while open.
+lv_obj_t* map_img = nullptr;
+lv_obj_t* map_towns = nullptr;  // town dots + names, rebuilt per open
+lv_img_dsc_t map_dsc;
+uint16_t* map_px = nullptr;
+lv_obj_t* rain_prev = nullptr;  // left edge hint: Warnungen
 constexpr int kRainChartH = 110;
 
 lv_obj_t* trset_root = nullptr;
@@ -163,6 +173,7 @@ void info_hide_views() {
   hide(tr_root);
   hide(calv_root);
   hide(rain_root);
+  hide(warn_root);
   hide(en_root[0]);
   hide(en_root[1]);
   hide(en_root[2]);
@@ -454,17 +465,36 @@ void rain_refresh() {
       lv_label_set_text(rain_sum, t);
     }
   }
+  const bool warn = meteo_have && meteo.n > 0;  // order: Warnungen | Regen
+  dots_set(rain_dots, warn ? 2 : 1, warn ? 1 : 0);
+  if (warn) show(rain_dots); else hide(rain_dots);
+  if (warn) show(rain_prev); else hide(rain_prev);
+  if (meteo_have) {
+    char hm[8];
+    fmt_hm(hm, sizeof(hm), meteo.fetched);
+    lv_label_set_text_fmt(rain_status, "Quelle: MeteoSchweiz \xC2\xB7 Stand %s", hm);
+  } else {
+    lv_label_set_text(rain_status, "Quelle: MeteoSchweiz");
+  }
+}
+
+bool warn_active() { return meteo_have && meteo.n > 0; }
+
+// --- Warnungen (own page left of Regen, only while a warning is active) ---
+void warn_refresh() {
+  if (warn_root == nullptr) return;
+  dots_set(warn_dots, 2, 0);
   unreg_prefix("warn:");
-  lv_obj_clean(rain_list);
+  lv_obj_clean(warn_list);
   for (int i = 0; i < meteo.n; ++i) {
     const Warning& w = meteo.w[i];
-    lv_obj_t* card = lv_obj_create(rain_list);
+    lv_obj_t* card = lv_obj_create(warn_list);
     lv_obj_set_size(card, kScreen - 2 * kMargin, LV_SIZE_CONTENT);
     style_glass(card, 16);
     lv_obj_set_style_pad_all(card, 12, 0);
     lv_obj_set_style_border_color(card, lv_color_hex(level_color(w.level)), 0);
     // Cards must be hit-testable so a drag on them scrolls the list (LVGL 8
-    // only hit-tests clickable objects); the scroll chains to rain_list.
+    // only hit-tests clickable objects); the scroll chains to warn_list.
     lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(card, LV_OBJ_FLAG_SCROLL_CHAIN);
     lv_obj_t* ic = make_label(card, &font_icons_24, lv_color_hex(level_color(w.level)));
@@ -498,16 +528,12 @@ void rain_refresh() {
     snprintf(key, sizeof(key), "warn:%d", i);
     reg(key, card);
   }
-  if (meteo_have && meteo.n == 0) {
-    lv_obj_t* l = make_label(rain_list, &font_inter_14, lv_color_hex(kTextDim));
-    lv_label_set_text(l, "Keine Warnungen");
-  }
   if (meteo_have) {
     char hm[8];
     fmt_hm(hm, sizeof(hm), meteo.fetched);
-    lv_label_set_text_fmt(rain_status, "Quelle: MeteoSchweiz \xC2\xB7 Stand %s", hm);
+    lv_label_set_text_fmt(warn_status, "Quelle: MeteoSchweiz \xC2\xB7 Stand %s", hm);
   } else {
-    lv_label_set_text(rain_status, "Quelle: MeteoSchweiz");
+    lv_label_set_text(warn_status, "Quelle: MeteoSchweiz");
   }
 }
 
@@ -573,6 +599,15 @@ void radar_stop() {
   lv_img_cache_invalidate_src(nullptr);  // no cache entry may point at a freed frame
   radar_dsc.data = nullptr;
   radar_close();
+  if (map_img != nullptr) {
+    hide(map_img);
+    lv_img_set_src(map_img, nullptr);
+  }
+  if (map_towns != nullptr) lv_obj_clean(map_towns);
+  if (map_px != nullptr) {
+    heap_caps_free(map_px);
+    map_px = nullptr;
+  }
   radar_n = radar_expect = 0;
   radar_shown = -1;
 }
@@ -581,6 +616,25 @@ void radar_start() {
   if (radar_img == nullptr) return;
   radar_stop();
   Location loc = settings_load_location();
+  map_px = static_cast<uint16_t*>(
+      heap_caps_malloc(kRadarTile * kRadarTile * sizeof(uint16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  if (map_px != nullptr && map_img != nullptr) {
+    map_ne_render(map_px, kRadarTile, loc.lat, loc.lon);
+    map_dsc.data = reinterpret_cast<const uint8_t*>(map_px);
+    lv_img_cache_invalidate_src(&map_dsc);
+    lv_img_set_src(map_img, &map_dsc);
+    show(map_img);
+    const char* name;
+    int x, y;
+    for (int i = 0; map_ne_town(i, kRadarTile, loc.lat, loc.lon, &name, &x, &y); ++i) {
+      if (abs(x - kRadarTile / 2) < 6 && abs(y - kRadarTile / 2) < 6) continue;  // own location has the amber dot
+      lv_obj_t* d = make_bar(map_towns, x - 2, y - 2, 4, 4, 0xC8D0DC, LV_OPA_70);
+      lv_obj_set_style_radius(d, LV_RADIUS_CIRCLE, 0);
+      lv_obj_t* l = make_label(map_towns, &font_inter_14, lv_color_hex(0x8E98AA));
+      lv_label_set_text(l, name);
+      lv_obj_set_pos(l, x + 4, y - 9);
+    }
+  }
   radar_gen = radar_open(loc.lat, loc.lon);
   radar_ticks = 0;
   radar_failed = false;
@@ -596,6 +650,17 @@ void rain_enter() {
   lv_obj_scroll_to_y(rain_root, 0, LV_ANIM_OFF);
   rain_refresh();
   radar_start();
+}
+
+void warn_enter() {
+  if (message_open || warn_root == nullptr) return;
+  if (!warn_active()) {  // no empty page
+    rain_enter();
+    return;
+  }
+  enter_view(Nav::Warn, warn_root);
+  lv_obj_scroll_to_y(warn_list, 0, LV_ANIM_OFF);
+  warn_refresh();
 }
 
 // --- Home: warning pill + ÖV / Kalender chips ----------------------------------
@@ -696,7 +761,7 @@ void on_info_tap(lv_event_t* e) {
   if (which == 0) tr_enter(0);
   else if (which == 1) calv_enter();
   else if (which == 3) energy_home_open();
-  else rain_enter();
+  else warn_enter();  // warning pill (falls back to Regen when it just ended)
 }
 
 lv_obj_t* make_chip(lv_obj_t* parent, int x, int which, const char* key, uint32_t color, const char* icon,
@@ -1285,7 +1350,7 @@ void build_info_screens(lv_obj_t* screen) {
   lv_obj_t* unit = make_label(chart, &font_inter_14, lv_color_hex(kTextDim));
   lv_label_set_text(unit, "mm/h");
   lv_obj_align(unit, LV_ALIGN_TOP_RIGHT, -16, 12);
-  // The window scrolls: chart, source line, radar card, then the warnings.
+  // The window scrolls: chart, source line, radar card.
   make_page_scrollable(rain_root);
   rain_status = make_label(rain_root, &font_inter_14, lv_color_hex(kTextDim));
   lv_obj_set_pos(rain_status, 24, 254);
@@ -1299,6 +1364,23 @@ void build_info_screens(lv_obj_t* screen) {
   constexpr int kRx = (kScreen - 2 * kMargin - kRadarTile) / 2, kRy = 10;
   lv_obj_t* bg = make_bar(rc, kRx, kRy, kRadarTile, kRadarTile, 0x0B1220, LV_OPA_COVER);
   lv_obj_set_style_radius(bg, 10, 0);
+  memset(&map_dsc, 0, sizeof(map_dsc));
+  map_dsc.header.cf = LV_IMG_CF_TRUE_COLOR;
+  map_dsc.header.w = kRadarTile;
+  map_dsc.header.h = kRadarTile;
+  map_dsc.data_size = kRadarTile * kRadarTile * sizeof(uint16_t);
+  map_img = lv_img_create(rc);
+  lv_obj_set_pos(map_img, kRx, kRy);
+  lv_obj_set_size(map_img, kRadarTile, kRadarTile);
+  hide(map_img);
+  map_towns = lv_obj_create(rc);
+  style_plain(map_towns);
+  lv_obj_set_pos(map_towns, kRx, kRy);
+  lv_obj_set_size(map_towns, kRadarTile, kRadarTile);
+  lv_obj_set_style_bg_opa(map_towns, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_pad_all(map_towns, 0, 0);
+  lv_obj_clear_flag(map_towns, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_clear_flag(map_towns, LV_OBJ_FLAG_SCROLLABLE);
   memset(&radar_dsc, 0, sizeof(radar_dsc));
   radar_dsc.header.cf = LV_IMG_CF_TRUE_COLOR_ALPHA;
   radar_dsc.header.w = kRadarTile;
@@ -1334,13 +1416,26 @@ void build_info_screens(lv_obj_t* screen) {
   lv_obj_set_pos(radar_time, 16, kRy + kRadarTile + 10);
   lv_label_set_text(radar_time, "Radar");
   lv_obj_t* attr = make_label(rc, &font_inter_14, lv_color_hex(kTextDim));
-  lv_label_set_text(attr, "RainViewer");
+  lv_label_set_text(attr, "Karte: Natural Earth \xC2\xB7 Radar: RainViewer");
   lv_obj_align(attr, LV_ALIGN_TOP_RIGHT, -16, kRy + kRadarTile + 10);
-  rain_list = make_list(rain_root, 594, LV_SIZE_CONTENT);
-  lv_obj_clear_flag(rain_list, LV_OBJ_FLAG_SCROLLABLE);  // the page scrolls
-  lv_obj_add_flag(rain_list, LV_OBJ_FLAG_CLICKABLE);  // drags between cards scroll too
-  lv_obj_t* rn = wx_handle(rain_root, 470);
+  lv_obj_t* rn = wx_handle(rain_root, 470);  // -> Heute
   (void)rn;
+  rain_prev = wx_handle(rain_root, 5);  // <- Warnungen, only while one is active
+  lv_obj_add_flag(rain_prev, LV_OBJ_FLAG_FLOATING);
+  hide(rain_prev);
+  rain_dots = make_dots(rain_root);
+  lv_obj_add_flag(rain_dots, LV_OBJ_FLAG_FLOATING);  // stays at the bottom while the page scrolls
+
+  // Warnungen: own page, exists only while MeteoSchweiz reports a warning.
+  warn_root = make_screen_root(screen, "Warnungen");
+  warn_status = make_label(warn_root, &font_inter_14, lv_color_hex(kTextDim));
+  lv_obj_align(warn_status, LV_ALIGN_TOP_RIGHT, -24, 25);
+  header_note(warn_status);
+  warn_list = make_list(warn_root, 58, 384);
+  lv_obj_add_flag(warn_list, LV_OBJ_FLAG_CLICKABLE);  // drags between cards scroll too
+  lv_obj_t* wn = wx_handle(warn_root, 470);
+  (void)wn;
+  warn_dots = make_dots(warn_root);
 
   // Einstellungen > ÖV
   trset_root = make_screen_root(screen, "\xC3\x96V-Haltestellen");
@@ -1533,6 +1628,9 @@ bool info_describe(char* out, size_t n) {
       snprintf(out, n, "calendar events=%d waste=%d have=%d loading=%d", cal != nullptr ? cal->n_events : 0,
                cal != nullptr ? cal->n_waste : 0, cal_have ? 1 : 0, cal_inflight ? 1 : 0);
       return true;
+    case Nav::Warn:
+      snprintf(out, n, "warn n=%d ok=%d", meteo.n, meteo_have ? 1 : 0);
+      return true;
     case Nav::Rain:
       snprintf(out, n, "rain warnings=%d ok=%d loading=%d radar=%d/%d fail=%d", meteo.n, meteo_have ? 1 : 0,
                meteo_inflight ? 1 : 0, radar_n, radar_expect, radar_failed ? 1 : 0);
@@ -1607,7 +1705,7 @@ bool info_list_dump() {
       console_printf("ITEM E%d %s %s|%d chars\n", i, d, cal->events[i].all_day ? "ganztags" : hm,
                      static_cast<int>(strlen(cal->events[i].title)));  // titles are private: length only
     }
-  } else if (nav == Nav::Rain) {
+  } else if (nav == Nav::Rain || nav == Nav::Warn) {
     for (int i = 0; i < meteo.n; ++i)
       console_printf("ITEM %d %s level=%d %lld-%lld\n", i, warning_name(meteo.w[i].type), meteo.w[i].level,
                      static_cast<long long>(meteo.w[i].from), static_cast<long long>(meteo.w[i].to));

@@ -55,6 +55,7 @@ jobs:
           g++ -std=c++17 -Wall -I main -I components/ArduinoJson/src tools/test_transit.cpp main/transit_parse.cpp -o /tmp/ttr && /tmp/ttr
           g++ -std=c++17 -Wall -I main tools/test_co4_chart.cpp -o /tmp/tcc && /tmp/tcc
           g++ -std=c++17 -Wall -I main -I components/ArduinoJson/src tools/test_radar.cpp main/radar_parse.cpp -o /tmp/trd && /tmp/trd
+          g++ -std=c++17 -Wall -I main tools/test_map_ne.cpp main/map_ne.cpp -o /tmp/tmap && /tmp/tmap
 
   build:
     runs-on: ubuntu-latest

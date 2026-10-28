@@ -742,7 +742,7 @@ void back_level() {
     return;
   }
   if (nav == Nav::LoxMenu || nav == Nav::Weather || nav == Nav::Cameras || nav == Nav::Transit ||
-      nav == Nav::Calendar || nav == Nav::Rain || nav == Nav::Energy || nav == Nav::Co4) {
+      nav == Nav::Calendar || nav == Nav::Rain || nav == Nav::Warn || nav == Nav::Energy || nav == Nav::Co4) {
     go_home();
     return;
   }
@@ -786,8 +786,13 @@ void swipe_page(int dir) {
     if (dir < 0) open_co4set();
     return;
   }
-  if (nav == Nav::Rain) {
+  if (nav == Nav::Rain) {  // Warnungen (if any) <- Regen -> Heute
     if (dir > 0) open_weather_day(0);
+    else if (warn_active()) warn_enter();
+    return;
+  }
+  if (nav == Nav::Warn) {
+    if (dir > 0) rain_enter();
     return;
   }
   if (nav == Nav::TransitSet || nav == Nav::CalSet || nav == Nav::Maint || nav == Nav::RemSet ||
@@ -828,7 +833,7 @@ void swipe_page(int dir) {
     return;
   }
   if (nav == Nav::Weather) {
-    if (wx_day == 0 && dir < 0) {  // before "Heute": warnings and the rain nowcast
+    if (wx_day == 0 && dir < 0) {  // before "Heute": the rain nowcast + radar
       rain_enter();
       return;
     }

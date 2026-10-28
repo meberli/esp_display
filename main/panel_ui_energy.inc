@@ -527,15 +527,19 @@ void energy_refresh_wasser() {
   uint8_t yfl = 0;
   const float yest = v.water_on ? energy_yesterday_water_l(h, &yfl) : -1;
   const bool have = yest >= 0;
-  if (have) lv_label_set_text_fmt(ew_big, "%s%d", (yfl & kDayWaterApprox) ? "~" : "", static_cast<int>(yest + 0.5f));
+  // The 40 px font has digits only ("~" would be a box): mark estimates on the unit.
+  if (have) lv_label_set_text_fmt(ew_big, "%d", static_cast<int>(yest + 0.5f));
   else lv_label_set_text(ew_big, "-");
   lv_obj_t* unit = lv_obj_get_child(lv_obj_get_parent(ew_big), 2);
+  lv_label_set_text(unit, have && (yfl & kDayWaterApprox) ? "Liter (ca.)" : "Liter");
   lv_obj_align_to(unit, ew_big, LV_ALIGN_OUT_RIGHT_BOTTOM, 6, -7);
   if (!v.water_on) {
     lv_label_set_text(ew_meter, "Wasser ist ausgeschaltet");
   } else if (v.have && v.r.has_water) {
     snprintf(b, sizeof(b), "Z\xC3\xA4hlerstand %.3f m\xC2\xB3", v.r.water_m3);
     lv_label_set_text(ew_meter, b);
+  } else if (have || h.days[1].ymd) {  // day values exist, only the live reading is missing
+    lv_label_set_text(ew_meter, "Z\xC3\xA4hlerstand: noch keine aktuelle Meldung");
   } else {
     lv_label_set_text(ew_meter, "kein Wasserz\xC3\xA4hler gemeldet");
   }

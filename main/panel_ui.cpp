@@ -36,6 +36,7 @@
 #include "settings.h"
 #include "co4_task.h"
 #include "co4_chart_plot.h"
+#include "map_ne.h"
 #include "radar.h"
 #include "ui_text.h"
 #include "energy_task.h"
@@ -92,7 +93,7 @@ enum Section : uint8_t { kSecFav = 0, kSecLight = 1, kSecShutter = 2, kSecOther 
 enum class Nav : uint8_t {
   Home, Category, Weather, Settings, WifiList, WifiPass, Location, Display, Time,
   Cameras, CamSettings, CamId, CamSearch, CamKey,
-  Transit, Calendar, Rain, TransitSet, StationSearch, CalSet, TextEdit, Maint, RemSet, Energy, EnSet,
+  Transit, Calendar, Rain, Warn, TransitSet, StationSearch, CalSet, TextEdit, Maint, RemSet, Energy, EnSet,
   Playground, Co4, Co4Set, Co4Login, Co4Zones, LoxMenu
 };
 
@@ -313,6 +314,9 @@ void home_chips_refresh();
 void home_warn_refresh();
 void tr_swipe(int dir);
 void rain_enter();
+void warn_enter();
+bool warn_active();
+void warn_refresh();
 void open_trset();
 void open_calset();
 void open_maint();
@@ -645,7 +649,7 @@ void ui_describe(char* out, size_t n) {
 
 bool nav_has_pages() {
   return nav == Nav::Category || nav == Nav::Weather || nav == Nav::Cameras || nav == Nav::Transit ||
-         nav == Nav::Energy || nav == Nav::Co4 || nav == Nav::Rain;
+         nav == Nav::Energy || nav == Nav::Co4 || nav == Nav::Rain || nav == Nav::Warn;
 }
 
 void ui_touch_sample(bool pressed, int x, int y) {

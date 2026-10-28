@@ -364,6 +364,10 @@ void ui_meteo_done(bool ok, const MeteoNow& m) {
   }
   home_warn_refresh();
   if (nav == Nav::Rain) rain_refresh();
+  if (nav == Nav::Warn) {
+    if (warn_active()) warn_refresh();
+    else rain_enter();  // the last warning ended: the page goes away
+  }
 }
 
 bool ui_take_ota(char* url, size_t n, bool* check, bool* own) {
