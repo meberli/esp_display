@@ -129,14 +129,6 @@ config PANEL_CO4_BFF_URL
     string "Co4 BFF base URL"
     default "https://bff.beta.co4.dev"
 
-config PANEL_CO4_FIXTURE
-    bool "Co4 Energie: example data (fixture) instead of the Co4 series API"
-    default y
-    help
-        With this on, the dashboard and the object tree of the zone choice
-        use anonymised example data instead of the Co4 BFF, marked "Beispieldaten" on screen. DIAGCO4FIX 0/1 switches at
-        runtime (builds with CONFIG_PANEL_DIAG_INJECT or the test harness).
-
 endmenu
 
 endmenu

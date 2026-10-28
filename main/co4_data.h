@@ -1,9 +1,6 @@
 #pragma once
-// Co4 Energie: internal data interface between the data source (later the Co4
-// BFF, for now the fixture) and the UI. No LVGL, no ESP-IDF: host-testable.
-//
-// The Co4 measurement series endpoint is not known yet (it comes from Co4 with
-// API examples). Nothing here guesses it: a source only has to fill Co4Data.
+// Co4 Energie: internal data interface between the Co4 BFF source
+// (co4_task.cpp) and the UI. No LVGL, no ESP-IDF: host-testable.
 // Times are UTC milliseconds like everywhere in the Co4 API.
 
 #include <stddef.h>
@@ -48,7 +45,6 @@ struct Co4SiteData {
 };
 
 struct Co4Data {
-  bool example;        // fixture / example data: the UI shows "Beispieldaten"
   int64_t fetched_ms;  // when the source produced it
   Co4Curve day;        // today, 15 min power
   Co4Totals days;      // this month, energy per day
@@ -69,21 +65,6 @@ bool co4_ratio(const float (*v)[kCo4MaxBars], int from, int to, Co4Ratio* out);
 
 // "-0.4 kWh", "123 kWh", "-1.25 MWh"; sign kept, NAN -> 0.0 kWh.
 void co4_fmt_kwh(char* out, size_t n, float v);
-
-// A data source. fetch() runs on the Co4 task (core 0) and may block. bearer is
-// the current access token (RAM only) or nullptr for the fixture.
-struct Co4Source {
-  const char* name;
-  bool example;
-  bool (*fetch)(const char* zone_id, const char* bearer, int64_t now_ms, Co4Data* out, char* err, size_t err_n);
-};
-const Co4Source& co4_fixture_source();
-// Placeholder without network (host builds); the panel uses the BFF source in co4_task.cpp.
-const Co4Source& co4_live_source();
-
-// Fixture: anonymised synthetic example data for the day around now_ms (local
-// time via localtime_r). Deterministic for a given now_ms.
-void co4_fixture_fill(int64_t now_ms, Co4Data* out);
 
 // --- Zones --------------------------------------------------------------------
 // zevGetConsumptionZones answer (zones of one site), see co4_bff_parse_zones.

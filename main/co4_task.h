@@ -20,11 +20,9 @@ enum class Co4State : uint8_t {
 enum class Co4Fetch : uint8_t { Idle, Loading, Ok, Offline };
 enum class Co4ZonesState : uint8_t { Idle, Loading, Ok, Error };
 enum class Co4Event : uint8_t { State, Zones, Data };
-enum class Co4Mode : uint8_t { Live = 0, Fixture = 1, Demo = 2 };  // Demo: example data without login
 
 struct Co4View {
   Co4State state;
-  Co4Mode mode;
   char msg[64];  // last login problem (German), "" if none
   bool token_set;
   char user_code[16];
@@ -63,6 +61,5 @@ void co4_nav_back();                                  // one level up
 void co4_nav_reload();                                // current level again
 void co4_zone_choose(const char* id, const char* name, const char* site);
 void co4_refresh_now();
-void co4_set_mode(Co4Mode m);
 // One-line DIAG summary: never contains a token, only set/unset.
 void co4_diag(char* out, size_t n);

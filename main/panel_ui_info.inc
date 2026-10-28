@@ -1371,9 +1371,9 @@ bool info_describe(char* out, size_t n) {
       Co4View v;
       co4_get(&v);
       static const char* const kView[4] = {"co4", "co4set", "co4login", "co4zones"};
-      snprintf(out, n, "%s page=%d state=%d token=%s zone=%s mode=%d fetch=%d data=%d zones=%d",
+      snprintf(out, n, "%s page=%d state=%d token=%s zone=%s fetch=%d data=%d zones=%d",
                kView[static_cast<int>(nav) - static_cast<int>(Nav::Co4)], co4_page, static_cast<int>(v.state),
-               v.token_set ? "set" : "unset", v.zone_set ? "set" : "unset", static_cast<int>(v.mode),
+               v.token_set ? "set" : "unset", v.zone_set ? "set" : "unset",
                static_cast<int>(v.fetch), v.have_data ? 1 : 0, static_cast<int>(v.zones_state));
       return true;
     }

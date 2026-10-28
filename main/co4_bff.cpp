@@ -36,7 +36,13 @@ int64_t local_ms(struct tm m) {
 
 bool error_answer(JsonDocument& doc, char* err, size_t err_n) {
   if (!doc["errors"].isNull() || !doc["error"].isNull()) {
-    snprintf(err, err_n, "Co4 meldet einen Fehler");
+    // A stale zone choice (e.g. picked from removed example data) is answered
+    // with "... not exist" / "not found": tell the user to pick the zone again.
+    const char* m = doc["errors"][0]["message"] | "";
+    if (strstr(m, "not exist") != nullptr || strstr(m, "not found") != nullptr)
+      snprintf(err, err_n, "Zone bei Co4 nicht gefunden \xE2\x80\x93 bitte Zone neu w\xC3\xA4hlen");
+    else
+      snprintf(err, err_n, "Co4 meldet einen Fehler");
     return true;
   }
   return false;
@@ -380,39 +386,4 @@ bool co4_bff_parse_nav(const char* json, size_t len, bool roots, Co4NavLevel* ou
     out->it[j + 1] = t;
   }
   return true;
-}
-
-namespace {
-// BEISPIELDATEN (Platzhalter): object tree in co4CoreNavRoots / co4CoreNavGet form.
-// Root 9001 > site 9010 > zones 9011, 9012 (+ meter 9013); root 9002 is empty.
-const char kNavRoots[] =
-    "{\"data\":{\"roots\":["
-    "{\"id\":9001,\"hasChildren\":true,\"properties\":[{\"label\":\"name\",\"value\":\"Beispiel-Organisation\"}],"
-    "\"natures\":[{\"id\":7001,\"nature\":{\"code\":\"core_Folder\"}}]},"
-    "{\"id\":9002,\"hasChildren\":false,\"properties\":[{\"label\":\"name\",\"value\":\"Archiv (leer)\"}],"
-    "\"natures\":[]}]}}";
-const char kNav9001[] =
-    "{\"data\":{\"object\":{\"id\":9001,\"children\":["
-    "{\"id\":9010,\"hasChildren\":true,\"properties\":[{\"label\":\"name\",\"value\":\"Beispiel-ZEV Sonnenhalde\"}],"
-    "\"natures\":[{\"id\":7010,\"nature\":{\"code\":\"zev_Site\"}}]},"
-    "{\"id\":9020,\"hasChildren\":false,\"properties\":[{\"label\":\"name\",\"value\":\"Dokumente\"}],"
-    "\"natures\":[]}]}}}";
-const char kNav9010[] =
-    "{\"data\":{\"object\":{\"id\":9010,\"children\":["
-    "{\"id\":9011,\"hasChildren\":true,\"properties\":[{\"label\":\"name\",\"value\":\"Zone Haus A\"}],"
-    "\"natures\":[{\"id\":7011,\"nature\":{\"code\":\"zev_Zone\"}}]},"
-    "{\"id\":9012,\"hasChildren\":false,\"properties\":[{\"label\":\"name\",\"value\":\"Zone Haus B\"}],"
-    "\"natures\":[{\"id\":7012,\"nature\":{\"code\":\"zev_Zone\"}}]},"
-    "{\"id\":9013,\"hasChildren\":false,\"properties\":[{\"label\":\"name\",\"value\":\"Hauptz\xC3\xA4hler\"}],"
-    "\"natures\":[{\"id\":7013,\"nature\":{\"code\":\"zev_MeteringPoint\"}}]}]}}}";
-const char kNavEmpty[] = "{\"data\":{\"object\":{\"id\":0,\"children\":[]}}}";
-}  // namespace
-
-bool co4_bff_nav_fixture(const char* soid, Co4NavLevel* out, char* err, size_t err_n) {
-  bool roots = soid == nullptr || soid[0] == '\0';
-  const char* j = roots ? kNavRoots
-                  : strcmp(soid, "9001") == 0 ? kNav9001
-                  : strcmp(soid, "9010") == 0 ? kNav9010
-                                              : kNavEmpty;
-  return co4_bff_parse_nav(j, strlen(j), roots, out, err, err_n);
 }

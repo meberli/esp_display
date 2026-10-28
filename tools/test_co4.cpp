@@ -11,6 +11,7 @@
 #include "co4_bff.h"
 #include "co4_data.h"
 #include "co4_oidc.h"
+#include "co4_testdata.h"
 
 static int fails = 0;
 #define CHECK(c)                                          \
@@ -27,7 +28,6 @@ static void test_fixture() {
   // 26.10.2026 15:30 local (CET, UTC+1) = 14:30 UTC
   const int64_t now = 1793025000LL * 1000;
   co4_fixture_fill(now, &data);
-  CHECK(data.example);
   CHECK(data.day.n == 96 && data.day.step_ms == 900000);
   time_t t0 = static_cast<time_t>(data.day.t0_ms / 1000);
   struct tm lt;
@@ -297,6 +297,12 @@ static void test_bff() {
 
   const char nr[] = "{\"data\":{\"energyStats\":{\"start\":1,\"end\":[2,3],\"sources\":null,\"partialSources\":false}}}";
   CHECK(co4_bff_parse_stats(nr, strlen(nr), &c.v[0][0], 96, &c.n, &partial, err, sizeof(err)) == Co4BffRc::NotReady);
+  const char ze[] = "{\"errors\":[{\"message\":\"Zone 9999 not exist\"}]}";
+  CHECK(co4_bff_parse_stats(ze, strlen(ze), &c.v[0][0], 96, &c.n, &partial, err, sizeof(err)) == Co4BffRc::Error);
+  CHECK(strstr(err, "nicht gefunden") != nullptr);
+  const char ge[] = "{\"errors\":[{\"message\":\"internal\"}]}";
+  CHECK(co4_bff_parse_stats(ge, strlen(ge), &c.v[0][0], 96, &c.n, &partial, err, sizeof(err)) == Co4BffRc::Error);
+  CHECK(strcmp(err, "Co4 meldet einen Fehler") == 0);
   const char em[] = "{\"data\":{\"energyStats\":{\"start\":1,\"end\":[2],\"sources\":[],\"partialSources\":false}}}";
   CHECK(co4_bff_parse_stats(em, strlen(em), &c.v[0][0], 96, &c.n, &partial, err, sizeof(err)) == Co4BffRc::Ok);
   CHECK(c.n == 1 && isnan(c.v[kCo4Bezug][0]));

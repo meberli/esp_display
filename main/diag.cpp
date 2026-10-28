@@ -357,9 +357,6 @@ void handle(const char* line) {
     char buf[200];
     co4_diag(buf, sizeof buf);  // tokens only as set/unset
     console_puts(buf);
-  } else if (sscanf(line, "DIAGCO4MODE %d", &a) == 1 && a >= 0 && a <= 2) {
-    co4_set_mode(static_cast<Co4Mode>(a));
-    console_puts("DIAG OK");
   } else if (strcmp(line, "DIAGCO4EN") == 0) {
     play_diag();  // state and counters only, never keys
   } else if (strcmp(line, "SCANWIFI") == 0) {

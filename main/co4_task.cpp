@@ -48,7 +48,6 @@ enum Cmd : uint32_t {
   kCmdZones = 1u << 3,
   kCmdZone = 1u << 4,
   kCmdRefresh = 1u << 5,
-  kCmdMode = 1u << 6,
 };
 
 // Everything big lives in PSRAM.
@@ -76,7 +75,6 @@ Co4Data* g_data = nullptr;       // PSRAM, guarded by g_mu
 char g_pick_id[40];
 char g_pick_name[48];
 char g_pick_site[20];
-Co4Mode g_pick_mode = Co4Mode::Fixture;
 enum class NavOp : uint8_t { Root, Open, Back, Reload };
 NavOp g_nav_op = NavOp::Root;
 char g_nav_soid[20];
@@ -103,13 +101,6 @@ void edit(Co4Event e, F f) {
 void wipe(char* p, size_t n) {
   volatile char* v = p;
   for (size_t i = 0; i < n; ++i) v[i] = 0;
-}
-
-Co4Mode mode() {
-  xSemaphoreTake(g_mu, portMAX_DELAY);
-  Co4Mode m = g_view->mode;
-  xSemaphoreGive(g_mu);
-  return m;
 }
 
 void set_state(Co4State s, const char* msg) {
@@ -342,9 +333,7 @@ void do_nav() {
   const char* cur = L.depth > 0 ? L.path[L.depth - 1].soid : "";
   char err[48] = "";
   bool ok = false;
-  if (mode() != Co4Mode::Live) {
-    ok = co4_bff_nav_fixture(cur, &L, err, sizeof(err));
-  } else if (!wifi_connected()) {
+  if (!wifi_connected()) {
     snprintf(err, sizeof(err), "%s", "keine Verbindung");
   } else if (!ensure_access()) {
     snprintf(err, sizeof(err), "%s", "Co4 nicht erreichbar");
@@ -408,6 +397,20 @@ bool bff_get(const char* path, const char* bearer, size_t* len, char* err, size_
   return true;
 }
 
+// Logs the first GraphQL error message of a BFF answer: digits masked (IDs),
+// at most 80 chars. Never logs data values.
+void log_bff_error(const char* what, const char* period, const char* err) {
+  char m[84] = "";
+  const char* p = strstr(g_w->body, "\"message\":\"");
+  if (p != nullptr) {
+    p += 11;
+    size_t i = 0;
+    for (; p[i] != '\0' && p[i] != '"' && i < sizeof(m) - 1; ++i) m[i] = (p[i] >= '0' && p[i] <= '9') ? '#' : p[i];
+    m[i] = '\0';
+  }
+  ESP_LOGW(kTag, "%s %s: %s (%s)", what, period, err, m[0] ? m : "no message");
+}
+
 template <int N>
 bool bff_block(const char* zone, const char* bearer, const Co4BffWindow& win, Co4Block<N>* b, char* err,
                size_t err_n) {
@@ -420,6 +423,7 @@ bool bff_block(const char* zone, const char* bearer, const Co4BffWindow& win, Co
   if (!bff_get(path, bearer, &len, err, err_n)) return false;
   bool partial = false;
   Co4BffRc rc = co4_bff_parse_stats(g_w->body, len, &b->v[0][0], N, &b->n, &partial, err, err_n);
+  if (rc != Co4BffRc::Ok) log_bff_error("zone stats", win.period, err);
   b->res = win.res;
   b->t0_ms = win.start_ms;
   b->step_ms = win.step_ms;
@@ -458,6 +462,7 @@ bool site_block(const char* site, const char* bearer, const Co4BffWindow& win, C
   if (!bff_get(path, bearer, &len, err, err_n)) return false;
   bool p = false;
   Co4BffRc rc = co4_bff_parse_site_stats(g_w->body, len, &b->v[0][0], N, &b->n, &p, err, err_n);
+  if (rc != Co4BffRc::Ok) log_bff_error("site stats", win.period, err);
   *partial = *partial || p;
   b->res = win.res;
   b->t0_ms = win.start_ms;
@@ -496,35 +501,27 @@ bool bff_fetch(const char* zone, const char* bearer, int64_t now_ms, Co4Data* ou
   if (!bff_block(zone, bearer, win[1], &out->days, err, err_n)) return false;
   if (!bff_block(zone, bearer, win[2], &out->months, err, err_n)) return false;
   site_fetch(zone, bearer, win, &out->site);
-  out->example = false;
   out->fetched_ms = now_ms;
   return true;
 }
-const Co4Source kBffLive = {"Co4", false, bff_fetch};
 
 void do_data() {
   Co4View v;
   co4_get(&v);
-  bool demo = v.mode == Co4Mode::Demo;
   // Nothing to fetch yet (no zone / not logged in): still move g_next_data, or
   // task() would compute wait=0 and spin on core 0 (task_wdt IDLE0). Login and
   // zone pick set g_next_data = now themselves.
-  if ((!v.zone_set && !demo) || (!demo && v.state != Co4State::LoggedIn)) {
+  if (!v.zone_set || v.state != Co4State::LoggedIn) {
     g_next_data = now_ms() + kRetryMs;
     return;
   }
   edit(Co4Event::Data, [](Co4View& w) { w.fetch = Co4Fetch::Loading; });
-  const Co4Source& src = v.mode == Co4Mode::Live ? kBffLive : co4_fixture_source();
-  const char* bearer = nullptr;
   char err[48] = "";
   bool ok = false;
-  if (!src.example) {
-    if (ensure_access()) bearer = g_w->access;
-  }
-  if (src.example || bearer != nullptr) {
+  if (ensure_access()) {
     int64_t wall = static_cast<int64_t>(time(nullptr)) * 1000;
-    ok = src.fetch(demo ? "" : v.zone_id, bearer, wall, &g_w->data, err, sizeof(err));
-  } else if (err[0] == '\0') {
+    ok = bff_fetch(v.zone_id, g_w->access, wall, &g_w->data, err, sizeof(err));
+  } else {
     snprintf(err, sizeof(err), "%s", "Co4 nicht erreichbar");
   }
   if (ok) {
@@ -559,15 +556,6 @@ void task(void*) {
     if (wait < kMinWaitMs) wait = kMinWaitMs;  // always block: never starve IDLE0
     uint32_t cmd = 0;
     xTaskNotifyWait(0, UINT32_MAX, &cmd, pdMS_TO_TICKS(wait));
-    if (cmd & kCmdMode) {
-      xSemaphoreTake(g_mu, portMAX_DELAY);
-      g_view->mode = g_pick_mode;
-      g_view->have_data = false;
-      g_view->fetch = Co4Fetch::Idle;
-      xSemaphoreGive(g_mu);
-      emit(Co4Event::Data);
-      g_next_data = now_ms();
-    }
     if (cmd & kCmdLogout) do_logout();
     if (cmd & kCmdCancel) {
       co4_get(&v);
@@ -588,7 +576,7 @@ void task(void*) {
     }
     co4_get(&v);
     if (v.state != Co4State::Code && static_cast<int32_t>(g_next_data - now_ms()) <= 0) {
-      if (wifi_connected() || v.mode != Co4Mode::Live) do_data();
+      if (wifi_connected()) do_data();
       else {
         edit(Co4Event::Data, [](Co4View& w) { w.fetch = Co4Fetch::Offline; });
         g_next_data = now_ms() + kRetryMs;
@@ -622,11 +610,6 @@ void co4_start() {
     ESP_LOGE(kTag, "no memory, Co4 disabled");
     return;
   }
-#if CONFIG_PANEL_CO4_FIXTURE
-  g_view->mode = Co4Mode::Fixture;
-#else
-  g_view->mode = Co4Mode::Live;
-#endif
   bool tok = settings_load_co4_token(g_w->refresh, sizeof(g_w->refresh));
   g_view->state = tok ? Co4State::LoggedIn : settings_load_co4_expired() ? Co4State::Expired : Co4State::NoLogin;
   g_view->token_set = tok;
@@ -698,24 +681,15 @@ void co4_zone_choose(const char* id, const char* name, const char* site) {
   cmd(kCmdZone);
 }
 
-void co4_set_mode(Co4Mode m) {
-  if (g_mu == nullptr) return;
-  xSemaphoreTake(g_mu, portMAX_DELAY);
-  g_pick_mode = m;
-  xSemaphoreGive(g_mu);
-  cmd(kCmdMode);
-}
-
 void co4_diag(char* out, size_t n) {
   static const char* const kState[] = {"nologin", "starting", "code", "loggedin", "expired"};
-  static const char* const kMode[] = {"live", "fixture", "demo"};
   static const char* const kFetch[] = {"idle", "loading", "ok", "offline"};
   Co4View v;
   co4_get(&v);
-  snprintf(out, n, "CO4 state=%s token=%s zone=%s site=%s src=%s fetch=%s data=%s heap_int=%u psram=%u",
+  snprintf(out, n, "CO4 state=%s token=%s zone=%s site=%s fetch=%s data=%s heap_int=%u psram=%u",
            kState[static_cast<int>(v.state) % 5], v.token_set ? "set" : "unset", v.zone_set ? "set" : "unset",
            v.site_niid[0] ? "set" : "unset",
-           kMode[static_cast<int>(v.mode) % 3], kFetch[static_cast<int>(v.fetch) % 4], v.have_data ? "yes" : "no",
+           kFetch[static_cast<int>(v.fetch) % 4], v.have_data ? "yes" : "no",
            static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)),
            static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)));
 }

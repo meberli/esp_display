@@ -14,7 +14,6 @@ bool co4_dirty = true;
 
 // Dashboard widgets (per page)
 lv_obj_t* c4_status[2] = {};
-lv_obj_t* c4_badge[2] = {};
 lv_obj_t* c4_body[2] = {};
 lv_obj_t* c4_empty[2] = {};
 lv_obj_t* c4_empty_title[2] = {};
@@ -37,7 +36,7 @@ lv_obj_t* c4_mpv[12] = {};
 lv_obj_t* c4_mbz[12] = {};
 lv_obj_t* c4_mlbl[12] = {};
 // Settings
-constexpr int kCo4SetRows = 4;
+constexpr int kCo4SetRows = 3;
 lv_obj_t* co4set_val[kCo4SetRows] = {};
 lv_obj_t* co4_logout_row = nullptr;
 lv_obj_t* co4_confirm = nullptr;
@@ -117,7 +116,7 @@ void on_c4_empty_btn(lv_event_t*) {
   if (v.state == Co4State::NoLogin || v.state == Co4State::Expired) {
     co4_open_login();
     co4_login();
-  } else if (!v.zone_set && v.mode != Co4Mode::Demo) {
+  } else if (!v.zone_set) {
     co4_open_zones();
   } else {
     co4_refresh_now();
@@ -161,25 +160,6 @@ void c4_build_common(lv_obj_t* r, int page) {
   c4_empty_btn[page] = co4_btn(e, 220, "Co4 verbinden", on_c4_empty_btn, page, page == 0 ? "co4:act" : "co4:act2", true,
                                &c4_empty_btn_lbl[page]);
   lv_obj_align(c4_empty_btn[page], LV_ALIGN_BOTTOM_MID, 0, -40);
-}
-
-lv_obj_t* c4_make_badge(lv_obj_t* card) {
-  lv_obj_t* p = lv_obj_create(card);
-  lv_obj_set_size(p, LV_SIZE_CONTENT, 22);
-  lv_obj_set_style_radius(p, 11, 0);
-  lv_obj_set_style_bg_color(p, lv_color_hex(kAmber), 0);
-  lv_obj_set_style_bg_opa(p, LV_OPA_20, 0);
-  lv_obj_set_style_border_width(p, 1, 0);
-  lv_obj_set_style_border_color(p, lv_color_hex(kAmber), 0);
-  lv_obj_set_style_pad_hor(p, 8, 0);
-  lv_obj_set_style_pad_ver(p, 1, 0);
-  lv_obj_clear_flag(p, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_clear_flag(p, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_t* t = make_label(p, &font_inter_14, lv_color_hex(kAmber));
-  lv_label_set_text(t, "Beispieldaten");
-  lv_obj_center(t);
-  lv_obj_align(p, LV_ALIGN_TOP_RIGHT, -14, 10);
-  return p;
 }
 
 void c4_site_build(lv_obj_t* c, C4SiteTbl* t, int rows, const char* const* names) {
@@ -271,7 +251,6 @@ void build_co4_screens(lv_obj_t* screen) {
   c4_build_common(r, 0);
   lv_obj_t* c = en_card(c4_body[0], 56, 196);
   en_lbl(c, &font_inter_sb16, kText, 18, 12, "Heute");
-  c4_badge[0] = c4_make_badge(c);
   c4_sum = en_lbl(c, &font_inter_14, kTextDim, 18, 36, "");
   lv_obj_set_width(c4_sum, 396);
   lv_label_set_long_mode(c4_sum, LV_LABEL_LONG_DOT);
@@ -331,7 +310,6 @@ void build_co4_screens(lv_obj_t* screen) {
   c4_build_common(r, 1);
   c = en_card(c4_body[1], 56, 182);
   en_lbl(c, &font_inter_sb16, kText, 18, 12, "Dieser Monat");
-  c4_badge[1] = c4_make_badge(c);
   c4_mtot = en_lbl(c, &font_inter_14, kTextDim, 18, 36, "");
   lv_obj_set_width(c4_mtot, 396);
   lv_label_set_long_mode(c4_mtot, LV_LABEL_LONG_DOT);
@@ -520,26 +498,25 @@ void co4_refresh_verlauf(int64_t now_ms) {
 void co4_refresh_dash() {
   const int p = co4_page;
   const Co4View& v = *co4_v;
-  const bool demo = v.mode == Co4Mode::Demo;
   bool have = co4_get_data(co4_d);
   lv_obj_t* st = c4_status[p];
   // On the Co4 header bar (gradient) the status is white / light amber.
   const uint32_t c_dim = g_theme->header_bar ? 0xFFFFFF : kTextDim;
   const uint32_t c_warn = g_theme->header_bar ? 0xFFD27A : kAmber;
   lv_obj_set_style_text_color(st, lv_color_hex(c_dim), 0);
-  if (!demo && (v.state == Co4State::NoLogin || v.state == Co4State::Starting || v.state == Co4State::Code)) {
+  if ((v.state == Co4State::NoLogin || v.state == Co4State::Starting || v.state == Co4State::Code)) {
     lv_label_set_text(st, "");
     c4_set_empty(p, "Co4 nicht verbunden",
                  "Melde das Panel einmal bei Co4 an. Danach zeigt es hier die Energiedaten deiner Zone.",
                  "Co4 verbinden");
     return;
   }
-  if (!demo && v.state == Co4State::Expired) {
+  if (v.state == Co4State::Expired) {
     lv_label_set_text(st, "");
     c4_set_empty(p, "Co4-Anmeldung abgelaufen", "Bitte melde das Panel erneut bei Co4 an.", "Erneut anmelden");
     return;
   }
-  if (!demo && !v.zone_set) {
+  if (!v.zone_set) {
     lv_label_set_text(st, "");
     c4_set_empty(p, "Keine Zone gew\xC3\xA4hlt", "W\xC3\xA4hle einmal die Zone, deren Energiedaten das Panel zeigt.",
                  "Zone w\xC3\xA4hlen");
@@ -562,13 +539,9 @@ void co4_refresh_dash() {
   if (v.fetch == Co4Fetch::Offline) {
     lv_label_set_text_fmt(st, "Offline \xE2\x80\x93 Stand %s", hm);
     lv_obj_set_style_text_color(st, lv_color_hex(c_warn), 0);
-  } else if (demo) {
-    lv_label_set_text_fmt(st, "Demo \xC2\xB7 Stand %s", hm);
   } else {
     lv_label_set_text_fmt(st, "%s \xC2\xB7 %s", v.zone_name[0] ? v.zone_name : "Zone", hm);
   }
-  if (co4_d->example) show(c4_badge[p]);
-  else hide(c4_badge[p]);
   const int64_t now = static_cast<int64_t>(time(nullptr)) * 1000;
   if (p == 0) co4_refresh_heute(now);
   else co4_refresh_verlauf(now);
@@ -625,14 +598,6 @@ void build_co4_confirm(lv_obj_t* screen) {
   hide(co4_confirm);
 }
 
-const char* co4_mode_text(Co4Mode m) {
-  switch (m) {
-    case Co4Mode::Live: return "Co4 (Live-Messreihen)";
-    case Co4Mode::Fixture: return "Beispieldaten (nach Anmeldung)";
-    default: return "Beispieldaten ohne Anmeldung (Demo)";
-  }
-}
-
 void co4set_refresh() {
   if (co4set_root == nullptr) return;
   co4_get(co4_v);
@@ -648,13 +613,12 @@ void co4set_refresh() {
   }
   if (v.zone_set) lv_label_set_text(co4set_val[1], v.zone_name[0] ? v.zone_name : "gew\xC3\xA4hlt");
   else lv_label_set_text(co4set_val[1], "keine gew\xC3\xA4hlt");
-  lv_label_set_text(co4set_val[2], co4_mode_text(v.mode));
   if (v.have_data) {
     char hm[8];
     fmt_hm(hm, sizeof(hm), v.data_ms / 1000);
-    lv_label_set_text_fmt(co4set_val[3], "%s \xC2\xB7 Stand %s", v.fetch == Co4Fetch::Offline ? "Offline" : "Daten ok", hm);
+    lv_label_set_text_fmt(co4set_val[2], "%s \xC2\xB7 Stand %s", v.fetch == Co4Fetch::Offline ? "Offline" : "Daten ok", hm);
   } else {
-    lv_label_set_text(co4set_val[3], v.fetch == Co4Fetch::Offline ? (v.data_err[0] ? v.data_err : "Offline") : "noch keine Daten");
+    lv_label_set_text(co4set_val[2], v.fetch == Co4Fetch::Offline ? (v.data_err[0] ? v.data_err : "Offline") : "noch keine Daten");
   }
   if (v.token_set || v.state == Co4State::LoggedIn) lv_obj_clear_state(co4_logout_row, LV_STATE_DISABLED);
   else lv_obj_add_state(co4_logout_row, LV_STATE_DISABLED);
@@ -689,10 +653,8 @@ void on_co4set_row(lv_event_t* e) {
   } else if (row == 1) {
     co4_open_zones();
   } else if (row == 2) {
-    co4_set_mode(static_cast<Co4Mode>((static_cast<int>(co4_v->mode) + 1) % 3));
-  } else if (row == 3) {
     co4_enter(0);
-  } else if (row == 4) {
+  } else if (row == 3) {
     show(co4_confirm);
     lv_obj_move_foreground(co4_confirm);
   }
@@ -977,12 +939,11 @@ void build_co4set_screen(lv_obj_t* screen) {
   const Row rows[kCo4SetRows] = {
       {"Co4-Konto", ICON_ROUTER, kAccent, "co4:acct"},
       {"Zone", ICON_PLACE, kGreen, "co4:zone"},
-      {"Datenquelle", ICON_MEMORY, kAmber, "co4:src"},
       {"Co4 Energie \xC3\xB6" "ffnen", ICON_BOLT, kGreen, "co4:open"},
   };
   for (int i = 0; i < kCo4SetRows; ++i)
     make_value_row(list, 0, rows[i].name, rows[i].icon, rows[i].color, on_co4set_row, i, rows[i].key, &co4set_val[i]);
-  co4_logout_row = make_row(list, 56, nullptr, 0, on_co4set_row, 4);
+  co4_logout_row = make_row(list, 56, nullptr, 0, on_co4set_row, 3);
   reg("co4:logout", co4_logout_row);
   lv_obj_t* l = make_label(co4_logout_row, &font_inter_sb16, lv_color_hex(kRed));
   lv_label_set_text(l, "Co4 abmelden");

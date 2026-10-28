@@ -89,8 +89,6 @@ bool co4_bff_nav_path(char* out, size_t n, const char* soid);
 // roots: true for a co4CoreNavRoots answer. Fills out->n/total/it, sorted by name
 // (path/depth untouched). Only id, name, natures and hasChildren are kept.
 bool co4_bff_parse_nav(const char* json, size_t len, bool roots, Co4NavLevel* out, char* err, size_t err_n);
-// BEISPIELDATEN: placeholder tree in the same answer format (no real objects/IDs).
-bool co4_bff_nav_fixture(const char* soid, Co4NavLevel* out, char* err, size_t err_n);
 
 // kWh per block -> mean kW over the block.
 void co4_bff_energy_to_power(float* v, int n, int64_t step_ms);
