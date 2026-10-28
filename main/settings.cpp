@@ -237,7 +237,21 @@ TimeSettings settings_load_time() {
   bool ok = get_str(h, "ntp_srv", n.server, sizeof(n.server)) && n.server[0] != '\0' &&
             get_str(h, "tz_name", n.tz_name, sizeof(n.tz_name)) && get_str(h, "tz_posix", n.tz, sizeof(n.tz)) &&
             n.tz[0] != '\0';
+  // One-time reset to the Zurich default: earlier test builds could leave another zone stored.
+  // Choices saved after this migration (tz_rev=1) are kept as the user picked them.
+  uint8_t rev = 0;
+  bool migrated = nvs_get_u8(h, "tz_rev", &rev) == ESP_OK && rev >= 1;
   nvs_close(h);
+  if (!migrated) {
+    if (ok) snprintf(t.server, sizeof(t.server), "%s", n.server);
+    Tx tx;
+    tx.str("ntp_srv", t.server);
+    tx.str("tz_name", t.tz_name);
+    tx.str("tz_posix", t.tz);
+    tx.u8("tz_rev", 1);
+    tx.commit();
+    return t;
+  }
   return ok ? n : t;
 }
 
@@ -246,6 +260,7 @@ bool settings_save_time(const TimeSettings& t) {
   tx.str("ntp_srv", t.server);
   tx.str("tz_name", t.tz_name);
   tx.str("tz_posix", t.tz);
+  tx.u8("tz_rev", 1);
   return tx.commit();
 }
 
