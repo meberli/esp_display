@@ -614,7 +614,7 @@ void fill_wifi_list() {
     lv_obj_t* row = make_row(wl_list, 56, bars, kCyan, on_wifi_row, i);
     lv_obj_t* name = make_label(row, &font_inter_sb16, lv_color_hex(kText));
     lv_obj_set_width(name, 260);
-    lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
+    label_dot1(name);
     lv_label_set_text(name, ap.ssid);
     lv_obj_align(name, LV_ALIGN_LEFT_MID, 54, 0);
     char info[24];
@@ -731,7 +731,7 @@ void fill_loc_list() {
     lv_obj_align(name, LV_ALIGN_TOP_LEFT, 54, 10);
     lv_obj_t* reg_l = make_label(row, &font_inter_14, lv_color_hex(kTextDim));
     lv_obj_set_width(reg_l, 340);
-    lv_label_set_long_mode(reg_l, LV_LABEL_LONG_DOT);
+    label_dot1(reg_l);
     lv_label_set_text(reg_l, ui_places[i].region);
     lv_obj_align(reg_l, LV_ALIGN_BOTTOM_LEFT, 54, -10);
     char key[16];
@@ -948,7 +948,7 @@ void make_set_row(lv_obj_t* list, const char* name, const char* icon, uint32_t c
   lv_obj_align(l, LV_ALIGN_TOP_LEFT, 56, 13);
   lv_obj_t* v = make_label(row, &font_inter_14, lv_color_hex(kTextDim));
   lv_obj_set_width(v, 320);
-  lv_label_set_long_mode(v, LV_LABEL_LONG_DOT);
+  label_dot1(v);
   lv_obj_align(v, LV_ALIGN_BOTTOM_LEFT, 56, -13);
   if (val != nullptr) *val = v;
   else lv_label_set_text(v, "");
@@ -1045,7 +1045,7 @@ void build_settings_screens(lv_obj_t* screen) {
   lv_obj_t* hd = make_label(hint_row, &font_inter_14, lv_color_hex(kTextDim));
   lv_label_set_text(hd, "Bei Schwarz: dezentes \"wake me up\"");
   lv_obj_set_width(hd, 320);
-  lv_label_set_long_mode(hd, LV_LABEL_LONG_DOT);
+  label_dot1(hd);
   lv_obj_align(hd, LV_ALIGN_BOTTOM_LEFT, 16, -16);
   disp_hint_sw = lv_switch_create(hint_row);
   lv_obj_set_size(disp_hint_sw, 60, 32);

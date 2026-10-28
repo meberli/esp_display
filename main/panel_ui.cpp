@@ -446,6 +446,13 @@ lv_obj_t* make_label(lv_obj_t* parent, const lv_font_t* font, lv_color_t color) 
   return label;
 }
 
+// One line cut with "...": LONG_DOT only dots when the height is fixed; with the default
+// content height LVGL wraps instead (overlapping title/subtitle rows on the settings list).
+void label_dot1(lv_obj_t* l) {
+  lv_label_set_long_mode(l, LV_LABEL_LONG_DOT);
+  lv_obj_set_height(l, lv_font_get_line_height(lv_obj_get_style_text_font(l, LV_PART_MAIN)));
+}
+
 void hide(lv_obj_t* obj) {
   if (obj != nullptr) {
     lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);

@@ -673,9 +673,10 @@ void home_chips_refresh() {
     char day[24], hm[8];
     fmt_day_short(day, sizeof(day), e.start);
     fmt_hm(hm, sizeof(hm), e.start);
-    if (e.all_day) lv_label_set_text(chip_cal_top, day);
-    else lv_label_set_text_fmt(chip_cal_top, "%s %s", day, hm);
-    lv_label_set_text(chip_cal_main, e.title);
+    // The 90 px top line only fits the day ("Sa 31.10."); the time leads the 2-line main text.
+    lv_label_set_text(chip_cal_top, day);
+    if (e.all_day) lv_label_set_text(chip_cal_main, e.title);
+    else lv_label_set_text_fmt(chip_cal_main, "%s %s", hm, e.title);
   } else if (cal->n_waste > (waste_done_today(cal->waste[0]) ? 1 : 0)) {
     const CalEvent& w = cal->waste[waste_done_today(cal->waste[0]) ? 1 : 0];
     char day[24];
@@ -713,7 +714,7 @@ lv_obj_t* make_chip(lv_obj_t* parent, int x, int which, const char* key, uint32_
   *top = make_label(c, &font_inter_14, lv_color_hex(kTextDim));
   lv_obj_set_pos(*top, 40, 15);
   lv_obj_set_width(*top, w - 46);
-  lv_label_set_long_mode(*top, LV_LABEL_LONG_DOT);
+  label_dot1(*top);
   // Two lines of 14 px text, cut with "..." only after the second line.
   *main = make_label(c, &font_inter_14, lv_color_hex(kText));
   lv_obj_set_pos(*main, 12, 38);
@@ -736,7 +737,7 @@ void build_home_info(lv_obj_t* weather_card) {
   chip_en_sub = make_label(en_tile, &font_inter_14, lv_color_hex(kTextDim));
   lv_obj_set_pos(chip_en_sub, 12, 56);
   lv_obj_set_width(chip_en_sub, 136 - 22);
-  lv_label_set_long_mode(chip_en_sub, LV_LABEL_LONG_DOT);
+  label_dot1(chip_en_sub);
 
   home_warn = lv_btn_create(weather_card);
   lv_obj_set_size(home_warn, LV_SIZE_CONTENT, 34);
@@ -1181,7 +1182,7 @@ lv_obj_t* make_value_row(lv_obj_t* parent, int y, const char* name, const char* 
   lv_obj_align(n, LV_ALIGN_TOP_LEFT, icon != nullptr ? 56 : 16, 13);
   *val = make_label(row, &font_inter_14, lv_color_hex(kTextDim));
   lv_obj_set_width(*val, 330);
-  lv_label_set_long_mode(*val, LV_LABEL_LONG_DOT);
+  label_dot1(*val);
   lv_obj_align(*val, LV_ALIGN_BOTTOM_LEFT, icon != nullptr ? 56 : 16, -13);
   return row;
 }
@@ -1412,7 +1413,7 @@ void build_info_screens(lv_obj_t* screen) {
     maint_val[i] = make_label(box, &font_inter_14, lv_color_hex(kText));
     lv_obj_set_pos(maint_val[i], 124, 10 + i * 25);
     lv_obj_set_width(maint_val[i], 300);
-    lv_label_set_long_mode(maint_val[i], LV_LABEL_LONG_DOT);
+    label_dot1(maint_val[i]);
   }
   lv_obj_t* web = make_value_row(maint_root, 254, "Web-Wartung", ICON_ROUTER, kTeal, on_maint_btn, 0, "maint:web",
                                  &maint_web_lbl);
@@ -1429,12 +1430,12 @@ void build_info_screens(lv_obj_t* screen) {
   reg("maint:ota", upd);
   maint_ota_title = make_label(upd, &font_inter_sb16, lv_color_hex(kText));
   lv_obj_set_width(maint_ota_title, 350);
-  lv_label_set_long_mode(maint_ota_title, LV_LABEL_LONG_DOT);
+  label_dot1(maint_ota_title);
   lv_label_set_text(maint_ota_title, "Firmware pr\xC3\xBC" "fen");
   lv_obj_align(maint_ota_title, LV_ALIGN_TOP_LEFT, 56, 13);
   maint_ota_lbl = make_label(upd, &font_inter_14, lv_color_hex(kTextDim));
   lv_obj_set_width(maint_ota_lbl, 350);
-  lv_label_set_long_mode(maint_ota_lbl, LV_LABEL_LONG_DOT);
+  label_dot1(maint_ota_lbl);
   lv_obj_align(maint_ota_lbl, LV_ALIGN_BOTTOM_LEFT, 56, -13);
   // Advanced: own update URL (checked the same way, by the image version).
   lv_obj_t* url = make_row(maint_root, 50, ICON_PUBLIC, kAccent, on_maint_btn, 1);
@@ -1445,7 +1446,7 @@ void build_info_screens(lv_obj_t* screen) {
   lv_obj_align(uln, LV_ALIGN_LEFT_MID, 56, 0);
   maint_url_val = make_label(url, &font_inter_14, lv_color_hex(kTextDim));
   lv_obj_set_width(maint_url_val, 250);
-  lv_label_set_long_mode(maint_url_val, LV_LABEL_LONG_DOT);
+  label_dot1(maint_url_val);
   lv_obj_align(maint_url_val, LV_ALIGN_RIGHT_MID, -16, 0);
   build_web_confirm();
 }
