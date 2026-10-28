@@ -208,6 +208,22 @@ bool co4_bff_parse_zones(const char* json, size_t len, const char* site_niid, Co
   return true;
 }
 
+void co4_bff_fill_gaps(float* v, int cap, int n) {
+  if (n > cap) n = cap;
+  int last = -1;
+  for (int s = 0; s < kCo4SeriesN; ++s)
+    for (int i = 0; i < n; ++i)
+      if (!isnan(v[s * cap + i]) && i > last) last = i;
+  for (int s = 0; s < kCo4SeriesN; ++s) {
+    float* d = v + s * cap;
+    bool any = false;
+    for (int i = 0; i < n && !any; ++i) any = !isnan(d[i]);
+    if (!any) continue;
+    for (int i = 0; i <= last; ++i)
+      if (isnan(d[i])) d[i] = 0.0f;
+  }
+}
+
 void co4_bff_energy_to_power(float* v, int n, int64_t step_ms) {
   if (step_ms <= 0) return;
   const float f = 3600000.0f / static_cast<float>(step_ms);

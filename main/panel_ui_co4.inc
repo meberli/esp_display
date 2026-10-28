@@ -192,6 +192,22 @@ float c4_vsum(const float* v, int from, int to, bool* has) {
   return s;
 }
 
+// Zone blocks have no PV production, only the PV energy the ZEV allocated to the
+// zone (kCo4Eigen). That is what "PV" shows for a zone.
+Co4Series c4_pv_key(const float* pv, int n) {
+  for (int i = 0; i < n; ++i)
+    if (!isnan(pv[i])) return kCo4Pv;
+  return kCo4Eigen;
+}
+
+// Eigenverbrauchsquote (selfConsumption / pvProduction) only exists for the
+// whole site: false if the site block is not there or has no PV.
+bool c4_site_self(const Co4SiteData& sd, const Co4Totals& b, int from, int to, Co4Ratio* r) {
+  *r = {};
+  if (sd.state != Co4SiteState::Ok || from < 0) return false;
+  return co4_ratio(b.v, from, to > b.n ? b.n : to, r) && r->sum[kCo4Pv] > 0.0f;
+}
+
 // ranges: per row the block and [from, to) of the energy totals.
 void c4_site_show(C4SiteTbl* t, const Co4SiteData& sd, const Co4Totals* const* blk, const int* from, const int* to) {
   const char* msg = nullptr;
@@ -384,22 +400,23 @@ void co4_refresh_heute(int64_t now_ms) {
   const int top = vmax > 0 ? static_cast<int>(vmax * 100.0f * 1.1f) + 1 : 100;
   const int bot = vmin < 0 ? static_cast<int>(vmin * 100.0f * 1.1f) - 1 : 0;
   lv_chart_set_range(c4_chart, LV_CHART_AXIS_PRIMARY_Y, bot, top);
-  const Co4Series map[4] = {kCo4Pv, kCo4Bezug, kCo4Einspeisung, kCo4BatEntladen};
+  const Co4Series pvk = c4_pv_key(day.v[kCo4Pv], day.n);
+  const Co4Series map[4] = {pvk, kCo4Bezug, kCo4Einspeisung, kCo4BatEntladen};
   int peak_i = -1;
   for (int k = 0; k < 4; ++k) {
     for (int i = 0; i < kCo4MaxPoints; ++i) {
       float x = i < day.n ? day.v[map[k]][i] : NAN;
       c4_ser[k]->y_points[i] = x == x ? static_cast<lv_coord_t>(lroundf(fmaxf(-lim, fminf(lim, x)) * 100.0f))
                                       : LV_CHART_POINT_NONE;
-      if (k == 0 && x == x && (peak_i < 0 || x > day.v[kCo4Pv][peak_i])) peak_i = i;
+      if (k == 0 && x == x && (peak_i < 0 || x > day.v[pvk][peak_i])) peak_i = i;
     }
   }
   lv_chart_refresh(c4_chart);
-  if (peak_i >= 0 && day.v[kCo4Pv][peak_i] > 0) {
+  if (peak_i >= 0 && day.v[pvk][peak_i] > 0) {
     char hm[8];
     fmt_hm(hm, sizeof(hm), (day.t0_ms + static_cast<int64_t>(peak_i) * day.step_ms) / 1000);
     char pk[48];  // LVGL's own printf has no %f (LV_SPRINTF_USE_FLOAT off)
-    snprintf(pk, sizeof(pk), "PV max %.1f kW \xC2\xB7 %s", static_cast<double>(day.v[kCo4Pv][peak_i]), hm);
+    snprintf(pk, sizeof(pk), "PV max %.1f kW \xC2\xB7 %s", static_cast<double>(day.v[pvk][peak_i]), hm);
     lv_label_set_text(c4_peak, pk);
   } else {
     lv_label_set_text(c4_peak, "");
@@ -409,26 +426,39 @@ void co4_refresh_heute(int64_t now_ms) {
   int ti = co4_index(d.t0_ms, d.step_ms, d.n, now_ms);
   Co4Ratio rt = {};
   bool ok = ti >= 0 && co4_ratio(d.v, ti, ti + 1, &rt);
+  const Co4Series dpk = c4_pv_key(d.v[kCo4Pv], d.n);
+  bool has_es = false;
+  if (ok) c4_vsum(d.v[kCo4Einspeisung], ti, ti + 1, &has_es);
   char pv[16], bz[16], es[16];
-  co4_fmt_kwh(pv, sizeof(pv), rt.sum[kCo4Pv]);
+  co4_fmt_kwh(pv, sizeof(pv), rt.sum[dpk]);
   co4_fmt_kwh(bz, sizeof(bz), rt.sum[kCo4Bezug]);
-  co4_fmt_kwh(es, sizeof(es), rt.sum[kCo4Einspeisung]);
+  if (has_es) co4_fmt_kwh(es, sizeof(es), rt.sum[kCo4Einspeisung]);
+  else snprintf(es, sizeof(es), "\xE2\x80\x93");  // a zone feeds nothing in itself
   if (ok)
     lv_label_set_text_fmt(c4_sum, "#%06X PV# %s \xC2\xB7 #%06X Bezug# %s \xC2\xB7 #%06X Einspeisung# %s",
                           static_cast<unsigned>(kGreen), pv, static_cast<unsigned>(kAmber), bz,
                           static_cast<unsigned>(kAccent), es);
   else lv_label_set_text(c4_sum, "Noch keine Tageswerte");
-  const float pct[2] = {rt.autarky_pct, rt.self_pct};
+  // Autarkie: zone (PV to the zone / (that + Bezug)). Eigenverbrauch: the
+  // site's PV used on site / PV produced (a zone produces nothing itself).
+  Co4Ratio srt = {};
+  const Co4SiteData& sdd = co4_d->site;
+  bool sok = dpk == kCo4Pv ? (ok && rt.sum[kCo4Pv] > 0.0f)
+                           : c4_site_self(sdd, sdd.days, co4_index(sdd.days.t0_ms, sdd.days.step_ms, sdd.days.n, now_ms),
+                                          co4_index(sdd.days.t0_ms, sdd.days.step_ms, sdd.days.n, now_ms) + 1, &srt);
+  if (dpk == kCo4Pv) srt = rt;
+  const bool okp[2] = {ok, sok};
+  const float pct[2] = {rt.autarky_pct, srt.self_pct};
   char e1[16];
-  co4_fmt_kwh(e1, sizeof(e1), rt.sum[kCo4Eigen]);
+  co4_fmt_kwh(e1, sizeof(e1), srt.sum[kCo4Eigen]);
   for (int i = 0; i < 2; ++i) {
-    lv_arc_set_value(c4_arc[i], ok ? static_cast<int16_t>(pct[i] * 10.0f) : 0);
-    if (ok) lv_label_set_text_fmt(c4_pct[i], "%d %%", static_cast<int>(pct[i] + 0.5f));
+    lv_arc_set_value(c4_arc[i], okp[i] ? static_cast<int16_t>(pct[i] * 10.0f) : 0);
+    if (okp[i]) lv_label_set_text_fmt(c4_pct[i], "%d %%", static_cast<int>(pct[i] + 0.5f));
     else lv_label_set_text(c4_pct[i], "\xE2\x80\x93");
   }
   lv_label_set_text(c4_arc_sub[0], ok ? "vom Verbrauch aus PV" : "");
-  if (ok) lv_label_set_text_fmt(c4_arc_sub[1], "der PV selbst genutzt\n%s", e1);
-  else lv_label_set_text(c4_arc_sub[1], "");
+  if (sok) lv_label_set_text_fmt(c4_arc_sub[1], dpk == kCo4Pv ? "der PV selbst genutzt\n%s" : "der Site-PV vor Ort\ngenutzt: %s", e1);
+  else lv_label_set_text(c4_arc_sub[1], ok ? "Site-Werte fehlen" : "");
   const Co4SiteData& sd = co4_d->site;
   const Co4Totals* sb[1] = {&sd.days};
   int si = co4_index(sd.days.t0_ms, sd.days.step_ms, sd.days.n, now_ms);
@@ -438,9 +468,10 @@ void co4_refresh_heute(int64_t now_ms) {
 
 void co4_refresh_verlauf(int64_t now_ms) {
   const Co4Totals& d = co4_d->days;
+  const Co4Series dk = c4_pv_key(d.v[kCo4Pv], d.n);
   float max = 0;
   for (int i = 0; i < d.n; ++i) {
-    if (d.v[kCo4Pv][i] > max) max = d.v[kCo4Pv][i];
+    if (d.v[dk][i] > max) max = d.v[dk][i];
     if (d.v[kCo4Bezug][i] > max) max = d.v[kCo4Bezug][i];
   }
   for (int i = 0; i < 31; ++i) {
@@ -450,7 +481,7 @@ void co4_refresh_verlauf(int64_t now_ms) {
       hide(c4_dbz[i]);
       continue;
     }
-    c4_bar_pair(c4_dpv[i], c4_dbz[i], kC4DayBase + 40, kC4DayH, d.v[kCo4Pv][i], d.v[kCo4Bezug][i], max);
+    c4_bar_pair(c4_dpv[i], c4_dbz[i], kC4DayBase + 40, kC4DayH, d.v[dk][i], d.v[kCo4Bezug][i], max);
   }
   const int last = d.n > 20 ? d.n : 31;  // last day of the month
   lv_label_set_text_fmt(c4_dlbl[3], "%d", last);
@@ -458,7 +489,7 @@ void co4_refresh_verlauf(int64_t now_ms) {
   Co4Ratio r = {};
   char pv[16], bz[16];
   if (co4_ratio(d.v, 0, d.n, &r)) {
-    co4_fmt_kwh(pv, sizeof(pv), r.sum[kCo4Pv]);
+    co4_fmt_kwh(pv, sizeof(pv), r.sum[dk]);
     co4_fmt_kwh(bz, sizeof(bz), r.sum[kCo4Bezug]);
     lv_label_set_text_fmt(c4_mtot, "PV %s \xC2\xB7 Bezug %s \xC2\xB7 Autarkie %d %%", pv, bz,
                           static_cast<int>(r.autarky_pct + 0.5f));
@@ -466,9 +497,10 @@ void co4_refresh_verlauf(int64_t now_ms) {
     lv_label_set_text(c4_mtot, "Noch keine Monatswerte");
   }
   const Co4Totals& m = co4_d->months;
+  const Co4Series mk = c4_pv_key(m.v[kCo4Pv], m.n);
   max = 0;
   for (int i = 0; i < m.n; ++i) {
-    if (m.v[kCo4Pv][i] > max) max = m.v[kCo4Pv][i];
+    if (m.v[mk][i] > max) max = m.v[mk][i];
     if (m.v[kCo4Bezug][i] > max) max = m.v[kCo4Bezug][i];
   }
   for (int i = 0; i < 12; ++i) {
@@ -477,14 +509,22 @@ void co4_refresh_verlauf(int64_t now_ms) {
       hide(c4_mbz[i]);
       continue;
     }
-    c4_bar_pair(c4_mpv[i], c4_mbz[i], kC4MonBase + 30, kC4MonH, m.v[kCo4Pv][i], m.v[kCo4Bezug][i], max);
+    c4_bar_pair(c4_mpv[i], c4_mbz[i], kC4MonBase + 30, kC4MonH, m.v[mk][i], m.v[kCo4Bezug][i], max);
   }
   r = {};
   if (co4_ratio(m.v, 0, m.n, &r)) {
-    co4_fmt_kwh(pv, sizeof(pv), r.sum[kCo4Pv]);
+    co4_fmt_kwh(pv, sizeof(pv), r.sum[mk]);
     co4_fmt_kwh(bz, sizeof(bz), r.sum[kCo4Bezug]);
-    lv_label_set_text_fmt(c4_ytot, "PV %s \xC2\xB7 Bezug %s \xC2\xB7 Eigenverbrauch %d %%", pv, bz,
-                          static_cast<int>(r.self_pct + 0.5f));
+    Co4Ratio sr = {};
+    bool sok = mk == kCo4Pv ? r.sum[kCo4Pv] > 0.0f
+                            : c4_site_self(co4_d->site, co4_d->site.months, 0, co4_d->site.months.n, &sr);
+    if (mk == kCo4Pv) sr = r;
+    if (sok)
+      lv_label_set_text_fmt(c4_ytot, "PV %s \xC2\xB7 Bezug %s \xC2\xB7 Eigenverbrauch%s %d %%", pv, bz,
+                            mk == kCo4Pv ? "" : " Site", static_cast<int>(sr.self_pct + 0.5f));
+    else
+      lv_label_set_text_fmt(c4_ytot, "PV %s \xC2\xB7 Bezug %s \xC2\xB7 Autarkie %d %%", pv, bz,
+                            static_cast<int>(r.autarky_pct + 0.5f));
   } else {
     lv_label_set_text(c4_ytot, "Noch keine Jahreswerte");
   }
