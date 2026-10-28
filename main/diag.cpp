@@ -279,7 +279,7 @@ void scan_wifi() {
 bool read_only(const char* line) {
   return strcmp(line, "DIAGGT") == 0 || strcmp(line, "DIAGHW") == 0 || strcmp(line, "DIAGFB") == 0 || strcmp(line, "DIAGSTATS") == 0 ||
          strcmp(line, "DIAGSTACK") == 0 || strcmp(line, "DIAGENERGY") == 0 || strcmp(line, "DIAGHEALTH") == 0 ||
-         strcmp(line, "DIAGCO4EN") == 0 || strcmp(line, "DIAGCO4") == 0 || strcmp(line, "SCANWIFI") == 0;
+         strcmp(line, "DIAGCO4EN") == 0 || strcmp(line, "DIAGCO4") == 0 || strcmp(line, "DIAGTIME") == 0 || strcmp(line, "SCANWIFI") == 0;
 }
 
 void handle(const char* line) {
@@ -326,6 +326,15 @@ void handle(const char* line) {
   } else if (sscanf(line, "DIAGSAVER %d", &a) == 1 && a >= 0 && a <= 2) {
     ui_saver_runtime(a);  // this boot only: the saved setting is not touched
     console_puts("DIAG OK");
+  } else if (strcmp(line, "DIAGTIME") == 0) {
+    // Active POSIX TZ and the local time the UI shows (read-only).
+    time_t now = time(nullptr);
+    struct tm lt;
+    localtime_r(&now, &lt);
+    const char* tz = getenv("TZ");
+    console_printf("DIAG time tz=%s local=%04d-%02d-%02d %02d:%02d:%02d dst=%d synced=%d\n", tz != nullptr ? tz : "-",
+                   lt.tm_year + 1900, lt.tm_mon + 1, lt.tm_mday, lt.tm_hour, lt.tm_min, lt.tm_sec, lt.tm_isdst,
+                   clock_synced() ? 1 : 0);
   } else if (strncmp(line, "DIAGVER", 7) == 0) {
     // Pretend to run another version for the update check (this boot only).
     const char* v = line[7] == ' ' ? line + 8 : "";
