@@ -322,7 +322,7 @@ bool co4_bff_parse_nav(const char* json, size_t len, bool roots, Co4NavLevel* ou
   out->n = 0;
   out->total = 0;
   if (err_n > 0) err[0] = '\0';
-  StaticJsonDocument<512> filter;
+  StaticJsonDocument<1024> filter;  // 512 overflowed (dropped filter keys)
   JsonObject it = roots ? filter["data"]["roots"][0].to<JsonObject>()
                         : filter["data"]["object"]["children"][0].to<JsonObject>();
   it["id"] = true;
@@ -335,7 +335,8 @@ bool co4_bff_parse_nav(const char* json, size_t len, bool roots, Co4NavLevel* ou
   filter["errors"][0]["message"] = true;
   filter["error"] = true;
   Doc doc(kDocCap * 2);
-  if (deserializeJson(doc, json, len, DeserializationOption::Filter(filter))) {
+  // Live nav objects nest ~15 levels (parents/permissions), above the default limit of 10.
+  if (deserializeJson(doc, json, len, DeserializationOption::Filter(filter), DeserializationOption::NestingLimit(32))) {
     snprintf(err, err_n, "Antwort unlesbar");
     return false;
   }

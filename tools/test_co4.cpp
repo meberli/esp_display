@@ -119,6 +119,17 @@ static void test_tree() {
   const char* bad = "{\"errors\":[{\"message\":\"x\"}]}";
   CHECK(!co4_bff_parse_nav(bad, strlen(bad), true, &L, err, sizeof(err)) && err[0] != '\0');
   CHECK(!co4_bff_parse_nav("nope", 4, true, &L, err, sizeof(err)));
+  {
+    // Live answers nest ~15 levels (parents/permissions) and carry many keys.
+    std::string deep = "{\"data\":{\"roots\":[{\"id\":9001,\"hasChildren\":true,\"parents\":";
+    for (int i = 0; i < 6; ++i) deep += "[{\"p\":";
+    deep += "1";
+    for (int i = 0; i < 6; ++i) deep += "}]";
+    deep += ",\"permissions\":{\"a\":true,\"b\":false},\"properties\":[{\"label\":\"name\",\"value\":\"Platzhalter\"}],"
+            "\"natures\":[{\"id\":9002,\"nature\":{\"code\":\"zev_Zone\"}}]}]}}";
+    CHECK(co4_bff_parse_nav(deep.c_str(), deep.size(), true, &L, err, sizeof(err)) && L.n == 1);
+    CHECK(L.it[0].zone[0] != '\0');
+  }
   const char* nobj = "{\"data\":{\"object\":null}}";
   CHECK(!co4_bff_parse_nav(nobj, strlen(nobj), false, &L, err, sizeof(err)));
   // more children than kept: counted, list cut
