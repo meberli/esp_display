@@ -627,7 +627,7 @@ void build_co4_confirm(lv_obj_t* screen) {
 
 const char* co4_mode_text(Co4Mode m) {
   switch (m) {
-    case Co4Mode::Live: return "Co4 (Messreihen noch nicht angebunden)";
+    case Co4Mode::Live: return "Co4 (Live-Messreihen)";
     case Co4Mode::Fixture: return "Beispieldaten (nach Anmeldung)";
     default: return "Beispieldaten ohne Anmeldung (Demo)";
   }

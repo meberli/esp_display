@@ -267,6 +267,11 @@ HttpGetResult http_get_raw(const char* url, const char* user, const char* passwo
   cfg.url = url;
   cfg.timeout_ms = timeout_ms;
   cfg.buffer_size = 2048;
+  // Request line + headers are built in buffer_size_tx (default 512). A Co4
+  // bearer JWT alone is ~1.4 KB, so size it from URL + extra header.
+  size_t tx = strlen(url) + 512;
+  if (hdr_name != nullptr && hdr_value != nullptr) tx += strlen(hdr_name) + strlen(hdr_value) + 4;
+  cfg.buffer_size_tx = static_cast<int>(tx < 1024 ? 1024 : (tx > 4096 ? 4096 : tx));
   cfg.disable_auto_redirect = true;
   if (strncmp(url, "https://", 8) == 0) {
     cfg.crt_bundle_attach = esp_crt_bundle_attach;
