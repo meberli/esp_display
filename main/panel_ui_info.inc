@@ -490,8 +490,9 @@ lv_obj_t* make_rain_btn(lv_obj_t* parent, const char* key, int size) {
   lv_obj_t* b = lv_btn_create(parent);
   lv_obj_set_size(b, size, size);
   style_glass(b, size / 2);
-  lv_obj_set_style_bg_color(b, lv_color_hex(0x16324A), 0);
-  lv_obj_set_style_bg_grad_color(b, lv_color_hex(0x10263A), 0);
+  // Accent tint over the theme's card colours (Dark Glass and Co4).
+  lv_obj_set_style_bg_color(b, lv_color_mix(lv_color_hex(kAccent), lv_color_hex(kCardTop), LV_OPA_20), 0);
+  lv_obj_set_style_bg_grad_color(b, lv_color_mix(lv_color_hex(kAccent), lv_color_hex(kCardBottom), LV_OPA_10), 0);
   lv_obj_set_style_border_color(b, lv_color_hex(kAccent), 0);
   lv_obj_set_style_border_width(b, 2, 0);
   lv_obj_set_style_border_opa(b, LV_OPA_COVER, 0);

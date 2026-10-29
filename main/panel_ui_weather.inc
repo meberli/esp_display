@@ -1091,6 +1091,12 @@ void on_day_panel(lv_event_t* event) {
 
 void on_msg_wifi(lv_event_t*);
 
+// "Abbrechen" while connecting: main stops the attempt and opens the WLAN selection.
+void on_connect_cancel(lv_event_t*) {
+  if (gesture_consumed) return;
+  connect_cancel_pending = true;
+}
+
 void on_retry(lv_event_t*) {
   if (gesture_consumed) {
     return;

@@ -26,6 +26,8 @@ std::atomic<bool> g_connected{false};
 std::atomic<bool> g_failed{false};
 std::atomic<bool> g_scanning{false};    // no reconnects while a scan runs
 std::atomic<bool> g_hold{false};        // Playground CII mode: stay disconnected
+std::atomic<bool> g_paused{false};      // user: "Abbrechen" / "Ohne Netzwerk starten" (session only)
+bool held() { return g_hold || g_paused; }
 std::atomic<int> g_last_reason{0};      // last WIFI_REASON_* of a disconnect
 std::atomic<int> g_auth_fails{0};       // auth / handshake rejections since wifi_start
 std::atomic<int> g_noap_fails{0};       // "AP not found" since wifi_start
@@ -51,7 +53,7 @@ char g_ssid[33] = "";
 int g_retry = 0;
 esp_timer_handle_t g_retry_timer = nullptr;
 void retry_cb(void*) {
-  if (!g_scanning && !g_hold && g_ssid[0] != '\0' && !g_connected) esp_wifi_connect();
+  if (!g_scanning && !held() && g_ssid[0] != '\0' && !g_connected) esp_wifi_connect();
 }
 void reconnect() {
   int n = g_retry++;
@@ -91,7 +93,7 @@ void on_event(void*, esp_event_base_t base, int32_t id, void* data) {
   if (base == WIFI_EVENT && id == WIFI_EVENT_SCAN_DONE) {
     xEventGroupSetBits(wifi_events(), kBitScan);
   } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
-    if (g_ssid[0] != '\0' && !g_hold) esp_wifi_connect();  // empty SSID: station only for scanning
+    if (g_ssid[0] != '\0' && !held()) esp_wifi_connect();  // empty SSID: station only for scanning
   } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
     if (g_connected) diag_wifi_disconnect();
     g_connected = false;
@@ -118,7 +120,7 @@ void on_event(void*, esp_event_base_t base, int32_t id, void* data) {
     printf("Wi-Fi disconnect reason %d (auth %d, no AP %d)\n", reason, g_auth_fails.load(), g_noap_fails.load());
     // Keep trying (also the saved network after a failed boot); the caller
     // decides when to give up or switch. A scan pauses the retries.
-    if (!g_scanning && !g_hold && g_ssid[0] != '\0') reconnect();
+    if (!g_scanning && !held() && g_ssid[0] != '\0') reconnect();
   } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
     g_connected = true;
     g_failed = false;
@@ -137,6 +139,7 @@ bool wifi_wait(uint32_t ms) {
 }
 
 void wifi_start(const char* ssid, const char* password, const char* hostname) {
+  g_paused = false;  // a new connect request ends a user pause
   static bool inited = false;
   if (!inited) {
     g_netif = esp_netif_create_default_wifi_sta();
@@ -182,10 +185,23 @@ void wifi_hold(bool on) {
     printf("Wi-Fi held (Playground CII mode)\n");
   } else {
     g_retry = 0;
-    if (g_ssid[0] != '\0') esp_wifi_connect();
+    if (g_ssid[0] != '\0' && !g_paused) esp_wifi_connect();
     printf("Wi-Fi released: reconnecting\n");
   }
 }
+void wifi_pause(bool on) {
+  if (on == g_paused) return;
+  g_paused = on;
+  if (on) {
+    if (g_retry_timer != nullptr) esp_timer_stop(g_retry_timer);
+    esp_wifi_disconnect();  // non-blocking: the driver task handles it
+    printf("Wi-Fi paused by the user (session only, saved network kept)\n");
+  } else if (!g_hold) {
+    g_retry = 0;
+    if (g_ssid[0] != '\0') esp_wifi_connect();
+  }
+}
+bool wifi_paused() { return g_paused; }
 bool wifi_failed() { return g_failed; }
 int wifi_auth_fails() { return g_auth_fails; }
 int wifi_noap_fails() { return g_noap_fails; }
@@ -511,7 +527,7 @@ int wifi_scan(WifiAp* out, int cap, uint32_t gen) {
   }
   if (paused) {
     g_scanning = false;
-    if (g_ssid[0] != '\0' && !g_hold) esp_wifi_connect();
+    if (g_ssid[0] != '\0' && !held()) esp_wifi_connect();
   }
   if (scan_cancelled(gen)) {
     printf("Wi-Fi scan %lu cancelled\n", static_cast<unsigned long>(gen));
@@ -541,7 +557,7 @@ int wifi_pin_select(uint8_t ch, uint8_t bssid_out[6], int8_t* rssi_out) {
   sc.ssid = reinterpret_cast<uint8_t*>(g_ssid);
   sc.channel = ch;
   sc.show_hidden = false;
-  bool paused = !g_connected && !g_hold;
+  bool paused = !g_connected && !held();
   g_scanning = true;  // no reconnect while the scan runs (and blocks a UI scan)
   if (paused) {
     if (g_retry_timer != nullptr) esp_timer_stop(g_retry_timer);
@@ -591,7 +607,7 @@ int wifi_pin_select(uint8_t ch, uint8_t bssid_out[6], int8_t* rssi_out) {
     rc = err == ESP_OK ? 0 : -1;
   }
   g_scanning = false;
-  if (paused && g_ssid[0] != '\0' && !g_hold) {
+  if (paused && g_ssid[0] != '\0' && !held()) {
     g_retry = 0;
     esp_wifi_connect();
   }
@@ -615,7 +631,7 @@ bool wifi_pinned(uint8_t bssid[6], uint8_t* ch) {
 bool wifi_pin_lost_take() { return g_pin_lost.exchange(false); }
 
 void wifi_reassoc() {
-  if (g_ssid[0] == '\0' || g_hold || g_scanning) return;
+  if (g_ssid[0] == '\0' || held() || g_scanning) return;
   g_retry = 0;
   esp_wifi_disconnect();  // the disconnect event reconnects with the (new) config
 }

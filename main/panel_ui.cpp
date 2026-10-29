@@ -218,6 +218,14 @@ constexpr uint8_t kHintBacklight = 4;  // percent
 lv_obj_t* wl_root = nullptr;
 lv_obj_t* wl_list = nullptr;
 lv_obj_t* wl_status = nullptr;
+lv_obj_t* wl_banner = nullptr;   // status banner below the header (icon + 2 lines)
+lv_obj_t* wl_icon = nullptr;
+lv_obj_t* wl_offline = nullptr;  // "Ohne Netzwerk starten" (firmware opened the list)
+lv_obj_t* msg_cancel_btn = nullptr;  // "Abbrechen" while connecting
+bool offline_pending = false;
+bool connect_cancel_pending = false;
+enum class WlTone { Busy, Info, Warn };
+void wl_set_status(const char* text, WlTone tone);  // panel_ui_settings.inc
 char wifi_setup_note[96] = "";  // set while the firmware opened the WLAN selection
 lv_obj_t* wp_root = nullptr;
 lv_obj_t* wp_title = nullptr;
@@ -1019,6 +1027,19 @@ static void ui_init_impl() {
   lv_label_set_long_mode(retry_label, LV_LABEL_LONG_WRAP);
   lv_obj_set_style_text_align(retry_label, LV_TEXT_ALIGN_CENTER, 0);
   lv_obj_center(retry_label);
+
+  // "Abbrechen" while connecting: centred, same touch size as the buttons above.
+  msg_cancel_btn = lv_btn_create(message);
+  lv_obj_set_size(msg_cancel_btn, 240, 80);
+  lv_obj_align(msg_cancel_btn, LV_ALIGN_BOTTOM_MID, 0, -16);
+  style_glass(msg_cancel_btn, 20);
+  lv_obj_add_event_cb(msg_cancel_btn, on_connect_cancel, LV_EVENT_CLICKED, nullptr);
+  watch(msg_cancel_btn);
+  reg("msg:cancel", msg_cancel_btn);
+  lv_obj_t* cancel_label = make_label(msg_cancel_btn, &font_inter_20, lv_color_hex(kText));
+  lv_label_set_text(cancel_label, str::kConnectCancel);
+  lv_obj_center(cancel_label);
+  hide(msg_cancel_btn);
   hide(message);
   hide(home_root);
   build_settings_screens(screen);
@@ -1091,6 +1112,7 @@ void ui_show_message(const char* title, const char* body, bool retry) {
     hide(retry_btn);
     hide(msg_wifi_btn);
   }
+  hide(msg_cancel_btn);
   hide_settings();
   message_open = true;
   hide(home_root);
@@ -1192,6 +1214,23 @@ bool ui_take_command(LoxoneCommandRequest* out) {
   }
   *out = pending;
   command_pending = false;
+  return true;
+}
+
+void ui_show_connecting() {
+  ui_show_message(str::kConnectingTitle, str::kConnectingBody, false);
+  show(msg_cancel_btn);
+}
+
+bool ui_take_connect_cancel() {
+  if (!connect_cancel_pending) return false;
+  connect_cancel_pending = false;
+  return true;
+}
+
+bool ui_take_offline() {
+  if (!offline_pending) return false;
+  offline_pending = false;
   return true;
 }
 

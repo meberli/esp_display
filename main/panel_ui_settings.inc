@@ -633,6 +633,34 @@ void fill_wifi_list() {
   }
 }
 
+constexpr int kWlListY = 122;  // below the status banner (58..114)
+
+// Status banner (Dark Glass): icon + up to 2 lines, never clipped.
+void wl_set_status(const char* text, WlTone tone) {
+  lv_label_set_text(wl_status, text != nullptr ? text : "");
+  uint32_t c = tone == WlTone::Warn ? kAmber : tone == WlTone::Busy ? kAccent : kTextDim;
+  lv_label_set_text(wl_icon, tone == WlTone::Warn ? ICON_WARNING : ICON_WIFI3);
+  lv_obj_set_style_text_color(wl_icon, lv_color_hex(c), 0);
+  lv_obj_set_style_border_color(wl_banner, lv_color_hex(tone == WlTone::Warn ? kAmber : kBorder), 0);
+  lv_obj_set_style_border_opa(wl_banner, tone == WlTone::Warn ? LV_OPA_60 : LV_OPA_COVER, 0);
+}
+
+// Opened by the firmware: two button rows (Abbrechen | Nochmals versuchen,
+// then "Ohne Netzwerk starten" full width); otherwise one row.
+void wl_layout(bool setup) {
+  if (setup) {
+    lv_obj_set_size(wl_list, kScreen - 2 * kMargin, 214);
+    lv_obj_set_y(wl_left, 344);
+    lv_obj_set_y(wl_right, 344);
+    show(wl_offline);
+  } else {
+    lv_obj_set_size(wl_list, kScreen - 2 * kMargin, 270);
+    lv_obj_set_y(wl_left, 400);
+    lv_obj_set_y(wl_right, 400);
+    hide(wl_offline);
+  }
+}
+
 void open_wifi_list() {
   nav = Nav::WifiList;
   hide_settings();
@@ -641,7 +669,9 @@ void open_wifi_list() {
   unreg_prefix("wifi:");
   lv_obj_clean(wl_list);
   wl_scanning = true;
-  lv_label_set_text(wl_status, "Suche Netzwerke ...");
+  wl_set_status(wifi_setup_note[0] != '\0' ? wifi_setup_note : "Suche Netzwerke ...",
+                wifi_setup_note[0] != '\0' ? WlTone::Warn : WlTone::Busy);
+  wl_layout(wifi_setup_note[0] != '\0');
   SettingsRequest r = {};
   r.kind = SettingsRequest::Scan;
   r.scan_gen = wl_gen.start();
@@ -658,7 +688,8 @@ void wifi_scan_abort() {
   wl_gen.cancel();
   wl_scanning = false;
   if (settings_pending && settings_req.kind == SettingsRequest::Scan) settings_pending = false;  // not started yet
-  lv_label_set_text(wl_status, str::kWifiScanCancelled);
+  wl_set_status(wifi_setup_note[0] != '\0' ? wifi_setup_note : str::kWifiScanCancelled,
+                wifi_setup_note[0] != '\0' ? WlTone::Warn : WlTone::Info);
 }
 
 // "Abbrechen" / swipe back. Opened by the firmware: back to the error screen
@@ -689,8 +720,15 @@ void on_wl_right(lv_event_t*) {
   // "Nochmals versuchen": reconnect with the saved credentials (main: ui_take_retry).
   wifi_scan_abort();
   nav = Nav::Home;
-  ui_show_message(str::kConnectingTitle, str::kConnectingBody, false);
+  ui_show_connecting();
   retry_pending = true;
+}
+
+// "Ohne Netzwerk starten": main pauses Wi-Fi for this session and shows home.
+void on_wl_offline(lv_event_t*) {
+  if (gesture_consumed) return;
+  wifi_scan_abort();
+  offline_pending = true;
 }
 
 void on_wifi_row(lv_event_t* e) {
@@ -1090,13 +1128,30 @@ void build_settings_screens(lv_obj_t* screen) {
   lv_label_set_long_mode(time_status, LV_LABEL_LONG_DOT);
 
   wl_root = make_screen_root(screen, "WLAN");
-  wl_status = make_label(wl_root, &font_inter_14, lv_color_hex(kTextDim));
-  lv_obj_set_pos(wl_status, 24, 48);
-  lv_obj_set_width(wl_status, 432);
+  wl_banner = lv_obj_create(wl_root);
+  lv_obj_set_pos(wl_banner, kMargin, 58);
+  lv_obj_set_size(wl_banner, kScreen - 2 * kMargin, 56);
+  style_glass(wl_banner, 14);
+  lv_obj_set_style_pad_all(wl_banner, 0, 0);
+  lv_obj_clear_flag(wl_banner, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_clear_flag(wl_banner, LV_OBJ_FLAG_CLICKABLE);
+  wl_icon = make_label(wl_banner, &font_icons_24, lv_color_hex(kCyan));
+  lv_label_set_text(wl_icon, ICON_WIFI3);  // colour set by wl_set_status (theme)
+  lv_obj_align(wl_icon, LV_ALIGN_LEFT_MID, 14, 0);
+  wl_status = make_label(wl_banner, &font_inter_16, lv_color_hex(kText));
+  lv_obj_set_width(wl_status, kScreen - 2 * kMargin - 64);
+  lv_obj_set_height(wl_status, 42);  // 2 lines of 16 px, then "..."
   lv_label_set_long_mode(wl_status, LV_LABEL_LONG_DOT);
-  wl_list = make_list(wl_root, 76, 316);
+  lv_obj_align(wl_status, LV_ALIGN_LEFT_MID, 50, 0);
+  lv_label_set_text(wl_status, "");
+  wl_list = make_list(wl_root, kWlListY, 270);
   wl_left = make_choice(wl_root, kMargin, 400, 214, 56, str::kWifiCancel, on_wl_cancel, 0, "wl:cancel");
   wl_right = make_choice(wl_root, kMargin + 226, 400, 214, 56, str::kWifiRescan, on_wl_right, 0, "wl:retry");
+  wl_offline = make_choice(wl_root, kMargin, 408, kScreen - 2 * kMargin, 52, str::kWifiOffline, on_wl_offline, 0,
+                           "wl:offline");
+  lv_obj_set_style_bg_color(wl_offline, lv_color_hex(kAccent), 0);
+  lv_obj_set_style_bg_opa(wl_offline, LV_OPA_30, 0);
+  hide(wl_offline);
 
   wp_root = make_screen_root(screen, "WLAN");
   wp_title = lv_obj_get_child(wp_root, 0);

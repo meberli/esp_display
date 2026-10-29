@@ -26,7 +26,7 @@ void ui_wifi_scan_done(const WifiAp* aps, int n, uint32_t gen) {
   } else {
     snprintf(t, sizeof(t), ui_ap_n > 0 ? "%d Netzwerke" : "Keine Netzwerke gefunden", ui_ap_n);
   }
-  lv_label_set_text(wl_status, t);
+  wl_set_status(t, wifi_setup_note[0] != '\0' ? WlTone::Warn : WlTone::Info);
   fill_wifi_list();
 }
 
@@ -56,13 +56,13 @@ void ui_wifi_connect_done(bool ok, const char* ssid, const char* current, int st
 bool ui_wifi_busy() { return wp_connecting || (settings_pending && settings_req.kind == SettingsRequest::Connect); }
 
 // Boot without Wi-Fi or saved network unreachable: open the WLAN selection.
-// why: 0 none saved, 1 rejected (password?), 2 not found, 3 timeout.
+// why: 0 none saved, 1 rejected (password?), 2 not found, 3 timeout, 4 cancelled by the user.
 void ui_wifi_setup_open(const char* saved, int why) {
   if (saved == nullptr || saved[0] == '\0') {
     snprintf(wifi_setup_note, sizeof(wifi_setup_note), "Kein WLAN eingerichtet - Netz wählen");
   } else {
-    snprintf(wifi_setup_note, sizeof(wifi_setup_note), "%s %s - versuche weiter", saved,
-             why == 1 ? "abgelehnt" : "nicht erreichbar");
+    snprintf(wifi_setup_note, sizeof(wifi_setup_note), why == 4 ? "%s: Verbindung abgebrochen" : "%s %s - versuche weiter",
+             saved, why == 1 ? "abgelehnt" : "nicht erreichbar");
   }
   console_printf("UI: WLAN selection (%s)\n", wifi_setup_note);
   if (scr_off) screen_on();
@@ -83,7 +83,17 @@ void ui_wifi_setup_close() {
     hide_settings();
     nav = Nav::Home;
   }
-  ui_show_message(str::kConnectingTitle, str::kConnectingBody, false);
+  ui_show_connecting();
+}
+
+void ui_wifi_setup_leave_offline() {
+  wifi_setup_note[0] = '\0';
+  if (nav == Nav::WifiList || nav == Nav::WifiPass || nav == Nav::Settings) {
+    hide_settings();
+    nav = Nav::Home;
+  }
+  message_open = false;
+  hide(message);
 }
 
 void ui_geocode_done(bool ok, const GeoPlace* places, int n) {

@@ -56,6 +56,7 @@ constexpr uint32_t kWifiTimeoutMs = 30000;  // boot: then open the WLAN selectio
 constexpr uint32_t kWifiSwitchMs = 20000;   // settings: then revert to the previous network
 constexpr int kWifiAuthFails = 3;
 constexpr int kWifiNoApFails = 3;
+bool offline_session = false;  // "Ohne Netzwerk starten": Wi-Fi paused until the user connects (RAM only)
 bool wifi_setup_auto = false;  // WLAN selection opened by the firmware (boot failure / no Wi-Fi)
 constexpr size_t kStructureCap = 768 * 1024;
 
@@ -819,6 +820,15 @@ void poll() {
     case Phase::NotConfigured:
       break;
     case Phase::Wifi:
+      if (ui_take_connect_cancel()) {
+        // "Abbrechen": stop the attempt (saved network kept in NVS) and open the WLAN selection.
+        wifi_pause(true);
+        phase = Phase::Failed;
+        wifi_setup_auto = false;
+        console_puts("Wi-Fi connect cancelled by the user: WLAN selection");
+        ui_wifi_setup_open(wifi_ssid(), 4);
+        break;
+      }
       if (wifi_connected()) {
         console_printf("Wi-Fi connected, Miniserver %s:%d auth %s\n", settings_loxone().host, settings_loxone().port, auth->name());
         phase = Phase::Loading;
@@ -870,7 +880,21 @@ void poll() {
     case Phase::Ready: {
       if (!wifi_connected()) {
         ui_set_status(str::kStatusDisconnected);
+        NetRequest s = {};
+        if (ui_take_settings(&s.settings)) {  // Settings > WLAN works offline, too
+          s.op = NetOp::Settings;
+          net_post(s);
+        }
         break;
+      }
+      if (offline_session) {
+        // Connected again after an offline start (Settings > WLAN): finish the boot steps.
+        offline_session = false;
+        console_printf("Wi-Fi connected after offline start\n");
+        clock_sntp_kick();
+        maint_mark_valid();
+        ui_set_wifi_name(wifi_ssid());
+        lox_next_ms = now_ms();
       }
       NetRequest r = {};
       if (ui_take_settings(&r.settings)) {
@@ -904,6 +928,22 @@ void poll() {
         net_post(r);
         break;
       }
+      if (ui_take_offline()) {
+        // "Ohne Netzwerk starten": this session only, NVS untouched; the next boot connects as usual.
+        wifi_pause(true);
+        wifi_setup_auto = false;
+        offline_session = true;
+        console_puts("Start without network (session only)");
+        ui_wifi_setup_leave_offline();
+        char server[48] = "";
+        size_t n = auth != nullptr ? lox_cache_load(controls, kLoxoneControlCap, server, sizeof(server)) : 0;
+        controls_n = n;
+        lox_online = false;
+        phase = Phase::Ready;
+        ui_show_controls(controls, n, n, n > 0 && server[0] != '\0' ? server : "Loxone");
+        ui_set_status(str::kStatusDisconnected);
+        break;
+      }
       if (wifi_setup_auto && wifi_connected() && !ui_wifi_busy()) {
         // The saved network came back while the WLAN selection was open.
         console_printf("Wi-Fi \"%s\" is back: closing the WLAN selection\n", wifi_ssid());
@@ -916,7 +956,7 @@ void poll() {
       if (ui_take_retry()) {
         start_wifi();
         phase = Phase::Wifi;
-        ui_show_message(str::kConnectingTitle, str::kConnectingBody, false);
+        ui_show_connecting();
         ui_set_status(str::kStatusConnecting);
       }
       break;
@@ -988,7 +1028,7 @@ void ui_task(void*) {
     console_printf("Auth scheme %s\n", auth->name());
     start_wifi();
     phase = Phase::Wifi;
-    ui_show_message(str::kConnectingTitle, str::kConnectingBody, false);
+    ui_show_connecting();
     ui_set_status(str::kStatusConnecting);
   }
 

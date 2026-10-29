@@ -11,6 +11,10 @@ bool wifi_connected();
 // Playground CII mode: hold = disconnect and stop reconnecting (credentials kept);
 // release = reconnect normally.
 void wifi_hold(bool on);
+// User pause ("Abbrechen" while connecting, "Ohne Netzwerk starten"): disconnect
+// and stop retrying for this session; NVS untouched. wifi_start ends it.
+void wifi_pause(bool on);
+bool wifi_paused();
 // true once the driver reported a final failure (wrong password, no AP).
 bool wifi_failed();
 int wifi_auth_fails();   // auth / 4-way handshake rejections since wifi_start
