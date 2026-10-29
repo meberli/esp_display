@@ -159,7 +159,6 @@ void ui_set_cal_lead(uint16_t minutes);  // timed events: lead (minutes), persis
 uint16_t ui_cal_lead();
 void ui_set_cal_from(uint16_t minutes);  // all-day events: "Am Vortag ab" (minutes), persists
 uint16_t ui_cal_from();
-bool ui_rain_test(bool on);  // test harness: synthetic rain in the 24 h forecast
 bool ui_waste_test();  // test harness: inject a waste collection today
 int ui_rem_pending();
 void ui_saver_describe(char* out, size_t n);  // screensaver state for DIAGFB

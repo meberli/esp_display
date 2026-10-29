@@ -76,13 +76,11 @@ lv_obj_t* rain_tick[5] = {};
 lv_obj_t* rain_next = nullptr;      // right edge hint: Radar
 lv_obj_t* radar_root = nullptr;     // own page: radar + Natural Earth map
 lv_obj_t* radar_dots = nullptr;
-lv_obj_t* warn_next = nullptr;
 lv_obj_t* rain_sum = nullptr;
 lv_obj_t* rain_dots = nullptr;
 lv_obj_t* warn_root = nullptr;
 lv_obj_t* warn_list = nullptr;
 lv_obj_t* warn_status = nullptr;
-lv_obj_t* warn_dots = nullptr;
 lv_obj_t* rain_status = nullptr;
 lv_obj_t* rain_unit = nullptr;
 // Radar card (RainViewer): frames only while the Regen window is open.
@@ -102,7 +100,6 @@ lv_obj_t* map_img = nullptr;
 lv_obj_t* map_towns = nullptr;  // town dots + names, rebuilt per open
 lv_img_dsc_t map_dsc;
 uint16_t* map_px = nullptr;
-lv_obj_t* rain_prev = nullptr;  // left edge hint: Warnungen
 constexpr int kRainChartH = 170;
 // Radar drawn at kRadarS px (RainViewer tile 256 px, zoomed); towns/rings in that frame.
 constexpr int kRadarS = 340;
@@ -436,7 +433,6 @@ void calv_enter() {
 
 // Next 24 hours from the hourly Open-Meteo forecast (today from the current
 // hour, then tomorrow). Returns the hours filled (0 = no forecast).
-bool rain_demo = false;
 void rain_refresh();
 
 int rain24(float* mm, int* prob, int* h0) {
@@ -451,10 +447,6 @@ int rain24(float* mm, int* prob, int* h0) {
     if (d >= wx_count) break;
     mm[i] = wx_week[d].hprecip[h % 24];
     prob[i] = wx_week[d].hprob[h % 24];
-    if (rain_demo && i >= 5 && i <= 14) {  // test harness: synthetic shower
-      mm[i] = 0.3f * static_cast<float>(5 - (i > 9 ? i - 9 : 10 - i) + 1);
-      prob[i] = 40 + 5 * i;
-    }
     ++n;
   }
   return n;
@@ -515,13 +507,10 @@ lv_obj_t* make_rain_btn(lv_obj_t* parent, const char* key, int size) {
   return b;
 }
 
-// Pages: [Warnungen while active] | Regen (24 h) | Radar.
+// Rain area: exactly two pages, Regen (24 h) | Radar. Warnungen is a separate area.
 void rain_dots_set() {
-  const bool warn = warn_active();
-  const int n = (warn ? 1 : 0) + 2;
-  dots_set(rain_dots, n, warn ? 1 : 0);
-  dots_set(radar_dots, n, warn ? 2 : 1);
-  if (warn) show(rain_prev); else hide(rain_prev);
+  dots_set(rain_dots, 2, 0);
+  dots_set(radar_dots, 2, 1);
 }
 
 void rain_refresh() {
@@ -569,13 +558,9 @@ void rain_refresh() {
 
 bool warn_active() { return meteo_have && meteo.n > 0; }
 
-// --- Warnungen (own page left of Regen, only while a warning is active) ---
+// --- Warnungen (own single page, only while a warning is active) ---
 void warn_refresh() {
   if (warn_root == nullptr) return;
-  const int pages = 1 + (rain_forecast() ? 2 : 0);
-  dots_set(warn_dots, pages, 0);
-  if (pages > 1) show(warn_dots); else hide(warn_dots);
-  if (pages > 1) show(warn_next); else hide(warn_next);
   unreg_prefix("warn:");
   lv_obj_clean(warn_list);
   for (int i = 0; i < meteo.n; ++i) {
@@ -871,7 +856,7 @@ void on_info_tap(lv_event_t* e) {
   if (which == 0) tr_enter(0);
   else if (which == 1) calv_enter();
   else if (which == 3) energy_home_open();
-  else warn_enter();  // warning pill (falls back to Regen when it just ended)
+  else warn_enter();  // warning pill: Warnungen, its own single page
 }
 
 lv_obj_t* make_chip(lv_obj_t* parent, int x, int which, const char* key, uint32_t color, const char* icon,
@@ -1468,8 +1453,6 @@ void build_info_screens(lv_obj_t* screen) {
   lv_label_set_text(rain_status, "Balken: Regen mm pro Stunde \xC2\xB7 hell: Wahrscheinlichkeit\n"
                                  "Quelle: Open-Meteo (st\xC3\xBC" "ndlich)");
   rain_next = wx_handle(rain_root, 470);  // -> Radar
-  rain_prev = wx_handle(rain_root, 5);    // <- Warnungen, only while one is active
-  hide(rain_prev);
   rain_dots = make_dots(rain_root);
 
   radar_root = make_screen_root(screen, "Regenradar");
@@ -1556,8 +1539,6 @@ void build_info_screens(lv_obj_t* screen) {
   lv_obj_set_scrollbar_mode(warn_list, LV_SCROLLBAR_MODE_AUTO);  // only when the cards overflow
   lv_obj_set_scrollbar_mode(warn_root, LV_SCROLLBAR_MODE_OFF);
   lv_obj_clear_flag(warn_root, LV_OBJ_FLAG_SCROLLABLE);
-  warn_next = wx_handle(warn_root, 470);  // -> Regen, only while rain is forecast
-  warn_dots = make_dots(warn_root);
 
   // Einstellungen > ÖV
   trset_root = make_screen_root(screen, "\xC3\x96V-Haltestellen");

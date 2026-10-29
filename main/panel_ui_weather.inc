@@ -790,19 +790,15 @@ void swipe_page(int dir) {
     if (dir < 0) open_co4set();
     return;
   }
-  if (nav == Nav::Rain) {  // [Warnungen] <- Regen Übersicht -> Radar
+  if (nav == Nav::Rain) {  // Regen Übersicht -> Radar
     if (dir > 0) radar_enter();
-    else if (warn_active()) warn_enter();
     return;
   }
   if (nav == Nav::Radar) {
     if (dir < 0) rain_enter();
     return;
   }
-  if (nav == Nav::Warn) {  // the rain pages follow only while rain is forecast
-    if (dir > 0 && rain_forecast()) rain_enter();
-    return;
-  }
+  if (nav == Nav::Warn) return;  // single page
   if (nav == Nav::TransitSet || nav == Nav::CalSet || nav == Nav::Maint || nav == Nav::RemSet ||
       nav == Nav::Playground) {
     if (dir < 0) settings_back();
