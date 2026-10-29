@@ -742,8 +742,12 @@ void back_level() {
     return;
   }
   if (nav == Nav::LoxMenu || nav == Nav::Weather || nav == Nav::Cameras || nav == Nav::Transit ||
-      nav == Nav::Calendar || nav == Nav::Rain || nav == Nav::Warn || nav == Nav::Energy || nav == Nav::Co4) {
+      nav == Nav::Calendar || nav == Nav::Warn || nav == Nav::Energy || nav == Nav::Co4) {
     go_home();
+    return;
+  }
+  if (nav == Nav::Rain || nav == Nav::Radar) {  // reached via the rain icon: back to Heute
+    open_weather_day(0);
     return;
   }
   if (nav == Nav::Settings) {
@@ -786,13 +790,17 @@ void swipe_page(int dir) {
     if (dir < 0) open_co4set();
     return;
   }
-  if (nav == Nav::Rain) {  // Warnungen (if any) <- Regen -> Heute
-    if (dir > 0) open_weather_day(0);
+  if (nav == Nav::Rain) {  // [Warnungen] <- Regen Übersicht -> Radar
+    if (dir > 0) radar_enter();
     else if (warn_active()) warn_enter();
     return;
   }
-  if (nav == Nav::Warn) {
-    if (dir > 0) rain_enter();
+  if (nav == Nav::Radar) {
+    if (dir < 0) rain_enter();
+    return;
+  }
+  if (nav == Nav::Warn) {  // the rain pages follow only while rain is forecast
+    if (dir > 0 && rain_forecast()) rain_enter();
     return;
   }
   if (nav == Nav::TransitSet || nav == Nav::CalSet || nav == Nav::Maint || nav == Nav::RemSet ||
@@ -833,10 +841,6 @@ void swipe_page(int dir) {
     return;
   }
   if (nav == Nav::Weather) {
-    if (wx_day == 0 && dir < 0) {  // before "Heute": the rain nowcast + radar
-      rain_enter();
-      return;
-    }
     int next = wx_day + dir;
     if (next >= 0 && next < wx_count) {
       wx_day = next;
@@ -1301,6 +1305,8 @@ void build_weather_screen(lv_obj_t* screen) {
   lv_obj_align(legend, LV_ALIGN_BOTTOM_MID, 0, -8);
   lv_obj_set_style_text_opa(legend, LV_OPA_70, 0);
 
+  wx_rain = make_rain_btn(wx_root, "wx:rain", 68);
+  lv_obj_set_pos(wx_rain, kScreen - 22 - 68, 44);
   wx_prev_hint = wx_handle(wx_root, 5);
   wx_next_hint = wx_handle(wx_root, 470);
   lv_obj_t* up = make_label(wx_root, &font_icons_24, lv_color_hex(kTextDim));
@@ -1382,5 +1388,6 @@ void refresh_weather_day() {
   lv_line_set_points(wx_curve, wx_curve_pts, kWxSlots);
   if (wx_day > 0) show(wx_prev_hint); else hide(wx_prev_hint);
   if (wx_day + 1 < wx_count) show(wx_next_hint); else hide(wx_next_hint);
+  rain_icon_refresh();
 }
 

@@ -364,9 +364,10 @@ void ui_meteo_done(bool ok, const MeteoNow& m) {
   }
   home_warn_refresh();
   if (nav == Nav::Rain) rain_refresh();
+  if (nav == Nav::Radar) rain_dots_set();
   if (nav == Nav::Warn) {
     if (warn_active()) warn_refresh();
-    else rain_enter();  // the last warning ended: the page goes away
+    else go_home();  // the last warning ended: the page goes away
   }
 }
 
@@ -521,4 +522,11 @@ bool ui_scroll_check(char* out, size_t n) {
   int dummy = 0;
   sc_scroll_all(scr, false, &dummy);  // back to the top
   return ok;
+}
+
+bool ui_rain_test(bool on) {
+  rain_demo = on;
+  rain_icon_refresh();
+  if (nav == Nav::Rain) rain_refresh();
+  return wx_week != nullptr && wx_count > 0;
 }

@@ -81,6 +81,8 @@ struct WeatherDetailDay {
   int kind;  // DayKind (derived from daytime hourly data)
   float wind_max;
   WeatherSlot slot[kWxSlots];
+  float hprecip[24];  // mm per hour, local 00..23 (Open-Meteo hourly)
+  uint8_t hprob[24]; // precipitation probability % per hour
 };
 // days must stay valid only for the call; the UI copies what it needs.
 void ui_set_week(const WeatherDetailDay* days, int count);
@@ -157,6 +159,7 @@ void ui_set_cal_lead(uint16_t minutes);  // timed events: lead (minutes), persis
 uint16_t ui_cal_lead();
 void ui_set_cal_from(uint16_t minutes);  // all-day events: "Am Vortag ab" (minutes), persists
 uint16_t ui_cal_from();
+bool ui_rain_test(bool on);  // test harness: synthetic rain in the 24 h forecast
 bool ui_waste_test();  // test harness: inject a waste collection today
 int ui_rem_pending();
 void ui_saver_describe(char* out, size_t n);  // screensaver state for DIAGFB

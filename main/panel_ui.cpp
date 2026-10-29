@@ -93,7 +93,7 @@ enum Section : uint8_t { kSecFav = 0, kSecLight = 1, kSecShutter = 2, kSecOther 
 enum class Nav : uint8_t {
   Home, Category, Weather, Settings, WifiList, WifiPass, Location, Display, Time,
   Cameras, CamSettings, CamId, CamSearch, CamKey,
-  Transit, Calendar, Rain, Warn, TransitSet, StationSearch, CalSet, TextEdit, Maint, RemSet, Energy, EnSet,
+  Transit, Calendar, Rain, Radar, Warn, TransitSet, StationSearch, CalSet, TextEdit, Maint, RemSet, Energy, EnSet,
   Playground, Co4, Co4Set, Co4Login, Co4Zones, LoxMenu
 };
 
@@ -147,6 +147,8 @@ lv_obj_t* wx_empty = nullptr;
 lv_obj_t* wx_chip[4] = {nullptr, nullptr, nullptr, nullptr};
 lv_obj_t* wx_timeline = nullptr;
 WeatherDetailDay* wx_week = nullptr;  // PSRAM copy
+lv_obj_t* home_rain = nullptr;  // rain icon on the home weather card (rain in the next 24 h)
+lv_obj_t* wx_rain = nullptr;    // same on the Heute page
 int wx_count = 0;
 int wx_day = 0;
 
@@ -314,7 +316,13 @@ void home_chips_refresh();
 void home_warn_refresh();
 void tr_swipe(int dir);
 void rain_enter();
+void open_weather_day(int day);
+void radar_enter();
 void warn_enter();
+bool rain_forecast();
+void rain_dots_set();
+void rain_icon_refresh();
+lv_obj_t* make_rain_btn(lv_obj_t* parent, const char* key, int size);
 bool warn_active();
 void warn_refresh();
 void open_trset();
@@ -617,6 +625,7 @@ void ui_set_week(const WeatherDetailDay* days, int count) {
   if (nav == Nav::Weather) {
     refresh_weather_day();
   }
+  rain_icon_refresh();
 }
 
 void ui_describe(char* out, size_t n) {
@@ -649,7 +658,7 @@ void ui_describe(char* out, size_t n) {
 
 bool nav_has_pages() {
   return nav == Nav::Category || nav == Nav::Weather || nav == Nav::Cameras || nav == Nav::Transit ||
-         nav == Nav::Energy || nav == Nav::Co4 || nav == Nav::Rain || nav == Nav::Warn;
+         nav == Nav::Energy || nav == Nav::Co4 || nav == Nav::Rain || nav == Nav::Radar || nav == Nav::Warn;
 }
 
 void ui_touch_sample(bool pressed, int x, int y) {
@@ -810,6 +819,8 @@ static void ui_init_impl() {
     lv_label_set_text(fc_rain[d], "");
     lv_obj_set_pos(fc_rain[d], 82, 53);
   }
+  home_rain = make_rain_btn(weather, "home:rain", 60);
+  lv_obj_set_pos(home_rain, kScreen - 48 - 60 - 14, 54);  // below the warning pill, right of the place
   update_weather_line();
 
   // Four icon-only buttons in one row (432 px: 4 x 64 + 3 x 122.7):

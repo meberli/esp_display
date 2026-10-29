@@ -695,7 +695,8 @@ void energy_chip_refresh() {
     lv_label_set_text(chip_en_main, "einrichten");
     return;
   }
-  char w[16] = "- W";
+  char w[16];
+  snprintf(w, sizeof(w), "%s", !v.have ? "keine Daten" : "veraltet");  // was "- W": the meter did not answer
   if (v.have && !v.stale) {
     float net = (v.r.p_in_kw - v.r.p_out_kw) * 1000.0f;
     snprintf(w, sizeof(w), "%d W", static_cast<int>(net < 0 ? net - 0.5f : net + 0.5f));

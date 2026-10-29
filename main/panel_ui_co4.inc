@@ -325,7 +325,7 @@ void build_co4_screens(lv_obj_t* screen) {
   c = en_card(c4_body[0], 260, 112);
   const char* at[2] = {"Autarkie", "Eigenverbrauch"};
   for (int i = 0; i < 2; ++i) {
-    const int x0 = 16 + i * 216;
+    const int x0 = 16 + i * 204;
     en_lbl(c, &font_inter_sb16, kText, x0, 8, at[i]);
     c4_arc[i] = mx_donut(c, x0, 30, 76);
     lv_obj_set_style_arc_width(c4_arc[i], 11, LV_PART_MAIN);
@@ -336,7 +336,7 @@ void build_co4_screens(lv_obj_t* screen) {
     lv_obj_set_style_text_align(c4_pct[i], LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_pos(c4_pct[i], x0 + 5, 58);
     c4_arc_sub[i] = en_lbl(c, &font_inter_14, kTextDim, x0 + 88, 36, "");
-    lv_obj_set_width(c4_arc_sub[i], 112);
+    lv_obj_set_width(c4_arc_sub[i], 100);  // "Site-PV genutzt" wraps inside the card
     lv_label_set_long_mode(c4_arc_sub[i], LV_LABEL_LONG_WRAP);
   }
   c = en_card(c4_body[0], 380, 60);

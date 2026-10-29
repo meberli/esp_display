@@ -333,6 +333,8 @@ void handle(char* cmd) {
     esp_image_metadata_t md = {};
     esp_err_t e = esp_image_verify(ESP_IMAGE_VERIFY, &pos, &md);
     console_printf("IMGVERIFY %s %s\n", part->label, esp_err_to_name(e));
+  } else if (strcmp(cmd, "RAINTEST 1") == 0 || strcmp(cmd, "RAINTEST 0") == 0) {
+    console_puts(ui_rain_test(cmd[9] == '1') ? "OK" : "ERR no forecast");
   } else if (strcmp(cmd, "WASTETEST") == 0) {
     console_puts(ui_waste_test() ? "OK" : "ERR no calendar");
   } else if (strcmp(cmd, "REMDROP") == 0) {

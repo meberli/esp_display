@@ -12,7 +12,7 @@ struct MapTown { const char* name; int16_t x, y; };
 constexpr uint16_t rgb(uint32_t c) {
   return static_cast<uint16_t>(((c >> 8) & 0xF800) | ((c >> 5) & 0x07E0) | ((c & 0xFF) >> 3));
 }
-constexpr uint16_t kBg = rgb(0x0B1220), kKind[3] = {rgb(0x7A8496), rgb(0x3F78B5), rgb(0x2D5A8C)};
+constexpr uint16_t kBg = rgb(0x0B1220), kKind[3] = {rgb(0x9AA4B6), rgb(0x4F8FD0), rgb(0x3A6EA8)};
 
 // Window origin in map units (world px * SUB relative to the data origin).
 void origin(int size, float lat, float lon, double* ox, double* oy) {

@@ -7,5 +7,5 @@
 // Renders borders, lakes and rivers into an RGB565 (native endian) buffer of
 // size x size px, matching the RainViewer zoom-7 tile centred on lat/lon.
 void map_ne_render(uint16_t* px, int size, float lat, float lon);
-// i-th town inside the size x size window: name + pixel position. false when done.
+// i-th town (biggest first) inside the size x size window: name + pixel position. false when done.
 bool map_ne_town(int i, int size, float lat, float lon, const char** name, int* x, int* y);

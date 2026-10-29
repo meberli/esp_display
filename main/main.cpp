@@ -209,6 +209,9 @@ bool fetch_buchs_weather(int* temp_c, int* code, WeatherDay* days, int* week_cou
       hrs[i].precip = hourly["precipitation"][k] | 0.0f;
       hrs[i].temp = hourly["temperature_2m"][k] | 0.0f;
       hrs[i].cloud = hourly["cloud_cover"][k] | 50.0f;
+      w.hprecip[i] = hrs[i].precip;
+      int pp = hourly["precipitation_probability"][k] | 0;
+      w.hprob[i] = static_cast<uint8_t>(pp < 0 ? 0 : pp > 100 ? 100 : pp);
     }
     // Daytime window: sunrise hour .. sunset hour, else 06-21.
     int h_rise = strlen(sr) >= 13 ? atoi(sr + 11) : 6;
