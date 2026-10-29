@@ -470,7 +470,7 @@ void co4_refresh_heute(int64_t now_ms) {
     lv_label_set_text_fmt(c4_sum, "#%06X PV# %s \xC2\xB7 #%06X Bezug# %s \xC2\xB7 #%06X Einspeisung# %s",
                           static_cast<unsigned>(kGreen), pv, static_cast<unsigned>(kAmber), bz,
                           static_cast<unsigned>(kAccent), es);
-  else lv_label_set_text(c4_sum, "Noch keine Tageswerte");
+  // (no zone line yet: the message below, after the site check)
   // Autarkie: zone (PV to the zone / (that + Bezug)). Eigenverbrauch: the
   // site's PV used on site / PV produced (a zone produces nothing itself).
   Co4Ratio srt = {};
@@ -479,6 +479,9 @@ void co4_refresh_heute(int64_t now_ms) {
                            : c4_site_self(sdd, sdd.days, co4_index(sdd.days.t0_ms, sdd.days.step_ms, sdd.days.n, now_ms),
                                           co4_index(sdd.days.t0_ms, sdd.days.step_ms, sdd.days.n, now_ms) + 1, &srt);
   if (dpk == kCo4Pv) srt = rt;
+  // Zone values of today not delivered yet (Co4 aggregates the zone later than
+  // the site): say so instead of "Noch keine Tageswerte". Autarkie stays a dash.
+  if (!ok) lv_label_set_text(c4_sum, sok ? "Zonenwerte heute noch nicht von Co4" : "Noch keine Tageswerte");
   const bool okp[2] = {ok, sok};
   const float pct[2] = {rt.autarky_pct, srt.self_pct};
   char e1[16];

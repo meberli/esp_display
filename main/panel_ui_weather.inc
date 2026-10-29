@@ -1311,9 +1311,10 @@ void build_weather_screen(lv_obj_t* screen) {
   lv_obj_set_pos(wx_rain, kScreen - 22 - 68, 44);
   wx_prev_hint = wx_handle(wx_root, 5);
   wx_next_hint = wx_handle(wx_root, 470);
-  lv_obj_t* up = make_label(wx_root, &font_icons_24, lv_color_hex(kTextDim));
-  lv_label_set_text(up, ICON_UP);
-  lv_obj_align(up, LV_ALIGN_BOTTOM_MID, 0, -14);
+  // Page dots (one per forecast day) where the other pages have them; they
+  // replace the former up arrow at the same place (the home bar stays).
+  wx_dots = make_dots(wx_root);
+  hide(wx_dots);
   make_home_bar(wx_root);
   hide(wx_root);
 }
@@ -1333,6 +1334,7 @@ void refresh_weather_day() {
   if (wx_count <= 0 || wx_week == nullptr) {
     lv_label_set_text(wx_title, "Wetter");
     lv_label_set_text(wx_page, "");
+    hide(wx_dots);
     lv_label_set_text(wx_empty, wifi_connected() ? "Noch keine Vorhersage" : "Keine Verbindung");
     wx_show_data(false);
     show(wx_empty);
@@ -1351,6 +1353,7 @@ void refresh_weather_day() {
   snprintf(buf, sizeof(buf), "%s%s, %d. %s \xC2\xB7 %s", rel, date_ok ? kWeekday[weekday_of(y, m, dd)] : "", dd,
            date_ok ? kMonth[m - 1] : "", cur_place);
   lv_label_set_text(wx_title, buf);
+  dots_set(wx_dots, wx_count, wx_day);
   snprintf(buf, sizeof(buf), "%d / %d", wx_day + 1, wx_count);
   lv_label_set_text(wx_page, buf);
   lv_obj_align(wx_page, LV_ALIGN_TOP_RIGHT, -22, 20);

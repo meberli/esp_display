@@ -128,6 +128,7 @@ lv_obj_t* fc_icon[2] = {nullptr, nullptr};
 lv_obj_t* wx_root = nullptr;
 lv_obj_t* wx_title = nullptr;
 lv_obj_t* wx_page = nullptr;
+lv_obj_t* wx_dots = nullptr;  // weather day pager
 lv_obj_t* wx_icon = nullptr;
 lv_obj_t* wx_temp = nullptr;
 lv_obj_t* wx_cond = nullptr;
