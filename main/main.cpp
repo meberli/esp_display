@@ -551,8 +551,11 @@ void lox_task(void*) {
 }
 
 void net_task(void*) {
+  UBaseType_t low_mark = ~static_cast<UBaseType_t>(0);
   for (;;) {
-    NetRequest req;
+    // Only this task touches req: static (internal RAM, NVS writes read from
+    // it) instead of ~2 KB on the stack, which TLS handshakes need.
+    static NetRequest req;
     if (xQueueReceive(net_q, &req, portMAX_DELAY) != pdTRUE) {
       continue;
     }
@@ -645,6 +648,13 @@ void net_task(void*) {
         res.ok = fetch_buchs_weather(&res.temp_c, &res.code, res.days, &res.week_count);
         console_printf("Weather %s\n", res.ok ? "ok" : "unavailable");
         break;
+    }
+    {
+      const UBaseType_t mark = uxTaskGetStackHighWaterMark(nullptr);
+      if (mark < 1024 && mark < low_mark) {  // new low under 1 KB: say which op got there
+        console_printf("WARN net stack low: %u B free after op %d\n", static_cast<unsigned>(mark), static_cast<int>(req.op));
+      }
+      if (mark < low_mark) low_mark = mark;
     }
     xQueueSend(res_q, &res, portMAX_DELAY);
     if (ui_handle != nullptr) xTaskNotifyGive(ui_handle);  // wake the UI loop for the result
@@ -1081,7 +1091,9 @@ void app_start() {
   res_q = xQueueCreate(3, sizeof(NetResult));
   lox_q = xQueueCreate(1, sizeof(NetRequest));
   // Network and protocol work on core 0 (with the Wi-Fi stack), UI on core 1.
-  xTaskCreatePinnedToCore(net_task, "net", 12 * 1024, nullptr, 4, nullptr, 0);
+  // 16 KB internal (NVS writes: no PSRAM stack); TLS handshake + HTTP/JSON
+  // callees need ~10 KB, keep >= 4 KB headroom.
+  xTaskCreatePinnedToCore(net_task, "net", 16 * 1024, nullptr, 4, nullptr, 0);
   // Stack in PSRAM (8 KB, ~5.2 KB used): internal RAM is scarce, and with
   // SPIRAM_XIP_FROM_PSRAM the PSRAM stays usable during flash operations.
   xTaskCreatePinnedToCoreWithCaps(lox_task, "lox", 8 * 1024, nullptr, 5, nullptr, 0, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
