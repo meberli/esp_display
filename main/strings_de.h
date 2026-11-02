@@ -27,6 +27,7 @@ constexpr const char* kLoadFailedTitle = "Loxone nicht lesbar";
 constexpr const char* kStatusConnecting = "WLAN wird verbunden";
 constexpr const char* kStatusConnected = "WLAN verbunden";
 constexpr const char* kStatusDisconnected = "WLAN getrennt";
+constexpr const char* kStatusNoWifi = "Kein WLAN - Einstellungen > WLAN";
 constexpr const char* kStatusRelayOff = "Relais aus";
 constexpr const char* kStatusNoTouch = "Touch-Controller nicht gefunden";
 

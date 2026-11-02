@@ -51,6 +51,8 @@ Phase phase = Phase::NotConfigured;
 // the panel still runs weather, clock, ÖV, calendar, cams and settings.
 bool lox_on = false;         // Miniserver configured with a known auth scheme
 bool lox_setup_ask = false;  // first run: offer the Miniserver form once Wi-Fi is up
+bool wifi_up = false;
+bool lox_loaded = false;        // Wi-Fi up handled (SNTP, Loxone load); reset on drop
 uint32_t lox_retry_ms = 0;   // next background structure load after a failure
 constexpr uint32_t kLoxRetryMs = 60000;
 bool load_painted = false;
@@ -678,6 +680,7 @@ void handle_result(const NetResult& res) {
         break;
       }
       lox_retry_ms = 0;
+      lox_loaded = true;
       ui_set_lox_state(0);
       phase = Phase::Ready;
       ui_show_controls(controls, res.shown, res.supported, res.server[0] != '\0' ? res.server : "Loxone");
@@ -847,11 +850,28 @@ void poll() {
       break;
     }
     case Phase::Ready: {
+      NetRequest r = {};
       if (!wifi_connected()) {
-        ui_set_status(str::kStatusDisconnected);
+        // Wi-Fi optional: home keeps running offline; only Wi-Fi settings go out.
+        if (wifi_up) {
+          wifi_up = false;
+          ui_set_status(str::kStatusDisconnected);
+        }
+        if (ui_take_settings(&r.settings)) {
+          r.op = NetOp::Settings;
+          net_post(r);
+        }
         break;
       }
-      NetRequest r = {};
+      if (!wifi_up) {
+        wifi_up = true;
+        console_puts("Wi-Fi up: SNTP, content loads");
+        clock_sntp_kick();
+        maint_mark_valid();  // UI runs and Wi-Fi works: keep this image after an OTA update
+        ui_set_wifi_name(wifi_ssid());
+        ui_set_status(lox_on ? str::kStatusConnected : "");
+        if (lox_on && lox_retry_ms == 0 && !lox_loaded) lox_retry_ms = now_ms();  // load now
+      }
       if (lox_on && lox_retry_ms != 0 && !lox_busy && static_cast<int32_t>(now_ms() - lox_retry_ms) >= 0) {
         lox_retry_ms = now_ms() + kLoxRetryMs;  // background retry; on success the tiles come back
         r.op = NetOp::Load;
@@ -957,19 +977,22 @@ void ui_task(void*) {
                             : "No Miniserver configured: running without Loxone (optional)");
     lox_setup_ask = !configured && !settings_load_lox_skip();
   }
-  if (!have_wifi) {
-    // No Wi-Fi saved: straight to the WLAN selection (Miniserver form follows once connected).
-    phase = Phase::Failed;
-    wifi_setup_auto = true;
-    console_puts("No Wi-Fi configured: WLAN selection");
-    wifi_start("", "", "loxone-panel");  // station up for scanning, no network
-    ui_wifi_setup_open("", 0);
-  } else {
+  // Wi-Fi and Loxone are optional: always boot to the home screen. Network
+  // content (weather, ÖV, calendar, cams, NTP, OTA, Loxone) loads once Wi-Fi is up.
+  if (have_wifi) {
     if (lox_on) console_printf("Auth scheme %s\n", auth->name());
-    start_wifi();
-    phase = Phase::Wifi;
-    ui_show_message(str::kConnectingTitle, str::kConnectingBody, false);
-    ui_set_status(str::kStatusConnecting);
+    start_wifi();  // saved network keeps being retried in the background
+  } else {
+    console_puts("No Wi-Fi configured: home screen offline (Einstellungen > WLAN)");
+    wifi_start("", "", "loxone-panel");  // station up for scanning, no network
+  }
+  phase = Phase::Ready;
+  ui_set_lox_state(lox_on ? 2 : 1);
+  ui_show_controls(controls, 0, 0, have_wifi ? str::kStatusConnecting : str::kStatusNoWifi);
+  if (lox_on) ui_set_lox_state(2);
+  if (lox_setup_ask) {  // first run: Miniserver form once (WLAN button, Überspringen)
+    lox_setup_ask = false;
+    ui_lox_setup_open(true);
   }
 
   diag_start();

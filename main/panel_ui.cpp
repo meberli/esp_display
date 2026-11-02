@@ -937,7 +937,8 @@ void ui_show_controls(const LoxoneControl* items, size_t count, size_t supported
   rebuild_pages();
   console_printf("Home categories ready, Schalter pages %d\n", section_pages[kSecOther]);
   hide(msg_status);
-  show_home();
+  // Background (re)loads must not yank the user out of settings/weather/cams.
+  if (nav == Nav::Home || nav == Nav::Category || message_open) show_home();
   ui_set_status(server_name);
   (void)supported;
 }
