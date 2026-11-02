@@ -1,0 +1,7 @@
+# Panlee ZX3D95CE01S-TR (WT32S3-86S), merged after sdkconfig.defaults with
+#   idf.py -B build-panlee -DSDKCONFIG=build-panlee/sdkconfig -DPANEL_BOARD=panlee build
+# Module WT32-S3-WROVER-N16R8: 16 MB quad flash, 8 MB octal PSRAM (ESP32-S3R8,
+# esptool: "Embedded PSRAM 8MB (AP_3v3)"). Wireless-Tag's own sdkconfig uses
+# QIO flash + octal PSRAM 80 MHz, the same as the Guition defaults, so only
+# the board choice changes. partitions.csv (16 MB, two 6 MB OTA slots) is reused.
+CONFIG_PANEL_BOARD_PANLEE=y

@@ -4,7 +4,8 @@ choice PANEL_BOARD
     prompt "Board"
     default PANEL_BOARD_GUITION
     help
-        Selected by sdkconfig.defaults.sensecap (idf.py -DPANEL_BOARD=sensecap_d1).
+        Selected by sdkconfig.defaults.sensecap (idf.py -DPANEL_BOARD=sensecap_d1)
+        or sdkconfig.defaults.panlee (idf.py -DPANEL_BOARD=panlee).
         The CMake project name must match (checked in main/CMakeLists.txt).
 
 config PANEL_BOARD_GUITION
@@ -12,6 +13,9 @@ config PANEL_BOARD_GUITION
 
 config PANEL_BOARD_SENSECAP_D1
     bool "Seeed SenseCAP Indicator D1"
+
+config PANEL_BOARD_PANLEE
+    bool "Panlee ZX3D95CE01S-TR (WT32S3-86S, GC9503V)"
 
 endchoice
 

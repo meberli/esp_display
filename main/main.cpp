@@ -868,7 +868,7 @@ void ui_task(void*) {
   console_begin(SERIAL_BAUD, 1024, 4096);
 #endif
   vTaskDelay(pdMS_TO_TICKS(200));
-#if CONFIG_PANEL_BOARD_SENSECAP_D1
+#if CONFIG_PANEL_BOARD_SENSECAP_D1 || CONFIG_PANEL_BOARD_PANLEE
   console_printf("%s Loxone panel (ESP-IDF)\n", kBoardName);
 #else
   console_puts("ESP32-4848S040C_I_Y_1 Loxone panel (ESP-IDF)");

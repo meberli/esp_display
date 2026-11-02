@@ -3,13 +3,16 @@
 if(CONFIG_PANEL_BOARD_SENSECAP_D1)
   set(PANEL_HW_SRC "panel_hw_sensecap_d1.cpp")
   set(PANEL_EXPECT_PROJECT "loxone_panel_sensecap_d1")
+elseif(CONFIG_PANEL_BOARD_PANLEE)
+  set(PANEL_HW_SRC "panel_hw_panlee.cpp")
+  set(PANEL_EXPECT_PROJECT "loxone_panel_panlee")
 else()
   set(PANEL_HW_SRC "panel_hw.cpp")
   set(PANEL_EXPECT_PROJECT "loxone_panel")
 endif()
 if(NOT CMAKE_BUILD_EARLY_EXPANSION AND NOT CMAKE_PROJECT_NAME STREQUAL PANEL_EXPECT_PROJECT)
   message(FATAL_ERROR "Board config does not match project ${CMAKE_PROJECT_NAME}: "
-                      "use idf.py -DPANEL_BOARD=sensecap_d1 with its own build dir")
+                      "use idf.py -DPANEL_BOARD=sensecap_d1|panlee with its own build dir")
 endif()
 idf_component_register(
     SRCS "app_main.cpp" "sys.cpp" "net.cpp" "main.cpp" "${PANEL_HW_SRC}" "panel_ui.cpp"

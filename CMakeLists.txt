@@ -3,6 +3,8 @@
 #     idf.py build flash monitor -p COM14
 #   SenseCAP Indicator D1 (own build dir, own project name = board ID):
 #     idf.py -B build-d1 -DSDKCONFIG=build-d1/sdkconfig -DPANEL_BOARD=sensecap_d1 build
+#   Panlee ZX3D95CE01S-TR (WT32S3-86S):
+#     idf.py -B build-panlee -DSDKCONFIG=build-panlee/sdkconfig -DPANEL_BOARD=panlee build
 cmake_minimum_required(VERSION 3.22)
 if(NOT PANEL_BOARD)
   set(PANEL_BOARD "guition")
@@ -12,8 +14,13 @@ if(PANEL_BOARD STREQUAL "sensecap_d1")
     set(SDKCONFIG_DEFAULTS "sdkconfig.defaults")
   endif()
   set(SDKCONFIG_DEFAULTS "${SDKCONFIG_DEFAULTS};sdkconfig.defaults.sensecap")
+elseif(PANEL_BOARD STREQUAL "panlee")
+  if(NOT SDKCONFIG_DEFAULTS)
+    set(SDKCONFIG_DEFAULTS "sdkconfig.defaults")
+  endif()
+  set(SDKCONFIG_DEFAULTS "${SDKCONFIG_DEFAULTS};sdkconfig.defaults.panlee")
 elseif(NOT PANEL_BOARD STREQUAL "guition")
-  message(FATAL_ERROR "PANEL_BOARD must be guition or sensecap_d1")
+  message(FATAL_ERROR "PANEL_BOARD must be guition, sensecap_d1 or panlee")
 endif()
 # Local secrets (Windy API key) live in the gitignored sdkconfig.defaults.local
 # and are merged after the regular defaults (and after sdkconfig.test when the
@@ -30,6 +37,8 @@ include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 # image whose project_name differs from the running one (ota_board.cpp).
 if(PANEL_BOARD STREQUAL "sensecap_d1")
   project(loxone_panel_sensecap_d1)
+elseif(PANEL_BOARD STREQUAL "panlee")
+  project(loxone_panel_panlee)
 else()
   project(loxone_panel)
 endif()

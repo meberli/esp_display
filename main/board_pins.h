@@ -8,6 +8,8 @@
 
 #if CONFIG_PANEL_BOARD_SENSECAP_D1
 #include "board_pins_sensecap_d1.h"
+#elif CONFIG_PANEL_BOARD_PANLEE
+#include "board_pins_panlee.h"
 #else
 #include "board_pins_guition.h"
 #endif
