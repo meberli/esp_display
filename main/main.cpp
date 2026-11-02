@@ -483,6 +483,17 @@ void net_settings(const SettingsRequest& s, NetResult* res) {
       console_printf("Setting text %d %s (ok=%d)\n", s.text_which, s.text[0] != '\0' ? "saved" : "reset to default",
                      res->ok ? 1 : 0);  // never log the value (private calendar URL)
       break;
+    case SettingsRequest::LoxTest: {
+      LoxoneHttpResult t = loxone_test(s.lox);
+      res->ok = t.ok;
+      res->status = t.status;
+      snprintf(res->detail, sizeof(res->detail), "%s", t.detail);
+      console_printf("Miniserver test: %s (HTTP %d)\n", t.ok ? "ok" : "failed", t.status);
+      break;
+    }
+    case SettingsRequest::SetLoxone:
+      res->ok = settings_save_loxone(s.lox, s.lox_keep_pass);
+      break;
     case SettingsRequest::ResetLocation:
       settings_reset_location();
       g_loc = settings_default_location();
@@ -704,6 +715,10 @@ void handle_result(const NetResult& res) {
         case SettingsRequest::SetText:
           ui_text_saved(res.ok, static_cast<uint8_t>(res.index));
           break;
+        case SettingsRequest::LoxTest:
+        case SettingsRequest::SetLoxone:
+          ui_lox_done(res.settings_kind == SettingsRequest::SetLoxone, res.ok, res.status, res.detail);
+          break;
         default:
           ui_location_done(res.ok, res.location.name);
           next_weather_ms = now_ms();  // refresh the weather right away
@@ -762,8 +777,14 @@ void poll() {
     return;
   }
   switch (phase) {
-    case Phase::NotConfigured:
+    case Phase::NotConfigured: {
+      NetRequest r = {};
+      if (ui_take_settings(&r.settings)) {  // on-device setup: WLAN + Miniserver
+        r.op = NetOp::Settings;
+        net_post(r);
+      }
       break;
+    }
     case Phase::Wifi:
       if (wifi_connected()) {
         console_printf("Wi-Fi connected, Miniserver %s:%d auth %s\n", settings_loxone().host, settings_loxone().port, auth->name());
@@ -902,8 +923,13 @@ void ui_task(void*) {
     phase = Phase::NotConfigured;
     console_puts(PANEL_CONFIG_PRESENT ? "panel_config.h is missing Wi-Fi, host, or user"
                                       : "panel_config.h not found; not configured");
-    ui_show_message(str::kNotConfiguredTitle, str::kNotConfiguredBody, false);
-    ui_set_status(str::kStatusRelayOff);
+    // On-device setup: Miniserver form (with a WLAN button). Saving restarts.
+    if (have_wifi) {
+      start_wifi();  // for the connection test
+    } else {
+      wifi_start("", "", "loxone-panel");  // station up for scanning, no network
+    }
+    ui_lox_setup_open(true);
   } else if (!have_wifi) {
     // Miniserver known, but no Wi-Fi saved: straight to the WLAN selection.
     phase = Phase::Failed;

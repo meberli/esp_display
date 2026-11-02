@@ -539,6 +539,7 @@ void open_settings() {
   maint_refresh();
   lv_label_set_text(set_wifi_val, cur_ssid[0] != '\0' ? cur_ssid : "nicht verbunden");
   lv_label_set_text(set_loc_val, cur_place);
+  lv_label_set_text(set_lox_val, settings_loxone().host[0] != '\0' ? settings_loxone().host : "nicht eingerichtet");
   refresh_display_settings();
   refresh_time_settings();
   camset_value();
@@ -682,6 +683,117 @@ void on_loc_row(lv_event_t* e) {
   queue_settings(r);
 }
 
+// --- Miniserver (on-device setup) ------------------------------------------
+// Host ("192.168.1.10", "miniserver.local:8080", "http://..." is stripped),
+// user and password. Test logs in without storing; Speichern stores in NVS
+// and restarts (the Loxone config is read once at boot). An empty password
+// field keeps the saved password. Values are never logged.
+
+void open_loxset(bool first_run) {
+  nav = Nav::LoxSet;
+  lox_first_run = first_run;
+  hide_settings();
+  const LoxoneConfig& c = settings_loxone();
+  char hp[80];
+  if (c.host[0] == '\0') hp[0] = '\0';
+  else if (c.port == 80 || c.port == 0) snprintf(hp, sizeof(hp), "%s", c.host);
+  else snprintf(hp, sizeof(hp), "%s:%u", c.host, static_cast<unsigned>(c.port));
+  lv_textarea_set_text(lox_host_ta, hp);
+  lv_textarea_set_text(lox_user_ta, c.user);
+  lv_textarea_set_text(lox_pass_ta, "");
+  lv_textarea_set_placeholder_text(lox_pass_ta, c.pass[0] != '\0' ? "Passwort (unver\xC3\xA4ndert)" : "Passwort");
+  lv_label_set_text(lox_status, first_run ? "Nicht eingerichtet: Miniserver eintragen. Ohne WLAN zuerst \"WLAN\"."
+                                          : "Adresse, Benutzer und Passwort des Miniservers");
+  show(lox_root);
+  if (c.host[0] == '\0') show_keyboard(lox_host_ta);
+}
+
+// Reads the form; false (status set) if host or user is missing or the port is bad.
+bool lox_form(LoxoneConfig* c, bool* keep_pass) {
+  memset(c, 0, sizeof(*c));
+  const char* h = lv_textarea_get_text(lox_host_ta);
+  while (*h == ' ') ++h;
+  if (strncmp(h, "http://", 7) == 0) h += 7;
+  if (strncmp(h, "https://", 8) == 0) {
+    lv_label_set_text(lox_status, "HTTPS wird nicht unterst\xC3\xBCtzt - http-Adresse eingeben");
+    return false;
+  }
+  char buf[80];
+  snprintf(buf, sizeof(buf), "%s", h);
+  char* slash = strchr(buf, '/');
+  if (slash != nullptr) *slash = '\0';
+  size_t n = strlen(buf);
+  while (n > 0 && buf[n - 1] == ' ') buf[--n] = '\0';
+  c->port = 80;
+  char* colon = strrchr(buf, ':');
+  if (colon != nullptr) {
+    char* end = nullptr;
+    long p = strtol(colon + 1, &end, 10);
+    if (end == colon + 1 || *end != '\0' || p < 1 || p > 65535) {
+      lv_label_set_text(lox_status, "Port ung\xC3\xBCltig (1-65535)");
+      return false;
+    }
+    c->port = static_cast<uint16_t>(p);
+    *colon = '\0';
+  }
+  if (buf[0] == '\0' || strlen(buf) >= sizeof(c->host)) {
+    lv_label_set_text(lox_status, "Adresse fehlt");
+    return false;
+  }
+  snprintf(c->host, sizeof(c->host), "%s", buf);
+  const char* u = lv_textarea_get_text(lox_user_ta);
+  if (u[0] == '\0') {
+    lv_label_set_text(lox_status, "Benutzer fehlt");
+    return false;
+  }
+  snprintf(c->user, sizeof(c->user), "%s", u);
+  const char* pw = lv_textarea_get_text(lox_pass_ta);
+  *keep_pass = pw[0] == '\0' && settings_loxone().pass[0] != '\0';
+  snprintf(c->pass, sizeof(c->pass), "%s", *keep_pass ? settings_loxone().pass : pw);
+  snprintf(c->auth, sizeof(c->auth), "basic");
+  return true;
+}
+
+void lox_submit(bool save) {
+  if (lox_working || settings_pending) return;
+  SettingsRequest r = {};
+  if (!lox_form(&r.lox, &r.lox_keep_pass)) return;
+  if (!save && !wifi_connected()) {
+    lv_label_set_text(lox_status, "Kein WLAN - zuerst \"WLAN\" verbinden, dann testen");
+    return;
+  }
+  r.kind = save ? SettingsRequest::SetLoxone : SettingsRequest::LoxTest;
+  lox_working = true;
+  lv_keyboard_set_textarea(kb, nullptr);
+  hide(kb);
+  lv_label_set_text(lox_status, save ? "Speichere ..." : "Teste Verbindung ...");
+  queue_settings(r);
+  memset(&r, 0, sizeof(r));
+}
+
+void on_lox_btn(lv_event_t* e) {
+  if (gesture_consumed) return;
+  int which = static_cast<int>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e)));
+  console_printf("Activate miniserver button %d\n", which);
+  if (which == 0) {
+    open_settings();
+    open_wifi_list();
+  } else {
+    lox_submit(which == 2);
+  }
+}
+
+void lox_restart_cb(lv_timer_t*) { esp_restart(); }
+
+void lox_kb_ready(lv_obj_t* ta) {
+  if (ta == lox_host_ta) show_keyboard(lox_user_ta);
+  else if (ta == lox_user_ta) show_keyboard(lox_pass_ta);
+  else if (ta == lox_pass_ta) {
+    lv_keyboard_set_textarea(kb, nullptr);
+    hide(kb);
+  }
+}
+
 void on_kb_event(lv_event_t* e) {
   lv_event_code_t code = lv_event_get_code(e);
   lv_obj_t* ta = lv_keyboard_get_textarea(kb);
@@ -689,6 +801,7 @@ void on_kb_event(lv_event_t* e) {
     if (ta == wp_ta) on_wifi_ready(e);
     if (ta == loc_ta) on_loc_ready(e);
     if (ta == time_ta) on_time_ready(e);
+    lox_kb_ready(ta);
     cam_kb_ready(ta);
     st_kb_ready(ta);
     txt_kb_ready(ta);
@@ -719,6 +832,7 @@ void on_settings_row(lv_event_t* e) {
   if (which == 8) open_maint();
   if (which == 9) open_enset();
   if (which == 10) open_play();
+  if (which == 11) open_loxset(false);
 }
 
 void on_msg_wifi(lv_event_t*) {
@@ -772,18 +886,18 @@ void build_settings_screens(lv_obj_t* screen) {
   set_root = make_screen_root(screen, "Einstellungen");
   // Scrollable list: eight rows do not fit on one screen.
   lv_obj_t* set_list = make_list(set_root, 56, 404);
-  constexpr int kRows = 11;
-  // Row order on screen; the callback gets the row id (Wartung stays 8, Energie is 9).
-  const char* names[kRows] = {"WLAN", "Wetter-Ort", "Bildschirm", "Uhrzeit", "Kameras", "\xC3\x96V", "Kalender",
+  constexpr int kRows = 12;
+  // Row order on screen; the callback gets the row id (Wartung stays 8, Energie is 9, Miniserver 11).
+  const char* names[kRows] = {"WLAN", "Miniserver", "Wetter-Ort", "Bildschirm", "Uhrzeit", "Kameras", "\xC3\x96V", "Kalender",
                               "Erinnerungen", "Energie", "Wartung", "Playground"};
-  const char* icons[kRows] = {ICON_WIFI3, ICON_PLACE, ICON_SCREEN, ICON_SCHEDULE, ICON_VIDEOCAM, ICON_TRAIN,
+  const char* icons[kRows] = {ICON_WIFI3, ICON_ROUTER, ICON_PLACE, ICON_SCREEN, ICON_SCHEDULE, ICON_VIDEOCAM, ICON_TRAIN,
                               ICON_EVENT, ICON_NOTIFY, ICON_BOLT, ICON_MEMORY, ICON_ROUTER};
-  const uint32_t colors[kRows] = {kAccent, kAmber, kPurple, kGreen, kTeal, kAccent, kPurple, kAmber, kAmber, kOrange, kTeal};
-  lv_obj_t** vals[kRows] = {&set_wifi_val, &set_loc_val, &set_disp_val, &set_time_val, &set_cam_val,
+  const uint32_t colors[kRows] = {kAccent, kGreen, kAmber, kPurple, kGreen, kTeal, kAccent, kPurple, kAmber, kAmber, kOrange, kTeal};
+  lv_obj_t** vals[kRows] = {&set_wifi_val, &set_lox_val, &set_loc_val, &set_disp_val, &set_time_val, &set_cam_val,
                             &set_tr_val,   &set_cal_val, &set_rem_val,  &set_en_val,   &set_maint_val, &set_play_val};
-  const char* keys[kRows] = {"set:wifi", "set:loc", "set:disp", "set:time", "set:cams",
+  const char* keys[kRows] = {"set:wifi", "set:lox", "set:loc", "set:disp", "set:time", "set:cams",
                              "set:oev",  "set:cal", "set:rem",  "set:energy", "set:maint", "set:play"};
-  const int ids[kRows] = {0, 1, 2, 3, 4, 5, 6, 7, 9, 8, 10};
+  const int ids[kRows] = {0, 11, 1, 2, 3, 4, 5, 6, 7, 9, 8, 10};
   for (int i = 0; i < kRows; ++i) {
     lv_obj_t* row = make_row(set_list, 72, icons[i], colors[i], on_settings_row, ids[i]);
     reg(keys[i], row);
@@ -882,6 +996,23 @@ void build_settings_screens(lv_obj_t* screen) {
   loc_status = make_label(loc_root, &font_inter_14, lv_color_hex(kTextDim));
   lv_obj_set_pos(loc_status, 24, 116);
   loc_list = make_list(loc_root, 140, 316);
+
+  lox_root = make_screen_root(screen, "Miniserver");
+  lox_host_ta = make_ta(lox_root, 56, "Adresse, z.B. 192.168.1.10 oder host:8080");
+  reg("lox:host", lox_host_ta);
+  lox_user_ta = make_ta(lox_root, 116, "Benutzer");
+  reg("lox:user", lox_user_ta);
+  lox_pass_ta = make_ta(lox_root, 176, "Passwort");
+  lv_textarea_set_password_mode(lox_pass_ta, true);
+  lv_textarea_set_password_bullet(lox_pass_ta, "*");
+  reg("lox:pass", lox_pass_ta);
+  lox_status = make_label(lox_root, &font_inter_14, lv_color_hex(kTextDim));
+  lv_obj_set_pos(lox_status, 24, 234);
+  lv_obj_set_width(lox_status, 432);
+  lv_label_set_long_mode(lox_status, LV_LABEL_LONG_WRAP);
+  make_choice(lox_root, kMargin, 300, 136, 56, "WLAN", on_lox_btn, 0, "lox:wifi");
+  make_choice(lox_root, kMargin + 148, 300, 136, 56, "Testen", on_lox_btn, 1, "lox:test");
+  make_choice(lox_root, kMargin + 296, 300, 136, 56, "Speichern", on_lox_btn, 2, "lox:save");
 
   kb = lv_keyboard_create(screen);
   lv_obj_set_size(kb, kScreen, 220);

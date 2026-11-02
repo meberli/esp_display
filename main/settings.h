@@ -211,6 +211,10 @@ struct LoxoneConfig {
 };
 LoxoneConfig settings_load_loxone();
 const LoxoneConfig& settings_loxone();  // loaded once (after settings_seed_from_build)
+// On-device setup: stores host/port/user (and pass unless keep_pass) in NVS.
+// Takes effect after a restart (settings_loxone() is loaded once).
+bool settings_save_loxone(const LoxoneConfig& c, bool keep_pass);
+bool settings_loxone_has_pass();
 
 // --- Backup / restore of the whole "panel" NVS namespace as JSON ---
 // Secret keys (Wi-Fi password, Windy key, iCal URL) only with secrets = true.
@@ -235,6 +239,8 @@ struct SettingsRequest {
     StationSearch,  // query -> stations (transport.opendata.ch)
     SetStation,     // station_idx + station -> NVS
     SetText,        // text_which + text ("" = default) -> NVS
+    LoxTest,        // lox: test the Miniserver login (nothing stored)
+    SetLoxone,      // lox (+ lox_keep_pass) -> NVS, then restart
   } kind;
   WifiCreds creds;
   char query[48];
@@ -249,4 +255,6 @@ struct SettingsRequest {
   char station_name[48];
   uint8_t text_which;
   char text[256];
+  LoxoneConfig lox;
+  bool lox_keep_pass;
 };

@@ -33,6 +33,11 @@ void ui_wifi_connect_done(bool ok, const char* ssid, const char* current, int st
   snprintf(cur_ssid, sizeof(cur_ssid), "%s", current != nullptr ? current : "");
   if (ok) wifi_setup_note[0] = '\0';
   if (nav != Nav::WifiPass) return;
+  if (ok && lox_first_run) {  // first-run setup: back to the Miniserver form
+    open_loxset(true);
+    lv_label_set_text(lox_status, "WLAN verbunden. Miniserver eintragen, testen, speichern.");
+    return;
+  }
   if (ok) {
     open_settings();
     return;
@@ -513,4 +518,37 @@ bool ui_scroll_check(char* out, size_t n) {
   int dummy = 0;
   sc_scroll_all(scr, false, &dummy);  // back to the top
   return ok;
+}
+
+// --- Miniserver setup API (UI task) -------------------------------------------
+
+void ui_lox_setup_open(bool first_run) {
+  console_puts("UI: Miniserver setup");
+  if (scr_off) screen_on();
+  last_activity = now_ms();
+  message_open = false;
+  hide(message);
+  hide(msg_status);
+  hide(home_root);
+  hide(cat_root);
+  hide(wx_root);
+  open_settings();
+  open_loxset(first_run);
+}
+
+void ui_lox_done(bool saved, bool ok, int status, const char* detail) {
+  lox_working = false;
+  char t[160];
+  if (saved) {
+    snprintf(t, sizeof(t), ok ? "Gespeichert - Neustart ..." : "Speichern fehlgeschlagen");
+    if (ok) lv_timer_set_repeat_count(lv_timer_create(lox_restart_cb, 1500, nullptr), 1);
+  } else if (ok) {
+    snprintf(t, sizeof(t), "Verbindung OK - jetzt speichern");
+  } else if (status == 401 || status == 403) {
+    snprintf(t, sizeof(t), "Login abgelehnt - Benutzer/Passwort pr\xC3\xBC" "fen");
+  } else {
+    snprintf(t, sizeof(t), "Test fehlgeschlagen: %s", detail != nullptr ? detail : "");
+  }
+  console_printf("UI: Miniserver %s %s\n", saved ? "save" : "test", ok ? "ok" : "failed");
+  if (nav == Nav::LoxSet) lv_label_set_text(lox_status, t);
 }

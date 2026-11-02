@@ -983,6 +983,23 @@ LoxoneConfig settings_load_loxone() {
   return c;
 }
 
+bool settings_save_loxone(const LoxoneConfig& c, bool keep_pass) {
+  if (c.host[0] == '\0' || c.user[0] == '\0') return false;
+  WriteLock lock;
+  nvs_handle_t h;
+  if (nvs_open(kNs, NVS_READWRITE, &h) != ESP_OK) return false;
+  bool ok = nvs_set_str(h, "lox_host", c.host) == ESP_OK && nvs_set_u16(h, "lox_port", c.port) == ESP_OK &&
+            nvs_set_str(h, "lox_user", c.user) == ESP_OK &&
+            nvs_set_str(h, "lox_auth", c.auth[0] != '\0' ? c.auth : "basic") == ESP_OK;
+  if (ok && !keep_pass) ok = nvs_set_str(h, "lox_pass", c.pass) == ESP_OK;
+  ok = ok && nvs_commit(h) == ESP_OK;
+  nvs_close(h);
+  printf("Settings: Miniserver %s (password %s)\n", ok ? "saved" : "save failed", keep_pass ? "kept" : "set");
+  return ok;
+}
+
+bool settings_loxone_has_pass() { return settings_loxone().pass[0] != '\0'; }
+
 const LoxoneConfig& settings_loxone() {
   static LoxoneConfig c = settings_load_loxone();
   return c;

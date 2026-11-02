@@ -12,10 +12,8 @@ constexpr const char* kLoadingBody = "Steuerungen werden vom Miniserver geladen 
 constexpr const char* kNotConfiguredTitle = "Nicht eingerichtet";
 constexpr const char* kNotConfiguredBody =
     "WLAN- und Miniserver-Einstellungen fehlen.\n\n"
-    "include/panel_config.example.h nach\n"
-    "include/panel_config.h kopieren, den\n"
-    "Miniserver eintragen, neu bauen und\n"
-    "per USB flashen.\n\n"
+    "Unter Einstellungen > WLAN und\n"
+    "Einstellungen > Miniserver eintragen.\n\n"
     "Relais 1 bleibt aus, bis auf dem\n"
     "Startbildschirm unter Schalter\n"
     "Relais getippt wird.";

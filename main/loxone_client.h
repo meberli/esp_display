@@ -6,6 +6,8 @@
 #include "loxone_auth.h"
 #include "loxone_types.h"
 
+struct LoxoneConfig;
+
 struct LoxoneHttpResult {
   bool ok;
   int status;
@@ -25,3 +27,7 @@ LoxoneHttpResult loxone_send_command(LoxoneAuthorizer& auth, const char* action,
 // On success, value is numeric text ("0", "1", "0.42", "-1", ...).
 LoxoneHttpResult loxone_read_state(LoxoneAuthorizer& auth, const char* action, const char* state,
                                    LoxoneKind kind, char* value, size_t value_n);
+
+// On-device setup: tries a login against c (not the saved config) with
+// GET /jdev/sps/LoxAPPversion3. ok on HTTP 200; status 401 = login rejected.
+LoxoneHttpResult loxone_test(const LoxoneConfig& c);

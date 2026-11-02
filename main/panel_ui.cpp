@@ -1,5 +1,6 @@
 #include "esp_attr.h"
 #include "esp_heap_caps.h"
+#include "esp_system.h"
 #include "net.h"
 #include "panel_ui.h"
 #include "strings_de.h"
@@ -76,7 +77,7 @@ enum class Nav : uint8_t {
   Home, Category, Weather, Settings, WifiList, WifiPass, Location, Display, Time,
   Cameras, CamSettings, CamId, CamSearch, CamKey,
   Transit, Calendar, Rain, TransitSet, StationSearch, CalSet, TextEdit, Maint, RemSet, Energy, EnSet,
-  Playground
+  Playground, LoxSet
 };
 
 const char* kShutterLabel[2] = {"Auf", "Ab"};
@@ -197,6 +198,14 @@ lv_obj_t* wp_root = nullptr;
 lv_obj_t* wp_title = nullptr;
 lv_obj_t* wp_ta = nullptr;
 lv_obj_t* wp_status = nullptr;
+lv_obj_t* lox_root = nullptr;  // Einstellungen > Miniserver (also the first-run setup)
+lv_obj_t* lox_host_ta = nullptr;
+lv_obj_t* lox_user_ta = nullptr;
+lv_obj_t* lox_pass_ta = nullptr;
+lv_obj_t* lox_status = nullptr;
+lv_obj_t* set_lox_val = nullptr;
+bool lox_first_run = false;   // opened at boot because no Miniserver is configured
+bool lox_working = false;     // test or save queued/running
 lv_obj_t* loc_root = nullptr;
 lv_obj_t* loc_ta = nullptr;
 lv_obj_t* loc_list = nullptr;

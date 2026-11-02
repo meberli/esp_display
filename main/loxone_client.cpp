@@ -21,8 +21,7 @@ void set_detail(LoxoneHttpResult* result, const char* text) {
 }
 
 // Host only. Rejects HTTPS. Strips a leading http:// and any path.
-bool normalize_host(char* out, size_t out_n, char* error, size_t error_n) {
-  const char* host = settings_loxone().host;
+bool normalize_host_of(const char* host, char* out, size_t out_n, char* error, size_t error_n) {
   if (strncmp(host, "https://", 8) == 0) {
     snprintf(error, error_n, "HTTPS is not implemented");
     return false;
@@ -44,6 +43,10 @@ bool normalize_host(char* out, size_t out_n, char* error, size_t error_n) {
     return false;
   }
   return true;
+}
+
+bool normalize_host(char* out, size_t out_n, char* error, size_t error_n) {
+  return normalize_host_of(settings_loxone().host, out, out_n, error, error_n);
 }
 
 bool code_is_200(JsonVariant code) {
@@ -362,5 +365,31 @@ LoxoneHttpResult loxone_read_state(LoxoneAuthorizer& auth, const char* action, c
     set_detail(&result, str::kLoxStateUnavailable);
   }
   result.ok = false;
+  return result;
+}
+
+LoxoneHttpResult loxone_test(const LoxoneConfig& c) {
+  LoxoneHttpResult result = {};
+  if (!wifi_connected()) {
+    set_detail(&result, str::kLoxWifiDown);
+    return result;
+  }
+  char host[80];
+  if (!normalize_host_of(c.host, host, sizeof(host), result.detail, sizeof(result.detail))) return result;
+  char url[192];
+  snprintf(url, sizeof(url), "http://%s:%d/jdev/sps/LoxAPPversion3", host, static_cast<int>(c.port));
+  uint8_t body[256];
+  HttpGetResult r = http_get(url, c.user, c.pass, body, sizeof(body), 10000);
+  result.status = r.status;
+  if (r.status <= 0) {
+    snprintf(result.detail, sizeof(result.detail), "Keine Antwort (%s)", r.error);
+  } else if (r.status == 401 || r.status == 403) {
+    set_detail(&result, str::kLoxLoginRejected);
+  } else if (r.status != 200) {
+    snprintf(result.detail, sizeof(result.detail), "HTTP %d", r.status);
+  } else {
+    result.ok = true;
+    set_detail(&result, "OK");
+  }
   return result;
 }

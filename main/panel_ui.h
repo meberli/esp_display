@@ -136,6 +136,9 @@ void ui_transit_done(int station, bool ok, const Board& board);
 void ui_station_search_done(bool ok, const Station* stations, int n);
 void ui_station_saved(bool ok, int station);
 void ui_text_saved(bool ok, uint8_t which);  // TextSetting
+// Miniserver setup (Einstellungen > Miniserver; boot without config: first_run).
+void ui_lox_setup_open(bool first_run);
+void ui_lox_done(bool saved, bool ok, int status, const char* detail);
 bool ui_take_calendar();
 void ui_calendar_done(bool ok, const Calendar& cal);
 bool ui_take_meteo();

@@ -520,6 +520,7 @@ void hide_settings() {
   hide(wl_root);
   hide(wp_root);
   hide(loc_root);
+  hide(lox_root);
   hide(disp_root);
   hide(time_root);
   cam_hide_all();
