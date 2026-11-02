@@ -47,6 +47,12 @@ namespace {
 enum class Phase { NotConfigured, Wifi, Loading, Ready, Failed };
 
 Phase phase = Phase::NotConfigured;
+// Loxone is optional: without Miniserver config (or when it is unreachable)
+// the panel still runs weather, clock, ÖV, calendar, cams and settings.
+bool lox_on = false;         // Miniserver configured with a known auth scheme
+bool lox_setup_ask = false;  // first run: offer the Miniserver form once Wi-Fi is up
+uint32_t lox_retry_ms = 0;   // next background structure load after a failure
+constexpr uint32_t kLoxRetryMs = 60000;
 bool load_painted = false;
 uint32_t wifi_started_ms = 0;
 constexpr uint32_t kWifiTimeoutMs = 30000;  // boot: then open the WLAN selection
@@ -658,10 +664,21 @@ void handle_result(const NetResult& res) {
       break;
     case NetOp::Load:
       if (!res.ok) {
-        phase = Phase::Failed;
-        ui_show_message(res.title, res.detail, true);
+        // Miniserver unreachable/unreadable: run without Loxone, retry later.
+        console_printf("Loxone load failed: running without Loxone, retry in %u s\n",
+                       static_cast<unsigned>(kLoxRetryMs / 1000));
+        lox_retry_ms = now_ms() + kLoxRetryMs;
+        ui_set_lox_state(2);
+        if (phase != Phase::Ready) {
+          phase = Phase::Ready;
+          ui_show_controls(controls, 0, 0, str::kLoadFailedTitle);
+        } else {
+          ui_set_status(str::kLoadFailedTitle);
+        }
         break;
       }
+      lox_retry_ms = 0;
+      ui_set_lox_state(0);
       phase = Phase::Ready;
       ui_show_controls(controls, res.shown, res.supported, res.server[0] != '\0' ? res.server : "Loxone");
       if (!panel_touch_ok()) {
@@ -787,12 +804,23 @@ void poll() {
     }
     case Phase::Wifi:
       if (wifi_connected()) {
-        console_printf("Wi-Fi connected, Miniserver %s:%d auth %s\n", settings_loxone().host, settings_loxone().port, auth->name());
-        phase = Phase::Loading;
-        load_painted = false;
         clock_sntp_kick();
         maint_mark_valid();  // UI runs and Wi-Fi works: keep this image after an OTA update
         ui_set_wifi_name(wifi_ssid());
+        if (!lox_on) {
+          console_puts("Wi-Fi connected, no Miniserver configured: running without Loxone");
+          phase = Phase::Ready;
+          ui_set_lox_state(1);
+          ui_show_controls(controls, 0, 0, "");
+          if (lox_setup_ask) {
+            lox_setup_ask = false;
+            ui_lox_setup_open(true);
+          }
+          break;
+        }
+        console_printf("Wi-Fi connected, Miniserver %s:%d auth %s\n", settings_loxone().host, settings_loxone().port, auth->name());
+        phase = Phase::Loading;
+        load_painted = false;
         ui_set_status(str::kStatusConnected);
       } else if (now_ms() - wifi_started_ms > kWifiTimeoutMs) {
         // Not on the first rejection (WPA3 routers often refuse the first SAE
@@ -824,7 +852,11 @@ void poll() {
         break;
       }
       NetRequest r = {};
-      if (ui_take_settings(&r.settings)) {
+      if (lox_on && lox_retry_ms != 0 && !lox_busy && static_cast<int32_t>(now_ms() - lox_retry_ms) >= 0) {
+        lox_retry_ms = now_ms() + kLoxRetryMs;  // background retry; on success the tiles come back
+        r.op = NetOp::Load;
+        net_post(r);
+      } else if (ui_take_settings(&r.settings)) {
         r.op = NetOp::Settings;
         net_post(r);
       } else if (ui_take_cam(&r.cam)) {
@@ -919,29 +951,21 @@ void ui_task(void*) {
     auth = &token_auth;
   }
 
-  if (!configured) {
-    phase = Phase::NotConfigured;
-    console_puts(PANEL_CONFIG_PRESENT ? "panel_config.h is missing Wi-Fi, host, or user"
-                                      : "panel_config.h not found; not configured");
-    // On-device setup: Miniserver form (with a WLAN button). Saving restarts.
-    if (have_wifi) {
-      start_wifi();  // for the connection test
-    } else {
-      wifi_start("", "", "loxone-panel");  // station up for scanning, no network
-    }
-    ui_lox_setup_open(true);
-  } else if (!have_wifi) {
-    // Miniserver known, but no Wi-Fi saved: straight to the WLAN selection.
+  lox_on = configured && auth != nullptr;
+  if (!lox_on) {
+    console_puts(configured ? "Loxone auth scheme unknown: running without Loxone"
+                            : "No Miniserver configured: running without Loxone (optional)");
+    lox_setup_ask = !configured && !settings_load_lox_skip();
+  }
+  if (!have_wifi) {
+    // No Wi-Fi saved: straight to the WLAN selection (Miniserver form follows once connected).
     phase = Phase::Failed;
     wifi_setup_auto = true;
     console_puts("No Wi-Fi configured: WLAN selection");
     wifi_start("", "", "loxone-panel");  // station up for scanning, no network
     ui_wifi_setup_open("", 0);
-  } else if (auth == nullptr) {
-    phase = Phase::Failed;
-    ui_show_message(str::kNotConfiguredTitle, str::kBadAuthBody, false);
   } else {
-    console_printf("Auth scheme %s\n", auth->name());
+    if (lox_on) console_printf("Auth scheme %s\n", auth->name());
     start_wifi();
     phase = Phase::Wifi;
     ui_show_message(str::kConnectingTitle, str::kConnectingBody, false);

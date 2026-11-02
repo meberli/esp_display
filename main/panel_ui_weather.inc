@@ -550,7 +550,14 @@ void show_home() {
   message_open = false;
 }
 
+void open_loxset(bool first_run);
+
 void enter_section(Section section) {
+  if (lox_avail != 0 && section_pages[section] <= 0) {  // Loxone optional: go to its setup
+    open_settings();
+    open_loxset(false);
+    return;
+  }
   if (section_pages[section] <= 0) {
     return;
   }

@@ -215,6 +215,9 @@ const LoxoneConfig& settings_loxone();  // loaded once (after settings_seed_from
 // Takes effect after a restart (settings_loxone() is loaded once).
 bool settings_save_loxone(const LoxoneConfig& c, bool keep_pass);
 bool settings_loxone_has_pass();
+// "lox_skip": first-run Miniserver form skipped (Loxone optional).
+bool settings_load_lox_skip();
+bool settings_save_lox_skip(bool skip);
 
 // --- Backup / restore of the whole "panel" NVS namespace as JSON ---
 // Secret keys (Wi-Fi password, Windy key, iCal URL) only with secrets = true.

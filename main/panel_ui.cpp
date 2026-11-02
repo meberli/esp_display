@@ -451,7 +451,11 @@ const char* section_name(Section section) {
   }
 }
 
+uint8_t lox_avail = 0;  // 0 ready, 1 not configured, 2 unreachable
+
 const char* empty_text(Section section) {
+  if (lox_avail == 1) return "Miniserver nicht eingerichtet";
+  if (lox_avail == 2) return "Miniserver nicht erreichbar";
   switch (section) {
     case kSecFav:
       return "Keine Favoriten";

@@ -536,6 +536,11 @@ void ui_lox_setup_open(bool first_run) {
   open_loxset(first_run);
 }
 
+void ui_set_lox_state(int state) {
+  lox_avail = static_cast<uint8_t>(state);
+  console_printf("UI: Loxone state %d\n", state);
+}
+
 void ui_lox_done(bool saved, bool ok, int status, const char* detail) {
   lox_working = false;
   char t[160];

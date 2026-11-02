@@ -998,6 +998,22 @@ bool settings_save_loxone(const LoxoneConfig& c, bool keep_pass) {
   return ok;
 }
 
+bool settings_load_lox_skip() {
+  uint8_t v = 0;
+  nvs_handle_t h;
+  if (nvs_open(kNs, NVS_READONLY, &h) == ESP_OK) {
+    nvs_get_u8(h, "lox_skip", &v);
+    nvs_close(h);
+  }
+  return v != 0;
+}
+
+bool settings_save_lox_skip(bool skip) {
+  Tx tx;
+  tx.u8("lox_skip", skip ? 1 : 0);
+  return tx.commit();
+}
+
 bool settings_loxone_has_pass() { return settings_loxone().pass[0] != '\0'; }
 
 const LoxoneConfig& settings_loxone() {

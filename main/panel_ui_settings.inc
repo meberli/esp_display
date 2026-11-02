@@ -702,7 +702,7 @@ void open_loxset(bool first_run) {
   lv_textarea_set_text(lox_user_ta, c.user);
   lv_textarea_set_text(lox_pass_ta, "");
   lv_textarea_set_placeholder_text(lox_pass_ta, c.pass[0] != '\0' ? "Passwort (unver\xC3\xA4ndert)" : "Passwort");
-  lv_label_set_text(lox_status, first_run ? "Nicht eingerichtet: Miniserver eintragen. Ohne WLAN zuerst \"WLAN\"."
+  lv_label_set_text(lox_status, first_run ? "Miniserver eintragen (optional) oder \"\xC3\x9C" "berspringen\"."
                                           : "Adresse, Benutzer und Passwort des Miniservers");
   show(lox_root);
   if (c.host[0] == '\0') show_keyboard(lox_host_ta);
@@ -778,6 +778,13 @@ void on_lox_btn(lv_event_t* e) {
   if (which == 0) {
     open_settings();
     open_wifi_list();
+  } else if (which == 3) {  // Überspringen: Loxone stays off, form does not reappear
+    bool ok = settings_save_lox_skip(true);
+    console_printf("Miniserver setup skipped (saved %d)\n", ok ? 1 : 0);
+    lox_first_run = false;
+    lv_keyboard_set_textarea(kb, nullptr);
+    hide(kb);
+    show_home();
   } else {
     lox_submit(which == 2);
   }
@@ -1010,9 +1017,10 @@ void build_settings_screens(lv_obj_t* screen) {
   lv_obj_set_pos(lox_status, 24, 234);
   lv_obj_set_width(lox_status, 432);
   lv_label_set_long_mode(lox_status, LV_LABEL_LONG_WRAP);
-  make_choice(lox_root, kMargin, 300, 136, 56, "WLAN", on_lox_btn, 0, "lox:wifi");
-  make_choice(lox_root, kMargin + 148, 300, 136, 56, "Testen", on_lox_btn, 1, "lox:test");
-  make_choice(lox_root, kMargin + 296, 300, 136, 56, "Speichern", on_lox_btn, 2, "lox:save");
+  make_choice(lox_root, kMargin, 300, 100, 56, "WLAN", on_lox_btn, 0, "lox:wifi");
+  make_choice(lox_root, kMargin + 111, 300, 100, 56, "Testen", on_lox_btn, 1, "lox:test");
+  make_choice(lox_root, kMargin + 222, 300, 100, 56, "Speichern", on_lox_btn, 2, "lox:save");
+  make_choice(lox_root, kMargin + 333, 300, 100, 56, "\xC3\x9C" "berspringen", on_lox_btn, 3, "lox:skip");
 
   kb = lv_keyboard_create(screen);
   lv_obj_set_size(kb, kScreen, 220);
