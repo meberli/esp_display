@@ -140,3 +140,6 @@ CONFIG_LWIP_TCPIP_TASK_STACK_SIZE=4096
 # Sockets: Loxone, PV listener + stick, whatwatt, HTTPS fetch, httpd (3), headroom
 # for a web mirror / Modbus. LWIP_MAX_ACTIVE_TCP stays 16.
 CONFIG_LWIP_MAX_SOCKETS=16
+
+# Wi-Fi 802.11k/v (rm/btm in net.cpp): lets the AP steer the panel to a better BSS.
+CONFIG_ESP_WIFI_11KV_SUPPORT=y

@@ -9,6 +9,8 @@
 #include <string.h>
 
 #include "esp_app_desc.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "esp_crt_bundle.h"
 #include "esp_heap_caps.h"
 #include "esp_http_client.h"
@@ -86,6 +88,11 @@ bool check_github(const char* api, OtaCheck* out) {
     return false;
   }
   HttpGetResult r = http_get(api, nullptr, nullptr, body, kCap, 10000, "Accept", "application/vnd.github+json");
+  if (r.status == 0 && strstr(r.error, "CONNECT") != nullptr) {  // e.g. ESP_ERR_HTTP_CONNECT: one retry
+    console_printf("OTA check: %s, retry in 3 s\n", r.error);
+    vTaskDelay(pdMS_TO_TICKS(3000));
+    r = http_get(api, nullptr, nullptr, body, kCap, 10000, "Accept", "application/vnd.github+json");
+  }
   if (r.status == 403 || r.status == 429) {
     snprintf(out->err, sizeof(out->err), "GitHub-Limit erreicht, sp\xC3\xA4ter erneut pr\xC3\xBC" "fen");
   } else if (r.status == 404) {

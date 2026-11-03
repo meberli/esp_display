@@ -3,6 +3,7 @@
 #include "diag.h"
 
 #include <stdint.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -64,6 +65,94 @@ EventGroupHandle_t wifi_events() {
   return g;
 }
 
+// --- Light roaming -----------------------------------------------------------
+// esp_timer every 10 s (no UI involvement): RSSI below kRoamRssi for ~3 min ->
+// async scan for the same SSID; a BSSID >= kRoamGain dB stronger -> reconnect
+// pinned to it (bssid_set), at most once per 10 min. The pin is cleared on any
+// later disconnect, so a vanished AP never locks the panel out.
+constexpr int kRoamRssi = -70, kRoamGain = 8;
+constexpr int64_t kRoamLowUs = 180LL * 1000000, kRoamGapUs = 600LL * 1000000;
+esp_timer_handle_t g_roam_timer = nullptr;
+int64_t g_low_since = 0, g_last_roam = 0;
+std::atomic<bool> g_roam_scan{false};
+std::atomic<bool> g_roam_pending{false};  // our own disconnect: keep the pin once
+std::atomic<bool> g_pinned{false};
+int g_roam_rssi = 0;
+uint8_t g_roam_cur[6] = {};
+
+void roam_cb(void*) {
+  wifi_ap_record_t ap;
+  if (!g_connected || g_scanning || g_hold || g_roam_scan || esp_wifi_sta_get_ap_info(&ap) != ESP_OK) {
+    g_low_since = 0;
+    return;
+  }
+  int64_t now = esp_timer_get_time();
+  if (ap.rssi >= kRoamRssi) {
+    g_low_since = 0;
+    return;
+  }
+  if (g_low_since == 0) g_low_since = now;
+  if (now - g_low_since < kRoamLowUs) return;
+  if (g_last_roam != 0 && now - g_last_roam < kRoamGapUs) return;
+  g_low_since = now;  // next scan at the earliest after another ~3 min
+  g_roam_rssi = ap.rssi;
+  memcpy(g_roam_cur, ap.bssid, 6);
+  wifi_scan_config_t sc = {};
+  sc.ssid = reinterpret_cast<uint8_t*>(g_ssid);
+  sc.show_hidden = false;
+  g_roam_scan = true;
+  if (esp_wifi_scan_start(&sc, false) != ESP_OK) g_roam_scan = false;
+}
+
+void roam_scan_done() {
+  g_roam_scan = false;
+  uint16_t num = 0;
+  esp_wifi_scan_get_ap_num(&num);
+  if (num > 16) num = 16;
+  wifi_ap_record_t* recs = static_cast<wifi_ap_record_t*>(calloc(num > 0 ? num : 1, sizeof(wifi_ap_record_t)));
+  if (recs == nullptr) {
+    esp_wifi_clear_ap_list();
+    return;
+  }
+  if (esp_wifi_scan_get_ap_records(&num, recs) != ESP_OK) num = 0;
+  int best = -1;
+  for (int i = 0; i < num; ++i) {
+    if (strcmp(reinterpret_cast<const char*>(recs[i].ssid), g_ssid) != 0) continue;
+    if (memcmp(recs[i].bssid, g_roam_cur, 6) == 0) continue;
+    if (best < 0 || recs[i].rssi > recs[best].rssi) best = i;
+  }
+  const uint8_t* c = g_roam_cur;
+  if (best >= 0 && recs[best].rssi >= g_roam_rssi + kRoamGain && g_connected && !g_hold) {
+    const uint8_t* b = recs[best].bssid;
+    printf("Wi-Fi roam: %02x:%02x:%02x:%02x:%02x:%02x %d dBm -> %02x:%02x:%02x:%02x:%02x:%02x %d dBm\n", c[0], c[1],
+           c[2], c[3], c[4], c[5], g_roam_rssi, b[0], b[1], b[2], b[3], b[4], b[5], recs[best].rssi);
+    wifi_config_t wc;
+    if (esp_wifi_get_config(WIFI_IF_STA, &wc) == ESP_OK) {
+      memcpy(wc.sta.bssid, b, 6);
+      wc.sta.bssid_set = true;
+      esp_wifi_set_config(WIFI_IF_STA, &wc);
+      g_pinned = true;
+      g_roam_pending = true;
+      g_last_roam = esp_timer_get_time();
+      esp_wifi_disconnect();  // the disconnect handler reconnects to the pinned BSSID
+    }
+  } else {
+    printf("Wi-Fi roam: stay on %02x:%02x:%02x:%02x:%02x:%02x %d dBm (best other %d dBm, %u seen)\n", c[0], c[1],
+           c[2], c[3], c[4], c[5], g_roam_rssi, best >= 0 ? recs[best].rssi : 0, static_cast<unsigned>(num));
+  }
+  free(recs);
+}
+
+void unpin_bssid() {
+  if (!g_pinned) return;
+  wifi_config_t wc;
+  if (esp_wifi_get_config(WIFI_IF_STA, &wc) == ESP_OK) {
+    wc.sta.bssid_set = false;
+    esp_wifi_set_config(WIFI_IF_STA, &wc);
+  }
+  g_pinned = false;
+}
+
 bool is_auth_reason(int r) {
   return r == WIFI_REASON_AUTH_FAIL || r == WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT || r == WIFI_REASON_HANDSHAKE_TIMEOUT ||
          r == WIFI_REASON_MIC_FAILURE || r == WIFI_REASON_AUTH_EXPIRE || r == WIFI_REASON_ASSOC_FAIL ||
@@ -73,7 +162,14 @@ bool is_auth_reason(int r) {
 void on_event(void*, esp_event_base_t base, int32_t id, void* data) {
   if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
     if (g_ssid[0] != '\0' && !g_hold) esp_wifi_connect();  // empty SSID: station only for scanning
+  } else if (base == WIFI_EVENT && id == WIFI_EVENT_SCAN_DONE) {
+    if (g_roam_scan) roam_scan_done();
   } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
+    if (g_roam_pending) {
+      g_roam_pending = false;  // our roam: reconnect pinned once
+    } else {
+      unpin_bssid();  // normal drop: any AP of the SSID again
+    }
     if (g_connected) diag_wifi_disconnect();
     g_connected = false;
     xEventGroupClearBits(wifi_events(), kBitIp);
@@ -119,6 +215,10 @@ void wifi_start(const char* ssid, const char* password, const char* hostname) {
     esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, on_event, nullptr);
     esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, on_event, nullptr);
     if (hostname != nullptr) esp_netif_set_hostname(g_netif, hostname);
+    esp_timer_create_args_t ra = {};
+    ra.callback = roam_cb;
+    ra.name = "wifi_roam";
+    if (esp_timer_create(&ra, &g_roam_timer) == ESP_OK) esp_timer_start_periodic(g_roam_timer, 10 * 1000000ULL);
     inited = true;
   } else {
     g_scanning = true;  // the stop below raises a disconnect: do not reconnect to the old AP
@@ -137,6 +237,14 @@ void wifi_start(const char* ssid, const char* password, const char* hostname) {
   snprintf(reinterpret_cast<char*>(wc.sta.ssid), sizeof(wc.sta.ssid), "%s", ssid);
   snprintf(reinterpret_cast<char*>(wc.sta.password), sizeof(wc.sta.password), "%s", password);
   wc.sta.threshold.authmode = password[0] != '\0' ? WIFI_AUTH_WPA_PSK : WIFI_AUTH_OPEN;
+  wc.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;      // all channels, then ...
+  wc.sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;  // ... the strongest AP of the SSID
+  wc.sta.bssid_set = false;                        // new/reloaded network: no roam pin
+  wc.sta.rm_enabled = 1;                           // 802.11k (CONFIG_ESP_WIFI_11KV_SUPPORT)
+  wc.sta.btm_enabled = 1;                          // 802.11v BSS transition
+  g_pinned = false;
+  g_roam_pending = false;
+  g_low_since = 0;
   esp_wifi_set_mode(WIFI_MODE_STA);
   esp_wifi_set_config(WIFI_IF_STA, &wc);
   esp_wifi_set_ps(WIFI_PS_NONE);  // was WiFi.setSleep(false)
@@ -310,6 +418,7 @@ int wifi_scan(WifiAp* out, int cap) {
   sc.show_hidden = false;
   // A scan fails while the station is (re)connecting, e.g. to an absent saved
   // network after a failed boot: pause the retries for the scan.
+  for (int i = 0; i < 30 && g_roam_scan; ++i) vTaskDelay(pdMS_TO_TICKS(100));  // let a roam scan finish
   bool paused = !g_connected;
   if (paused) {
     g_scanning = true;
