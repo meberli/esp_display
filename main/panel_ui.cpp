@@ -31,6 +31,19 @@
 #include "board_pins.h"
 #include "weather_derive.h"
 #include <esp_heap_caps.h>
+
+// Idempotent label text: LVGL 8 lv_label_set_text() re-lays out and
+// invalidates the label even for identical text. With one RGB framebuffer
+// (Panlee) the periodic redraws of unchanged status/weather/PV/clock labels
+// showed as flicker. Skip unchanged text for all UI files included below.
+static inline void ui_label_set_text_if_changed(lv_obj_t* obj, const char* text) {
+  if (obj != nullptr && text != nullptr) {
+    const char* cur = lv_label_get_text(obj);
+    if (cur != nullptr && strcmp(cur, text) == 0) return;
+  }
+  lv_label_set_text(obj, text);
+}
+#define lv_label_set_text ui_label_set_text_if_changed
 #include <esp_random.h>
 #include <esp_system.h>
 

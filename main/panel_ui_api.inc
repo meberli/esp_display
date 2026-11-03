@@ -537,6 +537,7 @@ void ui_lox_setup_open(bool first_run) {
 }
 
 void ui_set_lox_state(int state) {
+  if (lox_avail == static_cast<uint8_t>(state)) return;  // unchanged: no log, no redraw
   lox_avail = static_cast<uint8_t>(state);
   console_printf("UI: Loxone state %d\n", state);
 }

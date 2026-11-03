@@ -52,7 +52,8 @@ Phase phase = Phase::NotConfigured;
 bool lox_on = false;         // Miniserver configured with a known auth scheme
 bool lox_setup_ask = false;  // first run: offer the Miniserver form once Wi-Fi is up
 bool wifi_up = false;
-bool lox_loaded = false;        // Wi-Fi up handled (SNTP, Loxone load); reset on drop
+bool lox_loaded = false;
+bool lox_fail_shown = false;  // failure status already painted (retries stay silent)        // Wi-Fi up handled (SNTP, Loxone load); reset on drop
 uint32_t lox_retry_ms = 0;   // next background structure load after a failure
 constexpr uint32_t kLoxRetryMs = 60000;
 bool load_painted = false;
@@ -670,16 +671,18 @@ void handle_result(const NetResult& res) {
         console_printf("Loxone load failed: running without Loxone, retry in %u s\n",
                        static_cast<unsigned>(kLoxRetryMs / 1000));
         lox_retry_ms = now_ms() + kLoxRetryMs;
-        ui_set_lox_state(2);
+        ui_set_lox_state(2);  // no-op when already "unreachable"
         if (phase != Phase::Ready) {
           phase = Phase::Ready;
           ui_show_controls(controls, 0, 0, str::kLoadFailedTitle);
-        } else {
+        } else if (!lox_fail_shown) {
           ui_set_status(str::kLoadFailedTitle);
         }
+        lox_fail_shown = true;
         break;
       }
       lox_retry_ms = 0;
+      lox_fail_shown = false;
       lox_loaded = true;
       ui_set_lox_state(0);
       phase = Phase::Ready;

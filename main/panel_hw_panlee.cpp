@@ -164,7 +164,7 @@ bool rgb_begin() {
   c.in_color_format = LCD_COLOR_FMT_RGB565;
   c.out_color_format = LCD_COLOR_FMT_RGB565;
   c.num_fbs = 1;
-  c.bounce_buffer_size_px = kPanelWidth * 10;
+  c.bounce_buffer_size_px = kPanelWidth * 20;  // 2 x 20 lines x 480 x 2 B = 38 KB internal DMA
   c.dma_burst_size = 64;
   c.hsync_gpio_num = static_cast<gpio_num_t>(kPinHsync);
   c.vsync_gpio_num = static_cast<gpio_num_t>(kPinVsync);
