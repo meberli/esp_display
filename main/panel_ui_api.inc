@@ -413,10 +413,11 @@ bool ui_take_ota(char* url, size_t n, bool* check, bool* own) {
 
 void ui_ota_checked(const OtaCheck& c) {
   ota_running = false;
+  ota_no_img = c.ok && c.cmp > 0 && c.url[0] == '\0';
   if (!c.ok) {
     ota_state = OtaUi::Error;
     snprintf(ota_msg, sizeof(ota_msg), "%s", c.err);
-  } else if (c.cmp > 0) {
+  } else if (c.cmp > 0 && c.url[0] != '\0') {  // install only with this board's image
     ota_state = OtaUi::Newer;
     snprintf(ota_new_ver, sizeof(ota_new_ver), "%s", c.version);
     snprintf(ota_new_url, sizeof(ota_new_url), "%s", c.url);
@@ -426,7 +427,8 @@ void ui_ota_checked(const OtaCheck& c) {
     ota_state = OtaUi::Current;
     ota_new_ver[0] = '\0';
     ota_new_url[0] = '\0';
-    if (c.cmp < 0) snprintf(ota_msg, sizeof(ota_msg), "Neueste Version online: v%s", c.version);
+    if (c.cmp > 0) snprintf(ota_msg, sizeof(ota_msg), "Kein Update f\xC3\xBCr dieses Board (neuestes Release v%s)", c.version);
+    else if (c.cmp < 0) snprintf(ota_msg, sizeof(ota_msg), "Neueste Version online: v%s", c.version);
     else ota_msg[0] = '\0';
   }
   if (nav == Nav::Maint) maint_refresh();

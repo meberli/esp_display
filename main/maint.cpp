@@ -249,7 +249,11 @@ esp_err_t on_update(httpd_req_t* req) {
     return httpd_resp_sendstr(req, part == nullptr ? "Keine OTA-Partition" : "Falsche Dateigroesse");
   }
   esp_ota_handle_t ota = 0;
-  if (esp_ota_begin(part, req->content_len, &ota) != ESP_OK) return httpd_resp_send_500(req);
+  // OTA_WITH_SEQUENTIAL_WRITES: erase sector by sector while writing. With the
+  // image size, esp_ota_begin erased ~1.8 MB up front (seconds of flash work with
+  // the cache off) before the first recv; the TCP window stayed closed meanwhile
+  // and uploads died after ~7 s / 90-196 KB with recv errno 11 (Panlee, 0.9.7).
+  if (esp_ota_begin(part, OTA_WITH_SEQUENTIAL_WRITES, &ota) != ESP_OK) return httpd_resp_send_500(req);
   console_printf("Web: firmware upload %u bytes -> %s\n", static_cast<unsigned>(req->content_len), part->label);
   char* buf = static_cast<char*>(heap_caps_malloc(4096, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
   if (buf == nullptr) {
@@ -477,6 +481,7 @@ bool maint_web_start() {
   cfg.stack_size = 5120;
   cfg.max_open_sockets = 3;
   cfg.lru_purge_enable = true;
+  cfg.recv_wait_timeout = 10;  // s; slow Wi-Fi (-75 dBm) during flash writes (upload loop allows 6 x)
   if (httpd_start(&g_server, &cfg) != ESP_OK) {
     g_server = nullptr;
     return false;

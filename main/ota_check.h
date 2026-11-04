@@ -9,7 +9,7 @@ struct OtaCheck {
   int cmp;            // offered vs running: 1 newer, 0 same, -1 older
   char version[32];   // offered version, without "v"
   char notes[96];     // first line of the release notes (ASCII), may be empty
-  char url[256];      // image to install (exact release asset)
+  char url[256];      // image to install (exact release asset); empty: no image for this board
   char err[96];       // message for the panel when !ok
 };
 

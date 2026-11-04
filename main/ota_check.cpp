@@ -117,8 +117,9 @@ bool check_github(const char* api, OtaCheck* out) {
     if (strcmp(name, asset) == 0) snprintf(out->url, sizeof(out->url), "%s", a["browser_download_url"] | "");
   }
   if (out->url[0] == '\0') {
-    snprintf(out->err, sizeof(out->err), "Release v%s ohne %s", out->version, asset);
-    return false;
+    // Newest release has no image for this board: a valid answer, not an
+    // installable update (UI: "Kein Update für dieses Board").
+    console_printf("OTA check: release v%s has no %s\n", out->version, asset);
   }
   ascii_line(doc["body"] | "", out->notes, sizeof(out->notes));
   return true;
@@ -215,6 +216,6 @@ bool ota_check(const char* cfg_url, bool own, OtaCheck* out) {
   out->ok = ok;
   if (ok) out->cmp = ota_ver::offer_cmp(out->version, ota_running_version());
   console_printf("OTA check: running %s, offered %s -> %s\n", ota_running_version(), ok ? out->version : "-",
-                 !ok ? out->err : out->cmp > 0 ? "update available" : out->cmp == 0 ? "up to date" : "older");
+                 !ok ? out->err : out->url[0] == '\0' ? "no image for this board" : out->cmp > 0 ? "update available" : out->cmp == 0 ? "up to date" : "older");
   return ok;
 }

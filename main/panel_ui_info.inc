@@ -37,6 +37,7 @@ bool ota_install_req = false;  // UI -> net: install ota_new_url
 bool ota_running = false;      // request handed to the net task
 uint32_t ota_t0 = 0;
 char ota_msg[96] = "";
+bool ota_no_img = false;  // newest release has no image for this board
 char ota_new_ver[32] = "";
 char ota_new_url[256] = "";
 char ota_notes[96] = "";
@@ -1271,7 +1272,8 @@ void maint_refresh() {
     if (ota_notes[0] != '\0') snprintf(sub, sizeof(sub), "Neu: %s", ota_notes);
     else snprintf(sub, sizeof(sub), "Installiert: v%s - tippen zum Installieren", run);
   } else if (ota_state == OtaUi::Current) {
-    snprintf(title, sizeof(title), "Aktuell (v%s)", run);
+    if (ota_no_img) snprintf(title, sizeof(title), "Installiert: v%s", run);
+    else snprintf(title, sizeof(title), "Aktuell (v%s)", run);
     snprintf(sub, sizeof(sub), "%s", ota_msg[0] ? ota_msg : "Tippen, um erneut zu pr\xC3\xBC" "fen");
   } else if (ota_state == OtaUi::Error) {
     snprintf(title, sizeof(title), "Firmware pr\xC3\xBC" "fen");
