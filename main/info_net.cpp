@@ -8,6 +8,7 @@
 
 #include "esp_heap_caps.h"
 #include "waste_api.h"
+#include "transit_parse.h"
 #include "net.h"
 #include "sys.h"
 #include <esp_log.h>
@@ -104,57 +105,99 @@ int transit_search(const char* query, Station* out, int cap) {
   return n;
 }
 
-bool transit_board(const Station& st, Board* out) {
-  memset(out, 0, sizeof(*out));
-  out->st = st;
-  char url[400];
+namespace {
+// One stationboard request into out (cap). false on HTTP/JSON error.
+bool board_fetch(const char* id, Departure* out, int cap, int* n) {
+  *n = 0;
+  char url[440];
   snprintf(url, sizeof(url),
            "https://transport.opendata.ch/v1/stationboard?id=%s&limit=%d"
            "&fields[]=stationboard/category&fields[]=stationboard/number&fields[]=stationboard/to"
            "&fields[]=stationboard/stop/departureTimestamp&fields[]=stationboard/stop/delay"
-           "&fields[]=stationboard/stop/platform&fields[]=stationboard/stop/prognosis/platform",
-           st.id, kMaxDeps);
+           "&fields[]=stationboard/stop/platform&fields[]=stationboard/stop/prognosis/platform"
+           "&fields[]=stationboard/stop/prognosis/departure",
+           id, cap);
   constexpr size_t kCap = 24 * 1024;
   uint8_t* body = psram(kCap);
   if (body == nullptr) return false;
   HttpGetResult http = http_get(url, nullptr, nullptr, body, kCap, 10000);
   diag_svc(kSvcOev, http.ok && http.status == 200, http.status);
   if (!http.ok || http.status != 200) {
-    ESP_LOGW(TAG, "Stationboard %s HTTP %d %s", st.id, http.status, http.error);
+    ESP_LOGW(TAG, "Stationboard HTTP %d %s", http.status, http.error);
     heap_caps_free(body);
     return false;
   }
-  DynamicJsonDocument doc(12288);
-  DeserializationError err = deserializeJson(doc, reinterpret_cast<const char*>(body), http.length);
+  int r = transit_parse_board(reinterpret_cast<const char*>(body), http.length, out, cap, sanitize);
   heap_caps_free(body);
-  if (err) {
-    ESP_LOGW(TAG, "Stationboard JSON %s", err.c_str());
+  if (r < 0) {
+    ESP_LOGW(TAG, "Stationboard JSON unreadable");
     return false;
   }
-  for (JsonObject j : doc["stationboard"].as<JsonArray>()) {
-    if (out->n >= kMaxDeps) break;
-    Departure& d = out->d[out->n];
-    const char* cat = j["category"] | "";
-    const char* num = j["number"] | "";
-    d.bus = strcmp(cat, "B") == 0 || strcmp(cat, "BUS") == 0 || strcmp(cat, "NFB") == 0 || strcmp(cat, "T") == 0;
-    // "S" + "4" -> "S4"; buses show just the number with a bus icon.
-    if (d.bus) snprintf(d.line, sizeof(d.line), "%s", num[0] != '\0' ? num : cat);
-    else if (strlen(cat) <= 2) snprintf(d.line, sizeof(d.line), "%s%s", cat, num);
-    else snprintf(d.line, sizeof(d.line), "%s %s", cat, num);
-    snprintf(d.to, sizeof(d.to), "%s", j["to"] | "");
-    sanitize(d.to);
-    JsonObject stop = j["stop"];
-    d.dep = stop["departureTimestamp"] | 0LL;
-    d.delay = stop["delay"] | 0;
-    const char* pl = stop["platform"] | "";
-    const char* ppl = stop["prognosis"]["platform"] | "";
-    if (ppl[0] != '\0' && strcmp(ppl, pl) != 0) snprintf(d.platform, sizeof(d.platform), "%s!", ppl);
-    else snprintf(d.platform, sizeof(d.platform), "%s", pl);
-    if (d.dep > 0) out->n++;
+  *n = r;
+  return true;
+}
+
+// Rail stations list no buses: those leave from a separate stop ("<Ort>, Bahnhof").
+// Looked up once per station id and boot; "" = none.
+struct BusStop {
+  char rail[12];
+  char bus[12];
+  bool tried;
+};
+BusStop g_bus[kStationN] = {};
+
+const char* bus_stop_for(const Station& st) {
+  BusStop* e = nullptr;
+  for (BusStop& b : g_bus)
+    if (b.tried && strcmp(b.rail, st.id) == 0) return b.bus;
+  for (BusStop& b : g_bus)
+    if (!b.tried) { e = &b; break; }
+  if (e == nullptr) e = &g_bus[0];  // stations changed: reuse a slot
+  memset(e, 0, sizeof(*e));
+  snprintf(e->rail, sizeof(e->rail), "%s", st.id);
+  char name[64];
+  if (!transit_bus_stop_name(st.name, name, sizeof(name))) {
+    e->tried = true;
+    return "";
+  }
+  Station hits[kMaxStationHits];
+  int n = transit_search(name, hits, kMaxStationHits);
+  if (n < 0) return "";  // network error: try again next time
+  e->tried = true;
+  char want[64];
+  snprintf(want, sizeof(want), "%s", name);
+  sanitize(want);
+  for (int i = 0; i < n; ++i)
+    if (strcmp(hits[i].name, want) == 0 && strcmp(hits[i].id, st.id) != 0) {
+      snprintf(e->bus, sizeof(e->bus), "%s", hits[i].id);
+      break;
+    }
+  return e->bus;
+}
+}  // namespace
+
+bool transit_board(const Station& st, Board* out) {
+  memset(out, 0, sizeof(*out));
+  out->st = st;
+  int n = 0;
+  if (!board_fetch(st.id, out->d, kMaxDeps, &n)) return false;
+  out->n = n;
+  bool has_bus = false;
+  for (int i = 0; i < n; ++i) has_bus |= out->d[i].bus;
+  int nb = 0;
+  if (!has_bus) {
+    const char* bus = bus_stop_for(st);
+    if (bus[0] != '\0') {
+      Departure* tmp = static_cast<Departure*>(heap_caps_malloc(sizeof(Departure) * kMaxDeps, MALLOC_CAP_SPIRAM));
+      if (tmp != nullptr) {
+        if (board_fetch(bus, tmp, kMaxDeps, &nb)) out->n = transit_merge(out->d, out->n, tmp, nb, kMaxDeps);
+        heap_caps_free(tmp);
+      }
+    }
   }
   out->fetched = time(nullptr);
   out->ok = true;
-  console_printf("Stationboard %s: %d departures (%u bytes)\n", st.name, out->n, static_cast<unsigned>(http.length));
+  console_printf("Stationboard: %d departures (%d from the bus stop)\n", out->n, nb);
   return true;
 }
 
@@ -185,7 +228,7 @@ void waste_update(const char* base, const char* bfs, const char* zone, int64_t n
   int today = (lt.tm_year + 1900) * 1000 + lt.tm_yday;
   bool changed = key != g_waste.key;
   if (!changed && g_waste.ok && g_waste.ok_day == today) return;            // once per day
-  if (!changed && g_waste.tried != 0 && now - g_waste.tried < 3600) return;  // failed: retry hourly
+  if (!changed && g_waste.tried != 0 && now - g_waste.tried < 600) return;  // failed: retry after 10 min
   g_waste.key = key;
   g_waste.tried = now;
   if (changed) {

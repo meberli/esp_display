@@ -1,3 +1,4 @@
+#include "esp_attr.h"
 #include "settings.h"
 #include "waste_window.h"
 
@@ -205,6 +206,21 @@ bool settings_save_display(const DisplaySettings& d) {
   return tx.commit();
 }
 
+uint8_t settings_load_design() {
+  uint8_t v = 0;
+  nvs_handle_t h;
+  if (nvs_open(kNs, NVS_READONLY, &h) != ESP_OK) return 0;
+  if (nvs_get_u8(h, "ui_design", &v) != ESP_OK || v > 1) v = 0;
+  nvs_close(h);
+  return v;
+}
+
+bool settings_save_design(uint8_t design) {
+  Tx tx;
+  tx.u8("ui_design", design);
+  return tx.commit();
+}
+
 TimeSettings settings_default_time() {
   TimeSettings t = {};
   snprintf(t.server, sizeof(t.server), "ch.pool.ntp.org");
@@ -221,7 +237,21 @@ TimeSettings settings_load_time() {
   bool ok = get_str(h, "ntp_srv", n.server, sizeof(n.server)) && n.server[0] != '\0' &&
             get_str(h, "tz_name", n.tz_name, sizeof(n.tz_name)) && get_str(h, "tz_posix", n.tz, sizeof(n.tz)) &&
             n.tz[0] != '\0';
+  // One-time reset to the Zurich default: earlier test builds could leave another zone stored.
+  // Choices saved after this migration (tz_rev=1) are kept as the user picked them.
+  uint8_t rev = 0;
+  bool migrated = nvs_get_u8(h, "tz_rev", &rev) == ESP_OK && rev >= 1;
   nvs_close(h);
+  if (!migrated) {
+    if (ok) snprintf(t.server, sizeof(t.server), "%s", n.server);
+    Tx tx;
+    tx.str("ntp_srv", t.server);
+    tx.str("tz_name", t.tz_name);
+    tx.str("tz_posix", t.tz);
+    tx.u8("tz_rev", 1);
+    tx.commit();
+    return t;
+  }
   return ok ? n : t;
 }
 
@@ -230,6 +260,7 @@ bool settings_save_time(const TimeSettings& t) {
   tx.str("ntp_srv", t.server);
   tx.str("tz_name", t.tz_name);
   tx.str("tz_posix", t.tz);
+  tx.u8("tz_rev", 1);
   return tx.commit();
 }
 
@@ -703,6 +734,23 @@ bool settings_save_pv_on(bool on) {
   return tx.commit();
 }
 
+void settings_load_sw_target(char* out, size_t len) {
+  if (len == 0) return;
+  out[0] = '\0';
+  nvs_handle_t h;
+  if (nvs_open(kNs, NVS_READONLY, &h) == ESP_OK) {
+    size_t n = len;
+    if (nvs_get_str(h, "sw_target", out, &n) != ESP_OK) out[0] = '\0';
+    nvs_close(h);
+  }
+}
+
+bool settings_save_sw_target(const char* id) {
+  Tx tx;
+  tx.str("sw_target", id);
+  return tx.commit();
+}
+
 bool settings_load_energy_hist(EnergyHist* hist) {
   energy_hist_clear(hist);
   nvs_handle_t h;
@@ -826,7 +874,7 @@ struct AckRing {
   uint8_t next;
 };
 static_assert(sizeof(AckRing) == 48 * 4 + 4, "rem_ack size must match the schema (kAckBytes)");
-AckRing ack_ring;
+EXT_RAM_BSS_ATTR AckRing ack_ring;
 bool ack_loaded = false;
 
 void ack_load() {
@@ -1019,4 +1067,87 @@ bool settings_loxone_has_pass() { return settings_loxone().pass[0] != '\0'; }
 const LoxoneConfig& settings_loxone() {
   static LoxoneConfig c = settings_load_loxone();
   return c;
+}
+
+// --- Co4 Energie ---------------------------------------------------------------
+// The offline token is written with one nvs_set_str + commit: NVS writes the new
+// entry before it erases the old one, so a power cut leaves the old or the new
+// token, never half of one. Values are never logged (Tx logs key names only).
+
+bool settings_load_co4_token(char* out, size_t n) {
+  if (n > 0) out[0] = '\0';
+  nvs_handle_t h;
+  if (nvs_open(kNs, NVS_READONLY, &h) != ESP_OK) return false;
+  bool ok = get_str(h, "co4_rt", out, n) && out[0] != '\0';
+  nvs_close(h);
+  if (!ok && n > 0) out[0] = '\0';
+  return ok;
+}
+
+bool settings_save_co4_token(const char* rt) {
+  Tx tx;
+  if (rt == nullptr || rt[0] == '\0') tx.erase("co4_rt");
+  else tx.str("co4_rt", rt);
+  return tx.commit();
+}
+
+bool settings_load_co4_zone(char* id, size_t idn, char* name, size_t nn) {
+  if (idn > 0) id[0] = '\0';
+  if (nn > 0) name[0] = '\0';
+  nvs_handle_t h;
+  if (nvs_open(kNs, NVS_READONLY, &h) != ESP_OK) return false;
+  bool ok = get_str(h, "co4_zone", id, idn) && id[0] != '\0';
+  if (ok) get_str(h, "co4_zname", name, nn);
+  nvs_close(h);
+  if (!ok && idn > 0) id[0] = '\0';
+  return ok;
+}
+
+bool settings_save_co4_zone(const char* id, const char* name, const char* site) {
+  Tx tx;
+  if (id == nullptr || id[0] == '\0') {
+    tx.erase("co4_zone");
+    tx.erase("co4_zname");
+    tx.erase("co4_site");
+  } else {
+    tx.str("co4_zone", id);
+    if (name != nullptr && name[0] != '\0') tx.str("co4_zname", name);
+    else tx.erase("co4_zname");
+    if (site != nullptr && site[0] != '\0') tx.str("co4_site", site);
+    else tx.erase("co4_site");
+  }
+  return tx.commit();
+}
+
+bool settings_load_co4_site(char* site, size_t n) {
+  if (n > 0) site[0] = '\0';
+  nvs_handle_t h;
+  if (nvs_open(kNs, NVS_READONLY, &h) != ESP_OK) return false;
+  bool ok = get_str(h, "co4_site", site, n) && site[0] != '\0';
+  nvs_close(h);
+  if (!ok && n > 0) site[0] = '\0';
+  return ok;
+}
+
+bool settings_load_co4_expired() {
+  nvs_handle_t h;
+  if (nvs_open(kNs, NVS_READONLY, &h) != ESP_OK) return false;
+  uint8_t v = 0;
+  bool ok = nvs_get_u8(h, "co4_exp", &v) == ESP_OK && v == 1;
+  nvs_close(h);
+  return ok;
+}
+
+bool settings_save_co4_expired(bool expired) {
+  Tx tx;
+  if (expired) tx.u8("co4_exp", 1);
+  else tx.erase("co4_exp");
+  return tx.commit();
+}
+
+bool settings_save_co4_site(const char* site) {
+  Tx tx;
+  if (site == nullptr || site[0] == '\0') tx.erase("co4_site");
+  else tx.str("co4_site", site);
+  return tx.commit();
 }

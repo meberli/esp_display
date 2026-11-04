@@ -22,6 +22,7 @@ lv_obj_t* es_big = nullptr;
 lv_obj_t* es_unit = nullptr;
 lv_obj_t* es_amps = nullptr;
 lv_obj_t* es_val[3] = {};
+lv_obj_t* es_name[3] = {};
 lv_obj_t* es_price = nullptr;
 lv_obj_t* es_hin[24] = {};
 lv_obj_t* es_hout[24] = {};
@@ -37,6 +38,7 @@ lv_obj_t* ew_status = nullptr;
 lv_obj_t* ew_big = nullptr;
 lv_obj_t* ew_meter = nullptr;
 lv_obj_t* ew_val[3] = {};
+lv_obj_t* ew_name[3] = {};
 lv_obj_t* ew_price = nullptr;
 lv_obj_t* ew_hint = nullptr;
 lv_obj_t* ew_wk_tot = nullptr;
@@ -48,10 +50,11 @@ constexpr int kEnRows = 18;
 lv_obj_t* enset_val[kEnRows] = {};
 
 constexpr int kEsBase = 150;    // Strom hourly bars: baseline inside card 1
-constexpr int kEsUp = 44;       // import bar height max
+constexpr int kEsUp = 38;       // import bar height max (stays below the es_amps line)
 constexpr int kEsDown = 16;     // export bar height max
 constexpr int kDayBase = 118;   // 7-day bars: baseline inside card 2
 constexpr int kDayH = 74;
+
 
 lv_obj_t* en_card(lv_obj_t* parent, int y, int h) {
   lv_obj_t* c = lv_obj_create(parent);
@@ -67,6 +70,56 @@ lv_obj_t* en_lbl(lv_obj_t* parent, const lv_font_t* f, uint32_t color, int x, in
   lv_obj_set_pos(l, x, y);
   if (text != nullptr) lv_label_set_text(l, text);
   return l;
+}
+
+// Day label under a 7-day bar group starting at x: one fixed 56 px slot
+// centred on the bars, so the label lines up whatever the font width.
+lv_obj_t* en_daylbl(lv_obj_t* c, int x, int y) {
+  lv_obj_t* l = en_lbl(c, &font_inter_14, kTextDim, x - 10, y, "-");
+  lv_obj_set_width(l, 56);
+  lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
+  lv_label_set_long_mode(l, LV_LABEL_LONG_CLIP);
+  return l;
+}
+
+// Right column of the Strom / Wasser cards (x 244..414): name left, value
+// right-aligned against the card edge. en_kv_fit() keeps the pair apart
+// whatever the design font (Montserrat is wider than Inter) or value length:
+// value in its own font if both fit, else the value drops to the name font,
+// and only if that still does not fit the name is shortened with "...".
+constexpr int kKvR = 414, kKvGap = 6;
+constexpr int kKvXStrom = 236;   // separator at 228
+constexpr int kKvXWasser = 212;  // separator at 204: longer names ("Kosten gestern")
+lv_obj_t* en_kv_name(lv_obj_t* c, int x, int y, const char* text) {
+  lv_obj_t* l = en_lbl(c, &font_inter_14, kTextDim, x, y, text);
+  lv_label_set_long_mode(l, LV_LABEL_LONG_DOT);
+  return l;
+}
+void en_kv_val(lv_obj_t* v, int x, int y) {
+  lv_obj_set_width(v, kKvR - x);
+  lv_obj_set_style_text_align(v, LV_TEXT_ALIGN_RIGHT, 0);
+  lv_label_set_long_mode(v, LV_LABEL_LONG_CLIP);
+  lv_obj_set_pos(v, x, y);
+  lv_obj_set_user_data(v, const_cast<lv_font_t*>(lv_obj_get_style_text_font(v, LV_PART_MAIN)));
+}
+int en_text_w(lv_obj_t* l, const char* t) {
+  lv_point_t sz;
+  lv_txt_get_size(&sz, t, lv_obj_get_style_text_font(l, LV_PART_MAIN), lv_obj_get_style_text_letter_space(l, LV_PART_MAIN), 0,
+                  LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+  return sz.x;
+}
+void en_kv_fit(lv_obj_t* name, lv_obj_t* val) {
+  const int need = en_text_w(name, lv_label_get_text(name));
+  const int x = lv_obj_get_x(name);
+  const lv_font_t* big = static_cast<const lv_font_t*>(lv_obj_get_user_data(val));
+  if (big != nullptr) lv_obj_set_style_text_font(val, big, 0);
+  int avail = kKvR - x - en_text_w(val, lv_label_get_text(val)) - kKvGap;
+  if (need > avail) {
+    lv_obj_set_style_text_font(val, lv_obj_get_style_text_font(name, LV_PART_MAIN), 0);
+    avail = kKvR - x - en_text_w(val, lv_label_get_text(val)) - kKvGap;
+  }
+  lv_obj_set_width(name, need <= avail ? LV_SIZE_CONTENT : (avail > 24 ? avail : 24));
+  lv_obj_move_foreground(val);
 }
 
 lv_obj_t* en_rect(lv_obj_t* parent, int x, int y, int w, int h, uint32_t color) {
@@ -87,10 +140,7 @@ void en_set_bar(lv_obj_t* b, int base, int h, bool up) {
 }
 
 void en_dots(lv_obj_t* root, int active) {
-  for (int i = 0; i < 3; ++i) {
-    lv_obj_t* d = make_bar(root, 220 + i * 16, 452, 8, 8, i == active ? kText : kTextDim, i == active ? LV_OPA_COVER : LV_OPA_50);
-    (void)d;
-  }
+  dots_set(make_dots(root), 5, active);  // 3 Energie pages + 2 Co4 pages (one swipe chain)
 }
 
 const char* en_wday(int32_t ymd) {
@@ -112,6 +162,7 @@ void en_build_status(lv_obj_t* root, lv_obj_t** st) {
   lv_obj_set_style_text_align(*st, LV_TEXT_ALIGN_RIGHT, 0);
   lv_label_set_long_mode(*st, LV_LABEL_LONG_DOT);
   lv_obj_set_pos(*st, 236, 25);
+  header_note(*st);
 }
 
 // --- Bilanz (PV): Herkunft (PV vs Netz) and Verwendung (Eigenverbrauch vs Einspeisung) as donuts.
@@ -149,7 +200,7 @@ lv_obj_t* mx_donut(lv_obj_t* parent, int x, int y, int d) {
 
 void build_mix_screen(lv_obj_t* screen) {
   lv_obj_t* r = en_root[1] = make_screen_root(screen, "Bilanz");
-  lv_obj_set_pos(lv_obj_get_child(r, 0), 56, 20);
+  header_title_at(lv_obj_get_child(r, 0), 56, 20, 0);
   lv_obj_t* ic = make_label(r, &font_icon_bolt_24, lv_color_hex(kGreen));
   lv_label_set_text(ic, ICON_BOLT);
   lv_obj_set_pos(ic, 22, 19);
@@ -189,7 +240,7 @@ void build_mix_screen(lv_obj_t* screen) {
     const int x = 30 + d * 56;
     mx_dself[d] = en_rect(c, x + 4, kMxBase - 1, 28, 1, kGreen);
     mx_dgrid[d] = en_rect(c, x + 4, kMxBase - 1, 28, 1, kAmber);
-    mx_dlbl[d] = en_lbl(c, &font_inter_14, kTextDim, x + 8, kMxBase + 4, "-");
+    mx_dlbl[d] = en_daylbl(c, x, kMxBase + 4);
   }
   make_bar(c, 18, kMxBase, 396, 1, kBorder, LV_OPA_COVER);
   en_dots(r, 1);
@@ -200,7 +251,7 @@ void build_energy_screens(lv_obj_t* screen) {
   pv_v = static_cast<PvView*>(heap_caps_calloc(1, sizeof(PvView), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
   // --- Strom
   lv_obj_t* r = en_root[0] = make_screen_root(screen, "Strom");
-  lv_obj_set_pos(lv_obj_get_child(r, 0), 56, 20);
+  header_title_at(lv_obj_get_child(r, 0), 56, 20, 0);
   lv_obj_t* ic = make_label(r, &font_icon_bolt_24, lv_color_hex(kAmber));
   lv_label_set_text(ic, ICON_BOLT);
   lv_obj_set_pos(ic, 22, 19);
@@ -223,18 +274,18 @@ void build_energy_screens(lv_obj_t* screen) {
   es_big = en_lbl(c, &font_inter_light_40, kText, 16, 36, "-");
   es_unit = en_lbl(c, &font_inter_20, kTextDim, 0, 0, "W");
   es_amps = en_lbl(c, &font_inter_14, kTextDim, 18, 94, "");
+  lv_obj_set_width(es_amps, 204);  // left column only (separator at x 228)
+  lv_label_set_long_mode(es_amps, LV_LABEL_LONG_DOT);
   make_bar(c, 228, 14, 1, 106, kBorder, LV_OPA_COVER);
   const char* names[3] = {"Bezug heute", "Einspeisung", "Kosten netto"};
   const uint32_t colors[3] = {kAmber, kAccent, kText};
   for (int i = 0; i < 3; ++i) {
-    en_lbl(c, &font_inter_14, kTextDim, 244, 14 + i * 30, names[i]);
+    es_name[i] = en_kv_name(c, kKvXStrom, 14 + i * 30, names[i]);
     es_val[i] = make_label(c, &font_inter_sb16, lv_color_hex(colors[i]));
-    lv_obj_set_width(es_val[i], 96);
-    lv_obj_set_style_text_align(es_val[i], LV_TEXT_ALIGN_RIGHT, 0);
-    lv_obj_set_pos(es_val[i], 318, 12 + i * 30);
+    en_kv_val(es_val[i], kKvXStrom, 12 + i * 30);
   }
-  es_price = en_lbl(c, &font_inter_14, kTextDim, 244, 102, "");
-  lv_obj_set_width(es_price, 184);
+  es_price = en_lbl(c, &font_inter_14, kTextDim, kKvXStrom, 102, "");
+  lv_obj_set_width(es_price, kKvR - kKvXStrom);
   lv_label_set_long_mode(es_price, LV_LABEL_LONG_DOT);
   for (int h = 0; h < 24; ++h) {
     es_hself[h] = en_rect(c, 22 + h * 16, kEsBase - 1, 11, 1, kGreen);
@@ -242,9 +293,20 @@ void build_energy_screens(lv_obj_t* screen) {
     es_hout[h] = en_rect(c, 22 + h * 16, kEsBase + 1, 11, 1, kAccent);
   }
   make_bar(c, 18, kEsBase, 396, 1, kBorder, LV_OPA_COVER);
+  // Hour axis: 0 and 24 flush with the chart edges, 6/12/18 centred on their
+  // tick; the legend fills the gap between 12 and 18 so it never meets them.
+  const char* hn[5] = {"0", "6", "12", "18", "24"};
+  for (int i = 0; i < 5; ++i) {
+    lv_obj_t* l = en_lbl(c, &font_inter_14, kTextDim, 0, kEsBase + kEsDown + 6, hn[i]);
+    lv_obj_set_width(l, 32);
+    lv_obj_set_style_text_align(l, i == 0 ? LV_TEXT_ALIGN_LEFT : i == 4 ? LV_TEXT_ALIGN_RIGHT : LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_x(l, i == 0 ? 18 : i == 4 ? 414 - 32 : 22 + i * 96 - 16);
+  }
   es_hleg = en_lbl(c, &font_inter_14, kGreen, 0, kEsBase + kEsDown + 6, "PV direkt");
-  lv_obj_set_x(es_hleg, 132);
-  for (int h = 0; h <= 24; h += 6) en_lbl(c, &font_inter_14, kTextDim, h == 24 ? 386 : 18 + h * 16, kEsBase + kEsDown + 6, h == 24 ? "24" : h == 0 ? "0" : h == 6 ? "6" : h == 12 ? "12" : "18");
+  lv_obj_set_width(es_hleg, 64);
+  lv_obj_set_style_text_align(es_hleg, LV_TEXT_ALIGN_CENTER, 0);
+  lv_label_set_long_mode(es_hleg, LV_LABEL_LONG_CLIP);
+  lv_obj_set_x(es_hleg, 22 + 2 * 96 + 16);  // 230..294: between "12" and "18"
   c = en_card(r, 272, 172);
   en_lbl(c, &font_inter_sb16, kText, 18, 12, "Letzte 7 Tage");
   es_wk_tot = en_lbl(c, &font_inter_14, kTextDim, 0, 14, "");
@@ -255,7 +317,7 @@ void build_energy_screens(lv_obj_t* screen) {
     int x = 30 + d * 56;
     es_din[d] = en_rect(c, x, kDayBase - 1, 16, 1, kAmber);
     es_dout[d] = en_rect(c, x + 19, kDayBase - 1, 16, 1, kAccent);
-    es_dlbl[d] = en_lbl(c, &font_inter_14, kTextDim, x + 4, kDayBase + 4, "-");
+    es_dlbl[d] = en_daylbl(c, x, kDayBase + 4);
   }
   make_bar(c, 18, kDayBase, 396, 1, kBorder, LV_OPA_COVER);
   en_lbl(c, &font_inter_14, kAmber, 18, 146, "Bezug");
@@ -265,7 +327,7 @@ void build_energy_screens(lv_obj_t* screen) {
   // --- Wasser
   build_mix_screen(screen);
   r = en_root[2] = make_screen_root(screen, "Wasser");
-  lv_obj_set_pos(lv_obj_get_child(r, 0), 56, 20);
+  header_title_at(lv_obj_get_child(r, 0), 56, 20, 0);
   ic = make_label(r, &font_icons_24, lv_color_hex(kAccent));
   lv_label_set_text(ic, ICON_DROP);
   lv_obj_set_pos(ic, 22, 19);
@@ -275,17 +337,17 @@ void build_energy_screens(lv_obj_t* screen) {
   ew_big = en_lbl(c, &font_inter_light_40, kText, 16, 36, "-");
   en_lbl(c, &font_inter_20, kTextDim, 0, 0, "Liter");
   ew_meter = en_lbl(c, &font_inter_14, kTextDim, 18, 94, "");
-  make_bar(c, 228, 14, 1, 106, kBorder, LV_OPA_COVER);
+  lv_obj_set_width(ew_meter, kKvXWasser - 8 - 8 - 18);
+  lv_label_set_long_mode(ew_meter, LV_LABEL_LONG_WRAP);  // two lines fit above the separator at 132
+  make_bar(c, kKvXWasser - 8, 14, 1, 106, kBorder, LV_OPA_COVER);
   const char* wn[3] = {"Kosten gestern", "\xC3\x98 7 Tage", "Vorgestern"};
   for (int i = 0; i < 3; ++i) {
-    en_lbl(c, &font_inter_14, kTextDim, 244, 14 + i * 30, wn[i]);
+    ew_name[i] = en_kv_name(c, kKvXWasser, 14 + i * 30, wn[i]);
     ew_val[i] = make_label(c, &font_inter_sb16, lv_color_hex(i == 2 ? kText : kAccent));
-    lv_obj_set_width(ew_val[i], 96);
-    lv_obj_set_style_text_align(ew_val[i], LV_TEXT_ALIGN_RIGHT, 0);
-    lv_obj_set_pos(ew_val[i], 318, 12 + i * 30);
+    en_kv_val(ew_val[i], kKvXWasser, 12 + i * 30);
   }
-  ew_price = en_lbl(c, &font_inter_14, kTextDim, 244, 102, "");
-  lv_obj_set_width(ew_price, 184);
+  ew_price = en_lbl(c, &font_inter_14, kTextDim, kKvXWasser, 102, "");
+  lv_obj_set_width(ew_price, kKvR - kKvXWasser);
   lv_label_set_long_mode(ew_price, LV_LABEL_LONG_DOT);
   // No hourly bars: the water meter reports its total once a day.
   make_bar(c, 18, 132, 396, 1, kBorder, LV_OPA_COVER);
@@ -303,7 +365,7 @@ void build_energy_screens(lv_obj_t* screen) {
     ew_dval[d] = en_lbl(c, &font_inter_14, kTextDim, x - 4, 0, "");
     lv_obj_set_width(ew_dval[d], 44);
     lv_obj_set_style_text_align(ew_dval[d], LV_TEXT_ALIGN_CENTER, 0);
-    ew_dlbl[d] = en_lbl(c, &font_inter_14, kTextDim, x + 8, kDayBase + 22, "-");
+    ew_dlbl[d] = en_daylbl(c, x, kDayBase + 22);
   }
   make_bar(c, 18, kDayBase + 18, 396, 1, kBorder, LV_OPA_COVER);
   en_dots(r, 2);
@@ -319,6 +381,7 @@ void en_status_text(lv_obj_t* st) {
   if (!v.enabled) {
     lv_label_set_text(st, "nicht eingerichtet");
     lv_obj_set_style_text_color(st, lv_color_hex(kTextDim), 0);
+    header_note(st);
   } else if (v.stale) {
     if (v.have) lv_label_set_text_fmt(st, "veraltet \xC2\xB7 %s", v.error[0] ? v.error : "keine Daten");
     else lv_label_set_text_fmt(st, "%s", v.error[0] ? v.error : "verbinde ...");
@@ -328,6 +391,7 @@ void en_status_text(lv_obj_t* st) {
     fmt_hm(hm, sizeof(hm), v.fetched);
     lv_label_set_text_fmt(st, "%s \xC2\xB7 vor %d s", hm, static_cast<int>(now - v.fetched));
     lv_obj_set_style_text_color(st, lv_color_hex(kTextDim), 0);
+    header_note(st);
   }
 }
 
@@ -366,7 +430,7 @@ void energy_refresh_strom() {
     else if (p.have)
       snprintf(b, sizeof(b), "PV veraltet \xC2\xB7 %.1f kWh", pv_today);
     else
-      snprintf(b, sizeof(b), "PV: %s", p.down ? "Gateway nicht erreichbar" : p.connected ? "warte auf Daten" : "verbinde");
+      snprintf(b, sizeof(b), "PV: %s", p.down ? "Gateway offline" : p.connected ? "warte auf Daten" : "verbinde");
     lv_label_set_text(es_amps, b);
   } else if (live && v.r.i_a[0] >= 0) {
     lv_obj_set_style_text_color(es_amps, lv_color_hex(kTextDim), 0);
@@ -383,6 +447,7 @@ void energy_refresh_strom() {
   float net = h.cost - (v.show_exp ? h.credit : 0.0f);
   snprintf(b, sizeof(b), "%sCHF %.2f", net < 0 ? "-" : "", fabsf(net));
   lv_label_set_text(es_val[2], h.have ? b : "-");
+  for (int i = 0; i < 3; ++i) en_kv_fit(es_name[i], es_val[i]);
   char p1[12], p2[12];
   energy_format_price(p1, sizeof(p1), tariff_price(v.tariff, now));
   energy_format_price(p2, sizeof(p2), v.tariff.feed);
@@ -444,7 +509,6 @@ void energy_refresh_strom() {
     en_set_bar(es_din[d], kDayBase, static_cast<int>(din[d] / dmax * kDayH + 0.5f), true);
     en_set_bar(es_dout[d], kDayBase, v.show_exp ? static_cast<int>(dout[d] / dmax * kDayH + 0.5f) : 0, true);
     lv_label_set_text_fmt(es_dlbl[d], "%s%s", d == 6 ? "Heute" : en_wday(ymd[d]), (fl[d] & kDayApprox) && ymd[d] ? "*" : "");
-    lv_obj_set_x(es_dlbl[d], d == 6 ? 30 + d * 56 - 6 : 30 + d * 56 + 8);
     lv_obj_set_style_text_color(es_dlbl[d], lv_color_hex(d == 6 ? kText : kTextDim), 0);
   }
   // LVGL's printf has no floats: format with snprintf.
@@ -463,15 +527,19 @@ void energy_refresh_wasser() {
   uint8_t yfl = 0;
   const float yest = v.water_on ? energy_yesterday_water_l(h, &yfl) : -1;
   const bool have = yest >= 0;
-  if (have) lv_label_set_text_fmt(ew_big, "%s%d", (yfl & kDayWaterApprox) ? "~" : "", static_cast<int>(yest + 0.5f));
+  // The 40 px font has digits only ("~" would be a box): mark estimates on the unit.
+  if (have) lv_label_set_text_fmt(ew_big, "%d", static_cast<int>(yest + 0.5f));
   else lv_label_set_text(ew_big, "-");
   lv_obj_t* unit = lv_obj_get_child(lv_obj_get_parent(ew_big), 2);
+  lv_label_set_text(unit, have && (yfl & kDayWaterApprox) ? "Liter (ca.)" : "Liter");
   lv_obj_align_to(unit, ew_big, LV_ALIGN_OUT_RIGHT_BOTTOM, 6, -7);
   if (!v.water_on) {
     lv_label_set_text(ew_meter, "Wasser ist ausgeschaltet");
   } else if (v.have && v.r.has_water) {
     snprintf(b, sizeof(b), "Z\xC3\xA4hlerstand %.3f m\xC2\xB3", v.r.water_m3);
     lv_label_set_text(ew_meter, b);
+  } else if (have || h.days[1].ymd) {  // day values exist, only the live reading is missing
+    lv_label_set_text(ew_meter, "Z\xC3\xA4hlerstand: noch keine aktuelle Meldung");
   } else {
     lv_label_set_text(ew_meter, "kein Wasserz\xC3\xA4hler gemeldet");
   }
@@ -503,6 +571,7 @@ void energy_refresh_wasser() {
   if (v.water_on && y2.ymd) snprintf(b, sizeof(b), "%s%.0f L", (y2.flags & kDayWaterApprox) ? "~" : "", y2.water_l);
   else snprintf(b, sizeof(b), "-");
   lv_label_set_text(ew_val[2], b);
+  for (int i = 0; i < 3; ++i) en_kv_fit(ew_name[i], ew_val[i]);
   char p[12];
   energy_format_price(p, sizeof(p), v.tariff.water);
   lv_label_set_text_fmt(ew_price, "%s CHF/m\xC2\xB3 mit Abwasser", p);
@@ -516,7 +585,6 @@ void energy_refresh_wasser() {
     const bool yday = i == 6 && ymd[i] && ymd[i] == energy_prev_ymd(h.ymd);
     lv_label_set_text_fmt(ew_dlbl[i], "%s%s", yday ? "Gestern" : en_wday(ymd[i]),
                           (fl[i] & kDayWaterApprox) && ymd[i] ? "*" : "");
-    lv_obj_set_x(ew_dlbl[i], yday ? 30 + i * 56 - 10 : 30 + i * 56 + 8);
     lv_obj_set_style_text_color(ew_dlbl[i], lv_color_hex(yday ? kText : kTextDim), 0);
   }
   snprintf(b, sizeof(b), "%.2f m\xC2\xB3 \xC2\xB7 CHF %.2f", tot / 1000.0f, tot / 1000.0f * v.tariff.water / 100.0f);
@@ -609,7 +677,6 @@ void energy_refresh_mix() {
     lv_obj_set_style_bg_color(mx_dgrid[d], lv_color_hex(dm[d].valid ? kAmber : kTextDim), 0);
     const uint8_t dfl = d == 6 ? h.flags : h.days[5 - d].flags;
     lv_label_set_text_fmt(mx_dlbl[d], "%s%s", d == 6 ? "Heute" : en_wday(ymd[d]), (dfl & kDayApprox) && ymd[d] ? "*" : "");
-    lv_obj_set_x(mx_dlbl[d], d == 6 ? 30 + d * 56 - 6 : 30 + d * 56 + 8);
     lv_obj_set_style_text_color(mx_dlbl[d], lv_color_hex(d == 6 ? kText : kTextDim), 0);
   }
   if (su > 0.005f) snprintf(b, sizeof(b), "%.0f kWh \xC2\xB7 PV-Anteil %d %%", su, static_cast<int>(ss / su * 100 + 0.5f));
@@ -628,30 +695,21 @@ void energy_chip_refresh() {
     lv_label_set_text(chip_en_main, "einrichten");
     return;
   }
-  char w[16] = "- W";
+  char w[16];
+  snprintf(w, sizeof(w), "%s", !v.have ? "keine Daten" : "veraltet");  // was "- W": the meter did not answer
   if (v.have && !v.stale) {
     float net = (v.r.p_in_kw - v.r.p_out_kw) * 1000.0f;
     snprintf(w, sizeof(w), "%d W", static_cast<int>(net < 0 ? net - 0.5f : net + 0.5f));
   }
   lv_label_set_text(chip_en_main, w);
-  // Second line: yesterday's water (the meter reports once a day); longest form that fits.
+  // Second line: today's grid import in kWh (the energy source), never water.
   if (chip_en_sub != nullptr) {
-    const float yl = v.water_on ? energy_yesterday_water_l(v.h) : -1;
-    if (yl < 0) {
-      lv_label_set_text(chip_en_sub, "");
-    } else {
-      const int L = static_cast<int>(yl + 0.5f);
-      char t[3][32];
-      snprintf(t[0], sizeof(t[0]), "Wasser gestern: %d L", L);
-      snprintf(t[1], sizeof(t[1]), "Wasser gest. %d L", L);
-      snprintf(t[2], sizeof(t[2]), "gestern %d L", L);
-      int pick = 2;
-      for (int k = 0; k < 2; ++k) {
-        lv_point_t sz;
-        lv_txt_get_size(&sz, t[k], &font_inter_14, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-        if (sz.x <= lv_obj_get_width(chip_en_sub)) { pick = k; break; }
-      }
-      lv_label_set_text(chip_en_sub, t[pick]);
+    const float kwh = v.have ? energy_today_in(v.h) : -1.f;
+    if (kwh < 0) lv_label_set_text(chip_en_sub, "");
+    else {
+      char t[24];  // snprintf: LVGL's printf has no %f
+      snprintf(t, sizeof(t), "heute %.1f kWh", static_cast<double>(kwh));
+      lv_label_set_text(chip_en_sub, t);
     }
   }
 }
@@ -673,7 +731,11 @@ void energy_enter(int page) {
 
 void energy_swipe(int dir) {
   int next = en_page + dir;
-  if (next < 0 || next > 2) return;
+  if (next > 2) {
+    co4_enter(0);  // after Wasser: Co4 Energie
+    return;
+  }
+  if (next < 0) return;
   energy_enter(next);
 }
 
@@ -729,6 +791,7 @@ void enset_summary() {
 }
 
 void open_enset() {
+  set_group = 3;  // back goes to Energie-Quellen
   nav = Nav::EnSet;
   hide_settings();
   enset_refresh();

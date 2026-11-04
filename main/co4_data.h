@@ -1,0 +1,103 @@
+#pragma once
+// Co4 Energie: internal data interface between the Co4 BFF source
+// (co4_task.cpp) and the UI. No LVGL, no ESP-IDF: host-testable.
+// Times are UTC milliseconds like everywhere in the Co4 API.
+
+#include <stddef.h>
+#include <stdint.h>
+
+// Battery: kCo4BatLaden = charged into the battery, kCo4BatEntladen = delivered
+// by the battery. Shown only when the source delivers them (else NAN), never
+// added to Bezug / Eigenverbrauch.
+enum Co4Series : uint8_t { kCo4Bezug, kCo4Einspeisung, kCo4Pv, kCo4Eigen, kCo4BatLaden, kCo4BatEntladen, kCo4SeriesN };
+
+enum class Co4Res : uint8_t { Min15, Hour, Day, Month };
+
+constexpr int kCo4MaxPoints = 96;  // one day in 15 min steps
+constexpr int kCo4MaxBars = 31;    // days of a month (months of a year use 12)
+
+// One block of equally spaced values per series. NAN = no value (future, gap).
+// Curves carry power ("kW"), totals energy ("kWh").
+template <int N>
+struct Co4Block {
+  Co4Res res;
+  int64_t t0_ms;    // start of the first interval
+  int64_t step_ms;  // Min15/Hour/Day: fixed; Month: 0 (calendar months from t0)
+  uint16_t n;       // used points (<= N)
+  char unit[6];
+  float v[kCo4SeriesN][N];
+};
+using Co4Curve = Co4Block<kCo4MaxPoints>;
+using Co4Totals = Co4Block<kCo4MaxBars>;
+
+// Whole ZEV site (zevGetSiteEnergyStats): Bezug = gridProduction, Einspeisung =
+// feedIn, Pv = pvProduction, Eigen = selfConsumption, battery from
+// batteryConsumption / batteryProduction. Fetched after the zone; a site
+// problem never hides the zone data.
+enum class Co4SiteState : uint8_t { None, Ok, Error };  // None: no site niid known (yet)
+struct Co4SiteData {
+  Co4SiteState state;
+  bool partial;   // partialSources: trailing blocks may still be null
+  char err[48];
+  Co4Curve day;   // today, 15 min power
+  Co4Totals days;
+  Co4Totals months;
+};
+
+struct Co4Data {
+  int64_t fetched_ms;  // when the source produced it
+  Co4Curve day;        // today, 15 min power
+  Co4Totals days;      // this month, energy per day
+  Co4Totals months;    // this year, energy per month
+  Co4SiteData site;    // whole site
+};
+
+// Autarkie = Eigenverbrauch / (Eigenverbrauch + Bezug),
+// Eigenverbrauchsquote = Eigenverbrauch / PV. Over points [from, to) of a block,
+// NAN points skipped. Shares clamped to [0, 100] (Bezug may be negative).
+// false if no value at all (pct are 0 then).
+struct Co4Ratio {
+  float sum[kCo4SeriesN];
+  float autarky_pct;
+  float self_pct;
+};
+bool co4_ratio(const float (*v)[kCo4MaxBars], int from, int to, Co4Ratio* out);
+
+// "-0.4 kWh", "123 kWh", "-1.25 MWh"; sign kept, NAN -> 0.0 kWh.
+void co4_fmt_kwh(char* out, size_t n, float v);
+
+// --- Zones --------------------------------------------------------------------
+// zevGetConsumptionZones answer (zones of one site), see co4_bff_parse_zones.
+constexpr int kCo4MaxZones = 12;
+struct Co4Zone {
+  char id[40];
+  char name[48];
+  char site[20];  // niid of the ZEV site the zone belongs to, "" if unknown
+};
+struct Co4ZoneList {
+  int n;
+  Co4Zone z[kCo4MaxZones];
+};
+
+// --- Object tree (zone choice) ----------------------------------------------------
+// Navigation as in co4-frontend-app: co4CoreNavRoots, then co4CoreNavGet per node
+// (object.children). Only name, id, natures and hasChildren are kept.
+constexpr int kCo4NavMax = 48;   // children kept per level (rest counted in total)
+constexpr int kCo4NavDepth = 8;  // breadcrumb depth
+struct Co4NavItem {
+  char soid[20];  // system object id (input for co4CoreNavGet)
+  char name[48];
+  char zone[20];  // niid of the zev_Zone nature instance, "" = not a ZEV zone
+  bool kids;      // hasChildren
+};
+struct Co4NavCrumb {
+  char soid[20];
+  char name[48];
+};
+struct Co4NavLevel {
+  uint8_t depth;  // 0 = roots, else path[depth-1] is the current node
+  Co4NavCrumb path[kCo4NavDepth];
+  uint16_t n;      // items in it[]
+  uint16_t total;  // children in the answer (> n: list cut)
+  Co4NavItem it[kCo4NavMax];
+};

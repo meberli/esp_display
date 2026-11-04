@@ -13,3 +13,15 @@ LV_FONT_DECLARE(font_inter_20)      // SemiBold
 LV_FONT_DECLARE(font_inter_light_40)  // Light: digits, space - / : °
 LV_FONT_DECLARE(font_inter_xl_72)   // Display ExtraLight: digits, space - °
 LV_FONT_DECLARE(font_clock_150)     // Display Thin: digits, space :
+
+// Co4 design: Montserrat (SIL OFL 1.1, see fonts/OFL-Montserrat.txt), same size
+// slots and glyph ranges as the Inter set above (+ U+2013, U+2026 for text).
+LV_FONT_DECLARE(font_mont_14)    // Regular
+LV_FONT_DECLARE(font_mont_16)    // Regular
+LV_FONT_DECLARE(font_mont_sb16)  // SemiBold
+LV_FONT_DECLARE(font_mont_20)    // SemiBold
+LV_FONT_DECLARE(font_mont_40)    // Regular: digits, space - / : °
+LV_FONT_DECLARE(font_mont_72)    // SemiBold: digits, space - °
+LV_FONT_DECLARE(font_mont_150)   // SemiBold: digits, space :
+
+LV_IMG_DECLARE(img_co4_logo)     // official Co4 logo, 80x36, transparent

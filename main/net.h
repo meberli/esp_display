@@ -11,6 +11,10 @@ bool wifi_connected();
 // Playground CII mode: hold = disconnect and stop reconnecting (credentials kept);
 // release = reconnect normally.
 void wifi_hold(bool on);
+// User pause ("Abbrechen" while connecting, "Ohne Netzwerk starten"): disconnect
+// and stop retrying for this session; NVS untouched. wifi_start ends it.
+void wifi_pause(bool on);
+bool wifi_paused();
 // true once the driver reported a final failure (wrong password, no AP).
 bool wifi_failed();
 int wifi_auth_fails();   // auth / 4-way handshake rejections since wifi_start
@@ -19,9 +23,24 @@ int wifi_last_reason();  // last WIFI_REASON_* of a disconnect
 // Blocks (event group, no polling) until connected, a disconnect event arrives
 // or ms elapse. Returns wifi_connected(). Network task only.
 bool wifi_wait(uint32_t ms);
-// Blocking scan (call from the network task). Returns the number of APs,
-// strongest first, duplicates merged.
-int wifi_scan(WifiAp* out, int cap);
+// Scan (call from the network task). Returns the number of APs, strongest
+// first, duplicates merged; -1 if generation gen was cancelled meanwhile.
+int wifi_scan(WifiAp* out, int cap, uint32_t gen = 0);
+// UI ("Abbrechen"): cancel scan generation gen (and older). Only stores an atomic;
+// the net task stops the driver scan itself.
+void wifi_scan_cancel(uint32_t gen);
+// Playground "sender follows the gateway" (CO4EN v0.7 6.1). Generic: any SSID, any vendor.
+// Scans the configured SSID on channel ch only and pins the strongest BSSID whose primary
+// channel is ch (bssid_set + channel, RAM only). Returns 1 pinned, 0 no AP of the SSID on
+// ch (pin cleared, normal connect), -1 scan failed (pin cleared). Does not connect while held.
+int wifi_pin_select(uint8_t ch, uint8_t bssid_out[6] = nullptr, int8_t* rssi_out = nullptr);
+void wifi_unpin();  // back to "any AP of the SSID" on the next connect
+bool wifi_pinned(uint8_t bssid[6], uint8_t* ch);
+// true once after the pinned AP was not found 6 x in a row (net unpinned itself and
+// reconnects to any AP); the Playground then re-runs discovery.
+bool wifi_pin_lost_take();
+// Drop the association so the reconnect uses the current (pinned) config.
+void wifi_reassoc();
 // SSID of the configured network.
 const char* wifi_ssid();
 
@@ -58,3 +77,8 @@ HttpGetResult http_get_raw(const char* url, const char* user, const char* passwo
 // hdr_name/hdr_value add one request header (e.g. x-windy-api-key).
 HttpGetResult http_get(const char* url, const char* user, const char* password, uint8_t* body, size_t cap,
                        int timeout_ms, const char* hdr_name = nullptr, const char* hdr_value = nullptr);
+// POST body (body_len bytes, content_type e.g. application/x-www-form-urlencoded)
+// to an https:// url under the TLS lock; the answer goes into resp (cap bytes,
+// read for every status). bearer != nullptr adds "Authorization: Bearer ...".
+HttpGetResult http_post(const char* url, const char* content_type, const char* body, size_t body_len,
+                        const char* bearer, uint8_t* resp, size_t cap, int timeout_ms);

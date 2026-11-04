@@ -8,6 +8,7 @@
 #include "lvgl.h"
 #include "net.h"
 #include "settings.h"
+#include "co4_task.h"
 #include "energy_task.h"
 #include "pv_task.h"
 #include "diag.h"
@@ -34,6 +35,8 @@
 #include <esp_log.h>
 #include "freertos/idf_additions.h"
 #include "strings_de.h"
+#include "loxone_cache.h"
+#include "retry_logic.h"
 
 static const char* const TAG = "app";
 static TaskHandle_t ui_handle = nullptr;
@@ -53,15 +56,14 @@ bool lox_on = false;         // Miniserver configured with a known auth scheme
 bool lox_setup_ask = false;  // first run: offer the Miniserver form once Wi-Fi is up
 bool wifi_up = false;
 bool lox_loaded = false;
-bool lox_fail_shown = false;  // failure status already painted (retries stay silent)        // Wi-Fi up handled (SNTP, Loxone load); reset on drop
-uint32_t lox_retry_ms = 0;   // next background structure load after a failure
-constexpr uint32_t kLoxRetryMs = 60000;
+bool lox_fail_shown = false;  // failure status already painted (retries stay silent)
 bool load_painted = false;
 uint32_t wifi_started_ms = 0;
 constexpr uint32_t kWifiTimeoutMs = 30000;  // boot: then open the WLAN selection
 constexpr uint32_t kWifiSwitchMs = 20000;   // settings: then revert to the previous network
 constexpr int kWifiAuthFails = 3;
 constexpr int kWifiNoApFails = 3;
+bool offline_session = false;  // "Ohne Netzwerk starten": Wi-Fi paused until the user connects (RAM only)
 bool wifi_setup_auto = false;  // WLAN selection opened by the firmware (boot failure / no Wi-Fi)
 constexpr size_t kStructureCap = 768 * 1024;
 
@@ -78,8 +80,8 @@ uint32_t next_weather_ms = 0;
 EXT_RAM_BSS_ATTR static WeatherDetailDay week[kWxDays];
 // Weather location; written only by the network task (and before it starts).
 Location g_loc;
-WifiAp g_aps[kMaxAps];
-GeoPlace g_places[kMaxPlaces];
+EXT_RAM_BSS_ATTR WifiAp g_aps[kMaxAps];
+EXT_RAM_BSS_ATTR GeoPlace g_places[kMaxPlaces];
 
 void url_encode(const char* in, char* out, size_t n) {
   static const char* hex = "0123456789ABCDEF";
@@ -215,6 +217,9 @@ bool fetch_buchs_weather(int* temp_c, int* code, WeatherDay* days, int* week_cou
       hrs[i].precip = hourly["precipitation"][k] | 0.0f;
       hrs[i].temp = hourly["temperature_2m"][k] | 0.0f;
       hrs[i].cloud = hourly["cloud_cover"][k] | 50.0f;
+      w.hprecip[i] = hrs[i].precip;
+      int pp = hourly["precipitation_probability"][k] | 0;
+      w.hprob[i] = static_cast<uint8_t>(pp < 0 ? 0 : pp > 100 ? 100 : pp);
     }
     // Daytime window: sunrise hour .. sunset hour, else 06-21.
     int h_rise = strlen(sr) >= 13 ? atoi(sr + 11) : 6;
@@ -292,6 +297,7 @@ struct NetResult {
   size_t shown;
   size_t supported;
   char server[48];
+  uint32_t gen;  // Settings Scan: scan generation (stale results are dropped)
   // Weather
   int temp_c;
   int code;
@@ -318,11 +324,11 @@ bool windy_key(char* key, size_t n) {
 
 // Results too big for the queue: written by the network task before it posts
 // the result, read by the UI task in handle_result (one request in flight).
-Board g_board;
-OtaCheck g_ota;
+EXT_RAM_BSS_ATTR Board g_board;
+EXT_RAM_BSS_ATTR OtaCheck g_ota;
 EXT_RAM_BSS_ATTR Calendar g_cal;
 EXT_RAM_BSS_ATTR MeteoNow g_meteo;
-Station g_hits[kMaxStationHits];
+EXT_RAM_BSS_ATTR Station g_hits[kMaxStationHits];
 
 QueueHandle_t net_q = nullptr;
 QueueHandle_t res_q = nullptr;
@@ -333,6 +339,15 @@ QueueHandle_t lox_q = nullptr;
 bool net_busy = false;
 bool lox_busy = false;
 EXT_RAM_BSS_ATTR LoxoneControl controls[kLoxoneControlCap];
+// Load parses here on lox_task; handle_result (UI task) copies it into controls
+// so a background reload never races the UI reading controls.
+EXT_RAM_BSS_ATTR LoxoneControl lox_staging[kLoxoneControlCap];
+size_t controls_n = 0;
+// Miniserver state: false while the controls on screen come from the cache (or
+// there are none) and the structure load keeps failing. Commands are refused.
+bool lox_online = false;
+int lox_fails = 0;
+uint32_t lox_next_ms = 0;  // next background structure load while offline
 
 void net_post(const NetRequest& r) {
   net_busy = true;
@@ -359,7 +374,7 @@ void net_load(NetResult* res) {
     snprintf(res->detail, sizeof(res->detail), "%s", http.detail);
     return;
   }
-  bool parsed = loxone_parse_structure(buf, length, controls, kLoxoneControlCap, &res->shown, &res->supported,
+  bool parsed = loxone_parse_structure(buf, length, lox_staging, kLoxoneControlCap, &res->shown, &res->supported,
                                        res->server, sizeof(res->server), res->detail, sizeof(res->detail));
   heap_caps_free(buf);
   if (!parsed) {
@@ -369,13 +384,17 @@ void net_load(NetResult* res) {
   console_printf("LoxAPP3 %u bytes, %u controls shown, %u supported\n", static_cast<unsigned>(length),
                  static_cast<unsigned>(res->shown), static_cast<unsigned>(res->supported));
   res->ok = true;
+  // Last good structure for a boot without Miniserver (NVS write on core 0;
+  // skipped if unchanged or too large).
+  lox_cache_save(lox_staging, res->shown, res->server);
 }
 
 void net_settings(const SettingsRequest& s, NetResult* res) {
   res->settings_kind = s.kind;
   switch (s.kind) {
     case SettingsRequest::Scan:
-      res->count = wifi_scan(g_aps, kMaxAps);
+      res->count = wifi_scan(g_aps, kMaxAps, s.scan_gen);
+      res->gen = s.scan_gen;
       res->ok = res->count > 0;
       console_printf("Wi-Fi scan %d networks\n", res->count);
       break;
@@ -517,10 +536,13 @@ void lox_task(void*) {
   for (;;) {
     NetRequest req;
     if (xQueueReceive(lox_q, &req, portMAX_DELAY) != pdTRUE) continue;
-    static NetResult res;
+    EXT_RAM_BSS_ATTR static NetResult res;
     memset(&res, 0, sizeof(res));
     res.op = req.op;
     switch (req.op) {
+      case NetOp::Load:  // here, not on the net task: an absent Miniserver blocks nothing else
+        net_load(&res);
+        break;
       case NetOp::Command: {
         LoxoneHttpResult r = loxone_send_command(*auth, req.command.action, req.command.command);
         res.ok = r.ok;
@@ -547,12 +569,15 @@ void lox_task(void*) {
 }
 
 void net_task(void*) {
+  UBaseType_t low_mark = ~static_cast<UBaseType_t>(0);
   for (;;) {
-    NetRequest req;
+    // Only this task touches req: static (internal RAM, NVS writes read from
+    // it) instead of ~2 KB on the stack, which TLS handshakes need.
+    static NetRequest req;
     if (xQueueReceive(net_q, &req, portMAX_DELAY) != pdTRUE) {
       continue;
     }
-    static NetResult res;
+    EXT_RAM_BSS_ATTR static NetResult res;
     memset(&res, 0, sizeof(res));
     res.op = req.op;
     switch (req.op) {
@@ -568,8 +593,6 @@ void net_task(void*) {
         net_settings(req.settings, &res);
         break;
       case NetOp::Load:
-        net_load(&res);
-        break;
       case NetOp::Command:
       case NetOp::State:
         break;  // handled by lox_task
@@ -644,6 +667,13 @@ void net_task(void*) {
         console_printf("Weather %s\n", res.ok ? "ok" : "unavailable");
         break;
     }
+    {
+      const UBaseType_t mark = uxTaskGetStackHighWaterMark(nullptr);
+      if (mark < 1024 && mark < low_mark) {  // new low under 1 KB: say which op got there
+        console_printf("WARN net stack low: %u B free after op %d\n", static_cast<unsigned>(mark), static_cast<int>(req.op));
+      }
+      if (mark < low_mark) low_mark = mark;
+    }
     xQueueSend(res_q, &res, portMAX_DELAY);
     if (ui_handle != nullptr) xTaskNotifyGive(ui_handle);  // wake the UI loop for the result
   }
@@ -661,34 +691,47 @@ void start_wifi() {
 }
 
 void handle_result(const NetResult& res) {
-  if (res.op != NetOp::Command && res.op != NetOp::State) net_busy = false;
+  if (res.op != NetOp::Command && res.op != NetOp::State && res.op != NetOp::Load) net_busy = false;
   switch (res.op) {
     case NetOp::Connect:
       break;
     case NetOp::Load:
+      lox_busy = false;
       if (!res.ok) {
-        // Miniserver unreachable/unreadable: run without Loxone, retry later.
-        console_printf("Loxone load failed: running without Loxone, retry in %u s\n",
-                       static_cast<unsigned>(kLoxRetryMs / 1000));
-        lox_retry_ms = now_ms() + kLoxRetryMs;
-        ui_set_lox_state(2);  // no-op when already "unreachable"
+        ++lox_fails;
+        lox_next_ms = now_ms() + lox_backoff_ms(lox_fails);
+        console_printf("Loxone structure load failed (%d): %s; retry in %u s\n", lox_fails, res.title,
+                       static_cast<unsigned>(lox_backoff_ms(lox_fails) / 1000));
         if (phase != Phase::Ready) {
+          // No cache: show the panel anyway (weather, settings ...) without controls.
           phase = Phase::Ready;
-          ui_show_controls(controls, 0, 0, str::kLoadFailedTitle);
-        } else if (!lox_fail_shown) {
-          ui_set_status(str::kLoadFailedTitle);
+          controls_n = 0;
+          ui_show_controls(controls, 0, 0, "Loxone");
         }
-        lox_fail_shown = true;
+        if (controls_n == 0) ui_set_lox_state(2);  // no-op when already "unreachable"
+        if (!lox_fail_shown) ui_set_status(controls_n > 0 ? str::kStatusLoxCached : str::kStatusLoxOffline);
+        lox_fail_shown = true;  // retries stay silent (no flicker)
         break;
       }
-      lox_retry_ms = 0;
-      lox_fail_shown = false;
-      lox_loaded = true;
-      ui_set_lox_state(0);
-      phase = Phase::Ready;
-      ui_show_controls(controls, res.shown, res.supported, res.server[0] != '\0' ? res.server : "Loxone");
-      if (!panel_touch_ok()) {
-        ui_set_status(str::kStatusNoTouch);
+      {
+        bool same = lox_online || (res.shown == controls_n &&
+                                   memcmp(controls, lox_staging, res.shown * sizeof(LoxoneControl)) == 0);
+        bool first = phase != Phase::Ready;
+        memcpy(controls, lox_staging, res.shown * sizeof(LoxoneControl));
+        controls_n = res.shown;
+        lox_online = true;
+        lox_fails = 0;
+        lox_fail_shown = false;
+        lox_loaded = true;
+        ui_set_lox_state(0);
+        phase = Phase::Ready;
+        // Already showing the same (cached) controls: do not rebuild (that would
+        // jump back to home while the user is in a menu).
+        if (first || !same) {
+          ui_show_controls(controls, res.shown, res.supported, res.server[0] != '\0' ? res.server : "Loxone");
+        }
+        console_printf("Loxone online, %u controls%s\n", static_cast<unsigned>(res.shown), same && !first ? " (cache up to date)" : "");
+        ui_set_status(!panel_touch_ok() ? str::kStatusNoTouch : str::kStatusLoxOnline);
       }
       break;
     case NetOp::Command:
@@ -702,7 +745,7 @@ void handle_result(const NetResult& res) {
     case NetOp::Settings:
       switch (res.settings_kind) {
         case SettingsRequest::Scan:
-          ui_wifi_scan_done(g_aps, res.count);
+          ui_wifi_scan_done(g_aps, res.count, res.gen);
           break;
         case SettingsRequest::Connect:
           ui_wifi_connect_done(res.ok, res.detail, wifi_ssid(), res.status, res.title, res.index == 1);
@@ -786,7 +829,18 @@ void poll() {
     handle_result(res);
   }
   // Loxone path first and independent of the net task.
-  if (phase == Phase::Ready && !lox_busy && wifi_connected()) {
+  if (phase == Phase::Ready && lox_on && !lox_online) {
+    // Offline (cached or no controls): refuse commands at once, no state reads;
+    // retry the structure in the background with backoff.
+    NetRequest r = {};
+    if (ui_take_command(&r.command)) {
+      ui_command_finished(r.command.index, false, r.command.command, str::kLoxOfflineCmd);
+    }
+    if (!lox_busy && wifi_connected() && static_cast<int32_t>(now_ms() - lox_next_ms) >= 0) {
+      r.op = NetOp::Load;
+      lox_post(r);
+    }
+  } else if (phase == Phase::Ready && lox_on && !lox_busy && wifi_connected()) {
     NetRequest r = {};
     if (ui_take_command(&r.command)) {
       r.op = NetOp::Command;
@@ -809,6 +863,15 @@ void poll() {
       break;
     }
     case Phase::Wifi:
+      if (ui_take_connect_cancel()) {
+        // "Abbrechen": stop the attempt (saved network kept in NVS) and open the WLAN selection.
+        wifi_pause(true);
+        phase = Phase::Failed;
+        wifi_setup_auto = false;
+        console_puts("Wi-Fi connect cancelled by the user: WLAN selection");
+        ui_wifi_setup_open(wifi_ssid(), 4);
+        break;
+      }
       if (wifi_connected()) {
         clock_sntp_kick();
         maint_mark_valid();  // UI runs and Wi-Fi works: keep this image after an OTA update
@@ -842,14 +905,30 @@ void poll() {
       break;
     case Phase::Loading: {
       if (!load_painted) {
-        ui_show_message(str::kLoadingTitle, str::kLoadingBody, false);
         load_painted = true;
+        lox_online = false;
+        lox_fails = 0;
+        lox_next_ms = now_ms();
+        char server[48] = "";
+        size_t n = lox_cache_load(controls, kLoxoneControlCap, server, sizeof(server));
+        if (n > 0) {
+          // Show the last good controls at once (marked offline) and load the
+          // current structure in the background.
+          console_printf("Loxone cache: %u controls (offline until the Miniserver answers)\n", static_cast<unsigned>(n));
+          controls_n = n;
+          phase = Phase::Ready;
+          ui_show_controls(controls, n, n, server[0] != '\0' ? server : "Loxone");
+          ui_set_status(str::kStatusLoxCached);
+          break;
+        }
+        controls_n = 0;
+        ui_show_message(str::kLoadingTitle, str::kLoadingBody, false);
         break;
       }
       if (lox_busy) break;  // the structure load and Loxone requests share the client
       NetRequest r = {};
       r.op = NetOp::Load;
-      net_post(r);
+      lox_post(r);
       break;
     }
     case Phase::Ready: {
@@ -873,13 +952,10 @@ void poll() {
         maint_mark_valid();  // UI runs and Wi-Fi works: keep this image after an OTA update
         ui_set_wifi_name(wifi_ssid());
         ui_set_status(lox_on ? str::kStatusConnected : "");
-        if (lox_on && lox_retry_ms == 0 && !lox_loaded) lox_retry_ms = now_ms();  // load now
+        offline_session = false;
+        lox_next_ms = now_ms();  // Loxone structure load now (poll() Loxone path)
       }
-      if (lox_on && lox_retry_ms != 0 && !lox_busy && static_cast<int32_t>(now_ms() - lox_retry_ms) >= 0) {
-        lox_retry_ms = now_ms() + kLoxRetryMs;  // background retry; on success the tiles come back
-        r.op = NetOp::Load;
-        net_post(r);
-      } else if (ui_take_settings(&r.settings)) {
+      if (ui_take_settings(&r.settings)) {
         r.op = NetOp::Settings;
         net_post(r);
       } else if (ui_take_cam(&r.cam)) {
@@ -910,6 +986,22 @@ void poll() {
         net_post(r);
         break;
       }
+      if (ui_take_offline()) {
+        // "Ohne Netzwerk starten": this session only, NVS untouched; the next boot connects as usual.
+        wifi_pause(true);
+        wifi_setup_auto = false;
+        offline_session = true;
+        console_puts("Start without network (session only)");
+        ui_wifi_setup_leave_offline();
+        char server[48] = "";
+        size_t n = auth != nullptr ? lox_cache_load(controls, kLoxoneControlCap, server, sizeof(server)) : 0;
+        controls_n = n;
+        lox_online = false;
+        phase = Phase::Ready;
+        ui_show_controls(controls, n, n, n > 0 && server[0] != '\0' ? server : "Loxone");
+        ui_set_status(str::kStatusDisconnected);
+        break;
+      }
       if (wifi_setup_auto && wifi_connected() && !ui_wifi_busy()) {
         // The saved network came back while the WLAN selection was open.
         console_printf("Wi-Fi \"%s\" is back: closing the WLAN selection\n", wifi_ssid());
@@ -922,7 +1014,7 @@ void poll() {
       if (ui_take_retry()) {
         start_wifi();
         phase = Phase::Wifi;
-        ui_show_message(str::kConnectingTitle, str::kConnectingBody, false);
+        ui_show_connecting();
         ui_set_status(str::kStatusConnecting);
       }
       break;
@@ -991,7 +1083,15 @@ void ui_task(void*) {
   }
   phase = Phase::Ready;
   ui_set_lox_state(lox_on ? 2 : 1);
-  ui_show_controls(controls, 0, 0, have_wifi ? str::kStatusConnecting : str::kStatusNoWifi);
+  char cache_server[48] = "";
+  controls_n = lox_on ? lox_cache_load(controls, kLoxoneControlCap, cache_server, sizeof(cache_server)) : 0;
+  if (controls_n > 0) {
+    // Last good controls at once (offline until the Miniserver answers).
+    console_printf("Loxone cache: %u controls\n", static_cast<unsigned>(controls_n));
+    ui_show_controls(controls, controls_n, controls_n, cache_server[0] != '\0' ? cache_server : "Loxone");
+  } else {
+    ui_show_controls(controls, 0, 0, have_wifi ? str::kStatusConnecting : str::kStatusNoWifi);
+  }
   if (lox_on) ui_set_lox_state(2);
   if (lox_setup_ask) {  // first run: Miniserver form once (WLAN button, Überspringen)
     lox_setup_ask = false;
@@ -1047,12 +1147,15 @@ void app_start() {
   res_q = xQueueCreate(3, sizeof(NetResult));
   lox_q = xQueueCreate(1, sizeof(NetRequest));
   // Network and protocol work on core 0 (with the Wi-Fi stack), UI on core 1.
-  xTaskCreatePinnedToCore(net_task, "net", 12 * 1024, nullptr, 4, nullptr, 0);
+  // 16 KB internal (NVS writes: no PSRAM stack); TLS handshake + HTTP/JSON
+  // callees need ~10 KB, keep >= 4 KB headroom.
+  xTaskCreatePinnedToCore(net_task, "net", 16 * 1024, nullptr, 4, nullptr, 0);
   // Stack in PSRAM (8 KB, ~5.2 KB used): internal RAM is scarce, and with
   // SPIRAM_XIP_FROM_PSRAM the PSRAM stays usable during flash operations.
   xTaskCreatePinnedToCoreWithCaps(lox_task, "lox", 8 * 1024, nullptr, 5, nullptr, 0, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   xTaskCreatePinnedToCore(ui_task, "ui", 16 * 1024, nullptr, 5, &ui_handle, 1);
   energy_start();  // whatwatt Go polling (core 0, below net and Loxone)
   pv_start();      // Growatt via Modbus TCP gateway, read only (core 0, lowest)
+  co4_start();     // Co4 Energie: login, zones, data (core 0, PSRAM stack)
   play_start();    // Playground CO4EN test sender: idle until used (core 0)
 }

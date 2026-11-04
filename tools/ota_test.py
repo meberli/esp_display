@@ -32,7 +32,7 @@ def main():
     p = Panel(a.port)
     wait(p, lambda s: "STATE home" in s, 60)
     tapn(p, "cat:settings")
-    tapn(p, "set:maint")
+    tapn(p, "set:g:sys", 0.8); tapn(p, "set:maint")
     tapn(p, "maint:web")
     assert "web=1" in state(p), "web server did not start"
     before = status(ip)["partition"]
@@ -49,7 +49,7 @@ def main():
     # web server is off after reboot (not persisted): switch on again to read /status
     time.sleep(10)
     tapn(p, "cat:settings")
-    tapn(p, "set:maint")
+    tapn(p, "set:g:sys", 0.8); tapn(p, "set:maint")
     tapn(p, "maint:web")
     after = status(ip)["partition"]
     tapn(p, "maint:web")

@@ -34,6 +34,24 @@ config PANEL_DIAG_INJECT
         (DIAGGT, DIAGFB, DIAGSTATS, DIAGSTACK). DIAGTAP/DIAGSWIPE/DIAGRAW,
         DIAGVER, DIAGSCRTO, DIAGSAVER and DIAGBL need it (or the test harness).
 
+config CO4EN_LINK_MISS_MAX
+    int "CO4EN: missed ACKs in a row before the gateway is searched again"
+    range 1 20
+    default 3
+
+config CO4EN_RESWEEP_MIN_S
+    int "CO4EN: minimum seconds between gateway re-searches"
+    range 30 3600
+    default 120
+    help
+        A re-search drops Wi-Fi for up to ~18 s. Doubled after each failed
+        search up to CO4EN_RESWEEP_MAX_S; reset by an ACK.
+
+config CO4EN_RESWEEP_MAX_S
+    int "CO4EN: maximum seconds between gateway re-searches"
+    range 60 86400
+    default 1800
+
 config PANEL_SERIAL_BAUD
     int "Console/harness baud rate after boot"
     default 460800 if PANEL_TEST_HARNESS
@@ -86,5 +104,35 @@ config PANEL_METEO_PLZ
     default "947000"
     help
         Postcode for warnings and the precipitation nowcast: 947000 = 9470 Buchs SG.
+
+menu "Co4 Energie"
+
+config PANEL_CO4_REALM_URL
+    string "Co4 Keycloak realm URL"
+    default "https://auth.co4.cloud/realms/co4_beta"
+    help
+        Only the realm (beta: host from co4-frontend-app config.codegen /
+        co4-k8s beta overlays): the device, token and logout endpoints come
+        from OIDC discovery (<realm>/.well-known/openid-configuration).
+
+config PANEL_CO4_CLIENT_ID
+    string "Co4 public client id (Device Authorization Grant)"
+    default "co4-panel"
+    help
+        Public Keycloak client, Device Authorization Grant only, no secret,
+        no PKCE: the panel never holds a client secret or a password.
+
+config PANEL_CO4_SCOPE
+    string "Co4 OIDC scope"
+    default "openid offline_access"
+    help
+        offline_access is optional on the client; requested so the refresh
+        token survives reboots.
+
+config PANEL_CO4_BFF_URL
+    string "Co4 BFF base URL"
+    default "https://bff.beta.co4.dev"
+
+endmenu
 
 endmenu

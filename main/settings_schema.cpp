@@ -34,6 +34,7 @@ const KeySpec kSchema[] = {
     {"scr_to", KeyType::U16, 0, 3600, 0, 0},
     {"scr_hint", KeyType::U8, 0, 1, 0, 0},
     {"scr_saver", KeyType::U8, 0, kSaverAnalog, 0, 0},
+    {"ui_design", KeyType::U8, 0, 1, 0, 0},
     {"ical_url", KeyType::Str, 8, 255, kKeySecret | kKeyUrl, 0},
     {"ical_dflt", KeyType::Str, 0, 255, kKeySecret | kKeyUrl, 0},
     {"waste_url", KeyType::Str, 8, 255, kKeyUrl, 0},  // unused since 0.8.2 (old buchs-sg.ch page); kept for old backups
@@ -72,6 +73,7 @@ const KeySpec kSchema[] = {
     {"en_switch", KeyType::Str, 10, 10, 0, 0},
     {"pv_on", KeyType::U8, 0, 1, 0, 0},
     {"lox_skip", KeyType::U8, 0, 1, 0, 0},
+    {"sw_target", KeyType::Str, 0, 39, 0, 0},
     {"pv_ip", KeyType::Str, 7, 15, kKeyHost, 0},
     {"pv_port", KeyType::Str, 1, 5, kKeyDigits, 0},  // legacy (Grott stick), unused since cfg_ver 6
     {"pv_gw", KeyType::Str, 7, 15, kKeyHost, 0},
@@ -80,6 +82,12 @@ const KeySpec kSchema[] = {
     {"pv_hours", KeyType::Blob, sizeof(PvHours), sizeof(PvHours), kKeyInternal, 0},  // PV hours today: never exported
     {"pv_hist", KeyType::Blob, sizeof(PvHist), sizeof(PvHist), kKeyInternal, 0},  // PV day history: never exported
     {"en_hist", KeyType::Blob, sizeof(EnergyHist), sizeof(EnergyHist), kKeyInternal, 0},  // history: never exported
+    // Co4 Energie: offline refresh token (secret, never exported, never logged) and the chosen zone.
+    {"co4_rt", KeyType::Str, 1, 2047, kKeyInternal, 0},
+    {"co4_zone", KeyType::Str, 1, 39, 0, 0},
+    {"co4_zname", KeyType::Str, 1, 47, 0, 0},
+    {"co4_site", KeyType::Str, 1, 19, 0, 0},
+    {"co4_exp", KeyType::U8, 0, 1, kKeyInternal, 0},
 };
 
 bool printable(const char* v) {

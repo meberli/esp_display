@@ -50,7 +50,7 @@ def run(p, saved):
     s = state(p); print(s)
     check(rem(s) == r0 + 1, "after 'Am Vortag ab': card shown " + s)
     home(p)
-    tapn(p, "cat:settings"); tapn(p, "set:cal", 1.0)
+    tapn(p, "cat:settings"); tapn(p, "set:g:info", 0.8); tapn(p, "set:cal", 1.0)
     p.cmd(f"WASTEFROM {saved}", expect=("WASTEFROM",)); time.sleep(0.8)
     p.shot("v11shots/v11_calset.png")
     tapn(p, "calset:from", 0.8)

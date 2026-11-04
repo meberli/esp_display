@@ -3,8 +3,10 @@
 #include "esp_system.h"
 #include "net.h"
 #include "panel_ui.h"
+#include "retry_logic.h"
 #include "strings_de.h"
 #include "waste_window.h"
+#include "switch_target.h"
 
 #include "sys.h"
 #include "lvgl.h"
@@ -17,17 +19,33 @@
 #include <strings.h>
 
 #include "fonts.h"
+#include "ui_theme.h"
+// UI text fonts follow the design (same size slots; Inter for Dark Glass,
+// Montserrat for Co4). Declarations above keep the real symbol names.
+#define font_inter_14 (*g_theme->f14)
+#define font_inter_16 (*g_theme->f16)
+#define font_inter_sb16 (*g_theme->fsb16)
+#define font_inter_20 (*g_theme->f20)
+#define font_inter_light_40 (*g_theme->f40)
+#define font_inter_xl_72 (*g_theme->f72)
+#define font_clock_150 (*g_theme->f150)
 #include "clock_sync.h"
 #include <math.h>
 #include <sys/time.h>
 #include <time.h>
 #include "material_icons.h"
 #include "settings.h"
+#include "co4_task.h"
+#include "co4_chart_plot.h"
+#include "map_ne.h"
+#include "radar.h"
+#include "ui_text.h"
 #include "energy_task.h"
 #include "espnow_play.h"
 #include "pv_task.h"
 #include "energy_mix.h"
 #include "panel_hw.h"
+#include "touch_gesture.h"
 #include "board_pins.h"
 #include "weather_derive.h"
 #include <esp_heap_caps.h>
@@ -59,45 +77,45 @@ constexpr int kGap = 12;
 constexpr int kTileW = 214;
 constexpr int kTileH = 156;
 constexpr int kContentY = 88;
-constexpr int kRowsPerPage = 2;
-constexpr int kPerPage = 4;
+constexpr int kRowsPerPage = 48;  // one page per category (vertical scroll), = kLoxoneControlCap
+constexpr int kPerPage = 2 * kRowsPerPage;
 constexpr int kMaxPages = 32;
 constexpr uint32_t kShutterRereadMs = 3000;
 constexpr int kLocalRelay = -2;
 
-// Dark Glass (UI proposal 1): deep navy background, glass cards, soft accents.
-constexpr uint32_t kBgTop = 0x1A2438;
-constexpr uint32_t kBgBottom = 0x0B0F1A;
-constexpr uint32_t kText = 0xE8ECF4;
-constexpr uint32_t kTextDim = 0x8A94A8;
-constexpr uint32_t kCardTop = 0x1B2333;
-constexpr uint32_t kCardBottom = 0x131926;
-constexpr uint32_t kBorder = 0x2A3448;
-constexpr uint32_t kOffIcon = 0x5A6478;
-constexpr uint32_t kAccent = 0x7CC4FF;
-constexpr uint32_t kAmber = 0xFFC857;
-constexpr uint32_t kGreen = 0x7EE0A1;
-constexpr uint32_t kBlue = 0x7CC4FF;
-constexpr uint32_t kYellow = 0xFFC857;
-constexpr uint32_t kOrange = 0xFFD27A;
-constexpr uint32_t kCyan = 0x7CC4FF;
-constexpr uint32_t kPurple = 0xB4A8FF;
-constexpr uint32_t kTeal = 0x7FE3D8;
-constexpr uint32_t kRed = 0xFF7A7A;
+// Colours come from the active design (ui_theme.h: Dark Glass or Co4), chosen at boot.
+#define kBgTop (g_theme->bg_top)
+#define kBgBottom (g_theme->bg_bottom)
+#define kText (g_theme->text)
+#define kTextDim (g_theme->text_dim)
+#define kCardTop (g_theme->card_top)
+#define kCardBottom (g_theme->card_bottom)
+#define kBorder (g_theme->border)
+#define kOffIcon (g_theme->off_icon)
+#define kAccent (g_theme->accent)
+#define kAmber (g_theme->amber)
+#define kGreen (g_theme->green)
+#define kBlue (g_theme->blue)
+#define kYellow (g_theme->yellow)
+#define kOrange (g_theme->orange)
+#define kCyan (g_theme->cyan)
+#define kPurple (g_theme->purple)
+#define kTeal (g_theme->teal)
+#define kRed (g_theme->red)
 
 enum Section : uint8_t { kSecFav = 0, kSecLight = 1, kSecShutter = 2, kSecOther = 3 };
 enum class Nav : uint8_t {
   Home, Category, Weather, Settings, WifiList, WifiPass, Location, Display, Time,
   Cameras, CamSettings, CamId, CamSearch, CamKey,
-  Transit, Calendar, Rain, TransitSet, StationSearch, CalSet, TextEdit, Maint, RemSet, Energy, EnSet,
-  Playground, LoxSet
+  Transit, Calendar, Rain, Radar, Warn, TransitSet, StationSearch, CalSet, TextEdit, Maint, RemSet, Energy, EnSet,
+  Playground, Co4, Co4Set, Co4Login, Co4Zones, LoxMenu, LoxSet
 };
 
 const char* kShutterLabel[2] = {"Auf", "Ab"};
 const char* kShutterCommand[2] = {"FullUp", "FullDown"};
 const char* kShutterIcon[2] = {ICON_ARROW_UP, ICON_ARROW_DOWN};
 const char* kSectionIcon[4] = {ICON_STAR, ICON_BULB, ICON_BLINDS, ICON_TOGGLE};
-const uint32_t kSectionAccent[4] = {kAmber, kOrange, kAccent, kGreen};
+uint32_t kSectionAccent[4] = {};  // set from the design in the UI build
 
 struct RowPlan {
   bool shutter;
@@ -124,6 +142,7 @@ lv_obj_t* fc_icon[2] = {nullptr, nullptr};
 lv_obj_t* wx_root = nullptr;
 lv_obj_t* wx_title = nullptr;
 lv_obj_t* wx_page = nullptr;
+lv_obj_t* wx_dots = nullptr;  // weather day pager
 lv_obj_t* wx_icon = nullptr;
 lv_obj_t* wx_temp = nullptr;
 lv_obj_t* wx_cond = nullptr;
@@ -140,7 +159,11 @@ lv_point_t wx_curve_pts[kWxSlots];
 lv_obj_t* wx_prev_hint = nullptr;
 lv_obj_t* wx_next_hint = nullptr;
 lv_obj_t* wx_empty = nullptr;
+lv_obj_t* wx_chip[4] = {nullptr, nullptr, nullptr, nullptr};
+lv_obj_t* wx_timeline = nullptr;
 WeatherDetailDay* wx_week = nullptr;  // PSRAM copy
+lv_obj_t* home_rain = nullptr;  // rain icon on the home weather card (rain in the next 24 h)
+lv_obj_t* wx_rain = nullptr;    // same on the Heute page
 int wx_count = 0;
 int wx_day = 0;
 
@@ -151,6 +174,10 @@ lv_obj_t* card_btn[6] = {};
 lv_obj_t* weather_place = nullptr;
 // Settings screens
 lv_obj_t* set_root = nullptr;
+constexpr int kSetGroups = 5;
+constexpr int kSetGroupDisplay = 1;
+lv_obj_t* set_grp_root[kSetGroups] = {};
+int set_group = -1;  // open settings group, -1: top level
 lv_obj_t* set_wifi_val = nullptr;
 lv_obj_t* set_loc_val = nullptr;
 lv_obj_t* set_disp_val = nullptr;
@@ -206,12 +233,20 @@ constexpr uint8_t kHintBacklight = 4;  // percent
 lv_obj_t* wl_root = nullptr;
 lv_obj_t* wl_list = nullptr;
 lv_obj_t* wl_status = nullptr;
+lv_obj_t* wl_banner = nullptr;   // status banner below the header (icon + 2 lines)
+lv_obj_t* wl_icon = nullptr;
+lv_obj_t* wl_offline = nullptr;  // "Ohne Netzwerk starten" (firmware opened the list)
+lv_obj_t* msg_cancel_btn = nullptr;  // "Abbrechen" while connecting
+bool offline_pending = false;
+bool connect_cancel_pending = false;
+enum class WlTone { Busy, Info, Warn };
+void wl_set_status(const char* text, WlTone tone);  // panel_ui_settings.inc
 char wifi_setup_note[96] = "";  // set while the firmware opened the WLAN selection
 lv_obj_t* wp_root = nullptr;
 lv_obj_t* wp_title = nullptr;
 lv_obj_t* wp_ta = nullptr;
 lv_obj_t* wp_status = nullptr;
-lv_obj_t* lox_root = nullptr;  // Einstellungen > Miniserver (also the first-run setup)
+lv_obj_t* loxset_root = nullptr;  // Einstellungen > Miniserver (also the first-run setup)
 lv_obj_t* lox_host_ta = nullptr;
 lv_obj_t* lox_user_ta = nullptr;
 lv_obj_t* lox_pass_ta = nullptr;
@@ -225,10 +260,14 @@ lv_obj_t* loc_list = nullptr;
 lv_obj_t* loc_status = nullptr;
 lv_obj_t* kb = nullptr;
 lv_obj_t* msg_wifi_btn = nullptr;
-WifiAp ui_aps[kMaxAps];
+EXT_RAM_BSS_ATTR WifiAp ui_aps[kMaxAps];
 int ui_ap_n = 0;
 bool wl_scanning = false;
-GeoPlace ui_places[kMaxPlaces];
+ScanGen wl_gen;              // scan generation: "Abbrechen" makes a late result stale
+lv_obj_t* wl_left = nullptr;   // "Abbrechen"
+lv_obj_t* wl_right = nullptr;  // "Nochmals versuchen" (firmware opened the list) / "Neu suchen"
+void wifi_list_leave();        // panel_ui_settings.inc
+EXT_RAM_BSS_ATTR GeoPlace ui_places[kMaxPlaces];
 int ui_place_n = 0;
 bool loc_searching = false;
 bool wp_connecting = false;
@@ -287,6 +326,16 @@ bool rem_ok_pressing();
 void info_hide_all();
 // Playground (panel_ui_play.inc)
 lv_obj_t* set_play_val = nullptr;
+lv_obj_t* set_sw_val = nullptr;
+lv_obj_t* set_co4_val = nullptr;
+int co4_page = 0;  // Co4 Energie: 0 Heute, 1 Verlauf
+void co4_hide_all();
+void co4_hide_views();
+void co4_swipe(int dir);
+void co4_tick();
+void co4_enter(int page);
+void open_co4set();
+void co4set_summary();
 PlayState play_last_state = PlayState::Off;
 bool play_last_fwd = false;
 void play_hide();
@@ -298,6 +347,15 @@ void home_chips_refresh();
 void home_warn_refresh();
 void tr_swipe(int dir);
 void rain_enter();
+void open_weather_day(int day);
+void radar_enter();
+void warn_enter();
+bool rain_forecast();
+void rain_dots_set();
+void rain_icon_refresh();
+lv_obj_t* make_rain_btn(lv_obj_t* parent, const char* key, int size);
+bool warn_active();
+void warn_refresh();
 void open_trset();
 void open_calset();
 void open_maint();
@@ -318,7 +376,7 @@ struct Named {
   char name[16];
   lv_obj_t* obj;
 };
-EXT_RAM_BSS_ATTR Named named[192];
+EXT_RAM_BSS_ATTR Named named[224];
 int named_n = 0;
 void reg(const char* name, lv_obj_t* obj) {
   for (int i = 0; i < named_n; ++i) {
@@ -327,7 +385,7 @@ void reg(const char* name, lv_obj_t* obj) {
       return;
     }
   }
-  if (named_n < 192) {
+  if (named_n < 224) {
     snprintf(named[named_n].name, sizeof(named[named_n].name), "%s", name);
     named[named_n].obj = obj;
     named_n++;
@@ -353,6 +411,34 @@ lv_obj_t* tile_sub[kPerPage] = {};
 lv_obj_t* shutter_box[kRowsPerPage] = {};
 lv_obj_t* shutter_title[kRowsPerPage] = {};
 lv_obj_t* shutter_pos[kRowsPerPage] = {};
+lv_obj_t* cat_list = nullptr;
+lv_obj_t* lox_root = nullptr;
+lv_obj_t* lox_count[3] = {};
+lv_obj_t* sw_btn = nullptr;
+lv_obj_t* sw_icon = nullptr;
+
+// Stylised Loxone mark, drawn from plain rectangles (no external asset): a
+// square frame open at the top right with a small block inside. 36 x 36 px,
+// one colour like the font icons.
+void make_lox_glyph(lv_obj_t* parent, uint32_t color) {
+  lv_obj_t* g = lv_obj_create(parent);
+  lv_obj_remove_style_all(g);
+  lv_obj_set_size(g, 36, 36);
+  lv_obj_clear_flag(g, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_clear_flag(g, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_center(g);
+  static const int16_t kR[5][4] = {{0, 0, 5, 36}, {0, 31, 36, 5}, {0, 0, 22, 5}, {31, 14, 5, 22}, {13, 13, 10, 10}};
+  for (const auto& r : kR) {
+    lv_obj_t* b = lv_obj_create(g);
+    lv_obj_remove_style_all(b);
+    lv_obj_set_pos(b, r[0], r[1]);
+    lv_obj_set_size(b, r[2], r[3]);
+    lv_obj_set_style_bg_color(b, lv_color_hex(color), 0);
+    lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(b, 1, 0);
+    lv_obj_clear_flag(b, LV_OBJ_FLAG_CLICKABLE);
+  }
+}
 lv_obj_t* empty_hint = nullptr;
 lv_obj_t* message = nullptr;
 lv_obj_t* message_title = nullptr;
@@ -362,7 +448,7 @@ lv_obj_t* retry_btn = nullptr;
 EXT_RAM_BSS_ATTR LoxoneControl controls[kLoxoneControlCap];
 size_t control_count = 0;
 char server_name[48] = "";
-PagePlan pages[kMaxPages];
+EXT_RAM_BSS_ATTR PagePlan pages[kMaxPages];
 int page_n = 0;
 int section_origin[4] = {-1, -1, -1, -1};
 int section_pages[4] = {};
@@ -384,15 +470,30 @@ LoxoneCommandRequest pending = {};
 bool retry_pending = false;
 
 bool gesture_consumed = false;
+bool touch_edge = false;  // started in the right back-edge zone (decided at touch-down)
+bool touch_stop = false;        // this touch only stops a glide (no click)
+uint32_t last_gesture_end = 0;  // ms of the last non-tap release
+constexpr uint32_t kScrollStopMs = 250;
 lv_coord_t gesture_x0 = 0;
 lv_coord_t gesture_y0 = 0;
 
 lv_obj_t* make_label(lv_obj_t* parent, const lv_font_t* font, lv_color_t color) {
   lv_obj_t* label = lv_label_create(parent);
+  // lv_label_create() starts with the text "Text". Labels that are only filled
+  // once data arrives (offline, no forecast yet) would show it, and an icon or
+  // digits-only font draws its missing glyphs as placeholder boxes. Start empty.
+  lv_label_set_text_static(label, "");
   lv_obj_set_style_text_font(label, font, 0);
   lv_obj_set_style_text_color(label, color, 0);
   lv_obj_clear_flag(label, LV_OBJ_FLAG_CLICKABLE);
   return label;
+}
+
+// One line cut with "...": LONG_DOT only dots when the height is fixed; with the default
+// content height LVGL wraps instead (overlapping title/subtitle rows on the settings list).
+void label_dot1(lv_obj_t* l) {
+  lv_label_set_long_mode(l, LV_LABEL_LONG_DOT);
+  lv_obj_set_height(l, lv_font_get_line_height(lv_obj_get_style_text_font(l, LV_PART_MAIN)));
 }
 
 void hide(lv_obj_t* obj) {
@@ -413,8 +514,8 @@ void style_glass(lv_obj_t* obj, lv_coord_t radius) {
   lv_obj_set_style_bg_grad_color(obj, lv_color_hex(kCardBottom), 0);
   lv_obj_set_style_bg_grad_dir(obj, LV_GRAD_DIR_VER, 0);
   lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
-  lv_obj_set_style_bg_color(obj, lv_color_hex(0x2C3954), LV_STATE_PRESSED);
-  lv_obj_set_style_bg_grad_color(obj, lv_color_hex(0x1F2940), LV_STATE_PRESSED);
+  lv_obj_set_style_bg_color(obj, lv_color_hex(g_theme->pressed_top), LV_STATE_PRESSED);
+  lv_obj_set_style_bg_grad_color(obj, lv_color_hex(g_theme->pressed_bottom), LV_STATE_PRESSED);
   lv_obj_set_style_radius(obj, radius, 0);
   lv_obj_set_style_border_width(obj, 1, 0);
   lv_obj_set_style_border_color(obj, lv_color_hex(kBorder), 0);
@@ -427,8 +528,8 @@ void style_glass(lv_obj_t* obj, lv_coord_t radius) {
 
 // Checked state (selected choice): accent-tinted glass with an accent border.
 void style_checked(lv_obj_t* obj) {
-  lv_obj_set_style_bg_color(obj, lv_color_hex(0x2B4A6B), LV_STATE_CHECKED);
-  lv_obj_set_style_bg_grad_color(obj, lv_color_hex(0x1F3550), LV_STATE_CHECKED);
+  lv_obj_set_style_bg_color(obj, lv_color_hex(g_theme->checked_top), LV_STATE_CHECKED);
+  lv_obj_set_style_bg_grad_color(obj, lv_color_hex(g_theme->checked_bottom), LV_STATE_CHECKED);
   lv_obj_set_style_border_color(obj, lv_color_hex(kAccent), LV_STATE_CHECKED);
 }
 
@@ -436,7 +537,7 @@ void style_checked(lv_obj_t* obj) {
 // (LV_STATE_PRESSED) tints it with the accent.
 void style_tile(lv_obj_t* obj, uint32_t accent) {
   lv_color_t a = lv_color_hex(accent);
-  style_glass(obj, 24);
+  style_glass(obj, g_theme->r_tile);
   lv_obj_set_style_bg_color(obj, lv_color_mix(a, lv_color_hex(kCardTop), 90), LV_STATE_PRESSED);
   lv_obj_set_style_bg_grad_color(obj, lv_color_mix(a, lv_color_hex(kCardBottom), 50), LV_STATE_PRESSED);
   lv_obj_set_style_border_color(obj, a, LV_STATE_PRESSED);
@@ -483,6 +584,44 @@ const char* empty_text(Section section) {
 
 int round_c(float v) { return static_cast<int>(v >= 0.f ? v + 0.5f : v - 0.5f); }
 
+// Page dots, at the same place as before (8 px dots at y 452, centred), one
+// per page of the swipe chain, the current one bright.
+constexpr int kDotsY = 450;
+lv_obj_t* make_dots(lv_obj_t* parent) {
+  lv_obj_t* s = lv_obj_create(parent);
+  lv_obj_remove_style_all(s);
+  lv_obj_set_pos(s, 0, kDotsY);
+  lv_obj_set_size(s, kScreen, 12);
+  lv_obj_clear_flag(s, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_clear_flag(s, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_flex_flow(s, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(s, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  lv_obj_set_style_pad_column(s, 8, 0);
+  return s;
+}
+
+void dots_set(lv_obj_t* s, int n, int active) {
+  if (s == nullptr) return;
+  if (n > 20) n = 20;
+  while (static_cast<int>(lv_obj_get_child_cnt(s)) > n) lv_obj_del(lv_obj_get_child(s, -1));
+  while (static_cast<int>(lv_obj_get_child_cnt(s)) < n) {
+    lv_obj_t* d = lv_obj_create(s);
+    lv_obj_remove_style_all(d);
+    lv_obj_set_size(d, 8, 8);
+    lv_obj_set_style_radius(d, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_opa(d, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(d, LV_OBJ_FLAG_CLICKABLE);
+  }
+  for (int i = 0; i < n; ++i) {
+    lv_obj_t* d = lv_obj_get_child(s, i);
+    lv_obj_set_style_bg_color(d, lv_color_hex(i == active ? kText : kTextDim), 0);
+    lv_obj_set_style_bg_opa(d, i == active ? LV_OPA_COVER : LV_OPA_50, 0);
+  }
+  if (n > 1) show(s);
+  else hide(s);
+}
+
+
 #include "panel_ui_weather.inc"
 #include "panel_ui_settings.inc"
 #include "panel_ui_cams.inc"
@@ -491,8 +630,23 @@ int round_c(float v) { return static_cast<int>(v >= 0.f ? v + 0.5f : v - 0.5f); 
 #include "panel_ui_rem.inc"
 #include "panel_ui_energy.inc"
 #include "panel_ui_play.inc"
+#include "panel_ui_co4.inc"
 
 }  // namespace
+
+void ui_co4_chart_shape(char* out, size_t n) {
+  if (!g_c4_shape_set) {
+    snprintf(out, n, "CO4CHART none");
+    return;
+  }
+  static const char* const kName[4] = {"pv", "bezug", "einsp", "bat"};
+  size_t o = snprintf(out, n, "CO4CHART");
+  for (int k = 0; k < 4 && o < n; ++k) {
+    const Co4PlotShape& s = g_c4_shape[k];
+    o += snprintf(out + o, n - o, " %s=v%d/r%d/i%d/s%d/dy%d", kName[k], s.valid, s.runs, s.isolated, s.segments,
+                  s.max_dy);
+  }
+}
 
 void ui_set_week(const WeatherDetailDay* days, int count) {
   if (count > kWxDays) count = kWxDays;
@@ -506,6 +660,7 @@ void ui_set_week(const WeatherDetailDay* days, int count) {
   if (nav == Nav::Weather) {
     refresh_weather_day();
   }
+  rain_icon_refresh();
 }
 
 void ui_describe(char* out, size_t n) {
@@ -536,6 +691,11 @@ void ui_describe(char* out, size_t n) {
   }
 }
 
+bool nav_has_pages() {
+  return nav == Nav::Category || nav == Nav::Weather || nav == Nav::Cameras || nav == Nav::Transit ||
+         nav == Nav::Energy || nav == Nav::Co4 || nav == Nav::Rain || nav == Nav::Radar || nav == Nav::Warn;
+}
+
 void ui_touch_sample(bool pressed, int x, int y) {
   if (pressed) {
     if (!touch_down) {
@@ -544,7 +704,19 @@ void ui_touch_sample(bool pressed, int x, int y) {
       touch_max_move = 0;
       gesture_x0 = x;
       gesture_y0 = y;
-      gesture_consumed = false;
+      // A touch that lands while a list still glides (scroll throw), or right
+      // after a scroll/swipe, only stops the motion: it never clicks.
+      lv_indev_t* in = lv_indev_get_next(nullptr);
+      touch_stop = (in != nullptr && lv_indev_get_scroll_obj(in) != nullptr) ||
+                   (last_gesture_end != 0 && now_ms() - last_gesture_end < kScrollStopMs);
+      gesture_consumed = touch_stop;
+      // Right-edge back: decided here, once. Such a touch is back-only: no
+      // click, no scroll, no page swipe (LVGL gets nothing until release).
+      touch_edge = touch::starts_in_back_edge(x, nav_has_pages());
+      if (touch_edge) {
+        gesture_consumed = true;
+        if (in != nullptr) lv_indev_wait_release(in);
+      }
     }
     int m = abs(x - gesture_x0);
     int my = abs(y - gesture_y0);
@@ -577,7 +749,17 @@ void ui_init() {
   g_ui_build_psram = p0 > p1 ? p0 - p1 : 0;
   heap_note("ui-build");
 }
+void style_header(lv_obj_t* t);  // panel_ui_settings.inc
+void header_title_at(lv_obj_t* t, int32_t x, int32_t y, int32_t w);
+void header_note(lv_obj_t* l);
+
 static void ui_init_impl() {
+  // Design is fixed for this boot (a change in Einstellungen restarts).
+  ui_theme_select(settings_load_design());
+  kSectionAccent[0] = kAmber;
+  kSectionAccent[1] = kOrange;
+  kSectionAccent[2] = kAccent;
+  kSectionAccent[3] = kGreen;
   lv_obj_t* screen = lv_scr_act();
   lv_obj_set_style_bg_color(screen, lv_color_hex(kBgTop), 0);
   lv_obj_set_style_bg_grad_color(screen, lv_color_hex(kBgBottom), 0);
@@ -600,13 +782,18 @@ static void ui_init_impl() {
   home_time = make_label(home_root, &font_inter_16, lv_color_hex(kTextDim));
   lv_label_set_text(home_time, "--:--");
   lv_obj_align(home_time, LV_ALIGN_TOP_RIGHT, -24, 24);
+  if (g_theme->logo) {
+    lv_obj_t* logo = lv_img_create(home_root);
+    lv_img_set_src(logo, &img_co4_logo);
+    lv_obj_align(logo, LV_ALIGN_TOP_MID, 0, 12);
+  }
 
   // One weather card: now (icon, temperature, place and condition), then
   // today and tomorrow side by side under a divider. Tap a day for details.
   lv_obj_t* weather = lv_obj_create(home_root);
   lv_obj_set_pos(weather, 24, 56);
   lv_obj_set_size(weather, kScreen - 48, 222);
-  style_glass(weather, 28);
+  style_glass(weather, g_theme->r_weather);
   // Tapping the current-weather block opens today's details; the day panels
   // below are children and keep their own taps.
   lv_obj_clear_flag(weather, LV_OBJ_FLAG_SCROLLABLE);
@@ -667,36 +854,48 @@ static void ui_init_impl() {
     lv_label_set_text(fc_rain[d], "");
     lv_obj_set_pos(fc_rain[d], 82, 53);
   }
+  home_rain = make_rain_btn(weather, "home:rain", 60);
+  lv_obj_set_pos(home_rain, kScreen - 48 - 60 - 14, 54);  // below the warning pill, right of the place
   update_weather_line();
 
-  // Five icon-only buttons in one row.
+  // Four icon-only buttons in one row (432 px: 4 x 64 + 3 x 122.7):
+  // Loxone (opens the category menu), Schalter (toggles the chosen target
+  // directly), Kameras, Einstellungen.
   struct HomeButton {
-    const char* icon;
+    const char* icon;  // nullptr: drawn Loxone glyph
     const char* name;
     uint32_t color;
+    int which;  // on_category: 4 settings, 5 cameras, 6 Loxone menu, 7 switch toggle
   };
-  // Six icon-only buttons in one row (432 px: 6 x 64 + 5 x 9.6).
-  static const HomeButton kButtons[6] = {
-      {ICON_STAR, "cat:fav", kSectionAccent[0]},      {ICON_BULB, "cat:licht", kSectionAccent[1]},
-      {ICON_BLINDS, "cat:storen", kSectionAccent[2]}, {ICON_TOGGLE, "cat:schalter", kSectionAccent[3]},
-      {ICON_VIDEOCAM, "cat:kameras", kTeal},          {ICON_SETTINGS, "cat:settings", kPurple},
+  static const HomeButton kButtons[4] = {
+      {nullptr, "cat:loxone", kSectionAccent[0], 6},
+      {ICON_TOGGLE, "cat:schalter", kSectionAccent[3], 7},
+      {ICON_VIDEOCAM, "cat:kameras", kTeal, 5},
+      {ICON_SETTINGS, "cat:settings", kPurple, 4},
   };
-  static const int kWhich[6] = {0, 1, 2, 3, 5, 4};  // on_category: 4 = settings, 5 = cameras
-  for (int i = 0; i < 6; ++i) {
+  for (int i = 0; i < 4; ++i) {
     const HomeButton& b = kButtons[i];
     lv_obj_t* btn = lv_btn_create(home_root);
-    lv_obj_set_pos(btn, 24 + (i * 368) / 5, 300);
+    lv_obj_set_pos(btn, 24 + (i * 368) / 3, 300);
     lv_obj_set_size(btn, 64, 64);
     style_tile(btn, b.color);
     lv_obj_add_event_cb(btn, on_category, LV_EVENT_CLICKED,
-                        reinterpret_cast<void*>(static_cast<intptr_t>(kWhich[i])));
+                        reinterpret_cast<void*>(static_cast<intptr_t>(b.which)));
     watch(btn);
     reg(b.name, btn);
     card_btn[i] = btn;
-    lv_obj_t* icon = make_label(btn, &font_icons_38, lv_color_hex(b.color));
-    lv_label_set_text(icon, b.icon);
-    lv_obj_center(icon);
+    uint32_t ic = b.color;
+    if (g_theme->icon_mono) ic = i == 0 ? g_theme->icon_active : g_theme->icon;
+    if (b.icon == nullptr) {
+      make_lox_glyph(btn, ic);
+    } else {
+      lv_obj_t* icon = make_label(btn, &font_icons_38, lv_color_hex(ic));
+      lv_label_set_text(icon, b.icon);
+      lv_obj_center(icon);
+      if (b.which == 7) sw_icon = icon;
+    }
   }
+  sw_btn = card_btn[1];
   build_home_info(weather);  // warning pill in the card, ÖV + Kalender chips below the buttons
 
   cat_root = lv_obj_create(screen);
@@ -704,6 +903,17 @@ static void ui_init_impl() {
   lv_obj_set_size(cat_root, kScreen, kScreen);
   style_plain(cat_root);
 
+  if (g_theme->header_bar) {
+    lv_obj_t* bar = lv_obj_create(cat_root);
+    style_plain(bar);
+    lv_obj_set_pos(bar, 0, 0);
+    lv_obj_set_size(bar, kScreen, 60);
+    lv_obj_set_style_bg_color(bar, lv_color_hex(g_theme->grad_a), 0);
+    lv_obj_set_style_bg_grad_color(bar, lv_color_hex(g_theme->grad_b), 0);
+    lv_obj_set_style_bg_grad_dir(bar, LV_GRAD_DIR_HOR, 0);
+    lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(bar, LV_OBJ_FLAG_CLICKABLE);
+  }
   cat_icon = make_label(cat_root, &font_icons_24, lv_color_hex(kAmber));
   lv_obj_set_pos(cat_icon, 22, 20);
   cat_title = make_label(cat_root, &font_inter_20, lv_color_hex(kText));
@@ -715,72 +925,21 @@ static void ui_init_impl() {
   hide(cat_page);
 
   cat_status = make_label(cat_root, &font_inter_14, lv_color_hex(kTextDim));
-  lv_obj_set_pos(cat_status, 24, 54);
+  lv_obj_set_pos(cat_status, 24, g_theme->header_bar ? 64 : 54);  // below the 60 px bar
   lv_obj_set_width(cat_status, 432);
   lv_label_set_long_mode(cat_status, LV_LABEL_LONG_DOT);
   lv_label_set_text(cat_status, "");
 
-  for (int slot = 0; slot < kPerPage; ++slot) {
-    int col = slot % 2;
-    int row = slot / 2;
-    int x = kMargin + col * (kTileW + kGap);
-    int y = kContentY + row * (kTileH + kGap);
-    lv_obj_t* btn = lv_btn_create(cat_root);
-    lv_obj_set_pos(btn, x, y);
-    lv_obj_set_size(btn, kTileW, kTileH);
-    style_glass(btn, 22);
-    lv_obj_add_event_cb(btn, on_tile, LV_EVENT_CLICKED, reinterpret_cast<void*>(static_cast<intptr_t>(slot)));
-    watch(btn);
-    tiles[slot] = btn;
-
-    tile_icon[slot] = make_label(btn, &font_icons_32, lv_color_hex(kOffIcon));
-    lv_obj_set_pos(tile_icon[slot], 16, 14);
-
-    tile_name[slot] = make_label(btn, &font_inter_sb16, lv_color_hex(kText));
-    lv_obj_set_width(tile_name[slot], kTileW - 32);
-    lv_label_set_long_mode(tile_name[slot], LV_LABEL_LONG_WRAP);
-    lv_obj_set_pos(tile_name[slot], 16, 66);
-
-    tile_sub[slot] = make_label(btn, &font_inter_14, lv_color_hex(kTextDim));
-    lv_obj_set_width(tile_sub[slot], kTileW - 32);
-    lv_label_set_long_mode(tile_sub[slot], LV_LABEL_LONG_DOT);
-    lv_obj_align(tile_sub[slot], LV_ALIGN_BOTTOM_LEFT, 16, -14);
-    hide(btn);
-  }
-
-  for (int row_slot = 0; row_slot < kRowsPerPage; ++row_slot) {
-    lv_obj_t* box = lv_obj_create(cat_root);
-    lv_obj_set_pos(box, kMargin, kContentY + row_slot * (kTileH + kGap));
-    lv_obj_set_size(box, kScreen - 2 * kMargin, kTileH);
-    style_glass(box, 22);
-    lv_obj_clear_flag(box, LV_OBJ_FLAG_CLICKABLE);
-    shutter_box[row_slot] = box;
-
-    shutter_title[row_slot] = make_label(box, &font_inter_sb16, lv_color_hex(kText));
-    lv_obj_set_pos(shutter_title[row_slot], 18, 16);
-    lv_obj_set_width(shutter_title[row_slot], 300);
-    lv_label_set_long_mode(shutter_title[row_slot], LV_LABEL_LONG_DOT);
-
-    shutter_pos[row_slot] = make_label(box, &font_inter_14, lv_color_hex(kAccent));
-    lv_obj_align(shutter_pos[row_slot], LV_ALIGN_TOP_RIGHT, -18, 18);
-
-    for (int which = 0; which < 2; ++which) {
-      lv_obj_t* btn = lv_btn_create(box);
-      lv_obj_set_pos(btn, 14 + which * 208, 52);
-      lv_obj_set_size(btn, 198, 88);
-      style_shutter_button(btn);
-      intptr_t tag = static_cast<intptr_t>(row_slot * 2 + which);
-      lv_obj_add_event_cb(btn, on_shutter, LV_EVENT_CLICKED, reinterpret_cast<void*>(tag));
-      watch(btn);
-      lv_obj_t* arrow = make_label(btn, &font_icons_32, lv_color_hex(kAccent));
-      lv_label_set_text(arrow, kShutterIcon[which]);
-      lv_obj_align(arrow, LV_ALIGN_CENTER, -28, 0);
-      lv_obj_t* label = make_label(btn, &font_inter_20, lv_color_hex(kText));
-      lv_label_set_text(label, kShutterLabel[which]);
-      lv_obj_align(label, LV_ALIGN_CENTER, 18, 0);
-    }
-    hide(box);
-  }
+  // All controls of a category on one vertically scrolling page; the tiles and
+  // shutter rows are created on first use (ensure_tile / ensure_row).
+  cat_list = lv_obj_create(cat_root);
+  style_plain(cat_list);
+  lv_obj_set_pos(cat_list, 0, kContentY);
+  lv_obj_set_size(cat_list, kScreen, kScreen - kContentY - 14);
+  lv_obj_add_flag(cat_list, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scroll_dir(cat_list, LV_DIR_VER);
+  lv_obj_set_scrollbar_mode(cat_list, LV_SCROLLBAR_MODE_ACTIVE);
+  lv_obj_set_style_pad_bottom(cat_list, 12, 0);
 
   empty_hint = make_label(cat_root, &font_inter_20, lv_color_hex(kTextDim));
   lv_obj_set_width(empty_hint, 400);
@@ -798,6 +957,50 @@ static void ui_init_impl() {
   make_home_bar(cat_root);
 
   hide(cat_root);
+
+  // Loxone menu: one row per category; each opens its scrolling list.
+  lox_root = lv_obj_create(screen);
+  lv_obj_set_pos(lox_root, 0, 0);
+  lv_obj_set_size(lox_root, kScreen, kScreen);
+  style_plain(lox_root);
+  if (g_theme->header_bar) {
+    lv_obj_t* bar = lv_obj_create(lox_root);
+    style_plain(bar);
+    lv_obj_set_pos(bar, 0, 0);
+    lv_obj_set_size(bar, kScreen, 60);
+    lv_obj_set_style_bg_color(bar, lv_color_hex(g_theme->grad_a), 0);
+    lv_obj_set_style_bg_grad_color(bar, lv_color_hex(g_theme->grad_b), 0);
+    lv_obj_set_style_bg_grad_dir(bar, LV_GRAD_DIR_HOR, 0);
+    lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(bar, LV_OBJ_FLAG_CLICKABLE);
+  }
+  {
+    lv_obj_t* t = make_label(lox_root, &font_inter_20, lv_color_hex(kText));
+    lv_obj_set_pos(t, 24, 21);
+    lv_label_set_text(t, "Loxone");
+    static const char* kNames[3] = {"Favoriten", "Licht", "Storen"};
+    static const char* kRegs[3] = {"cat:fav", "cat:licht", "cat:storen"};
+    for (int i = 0; i < 3; ++i) {
+      lv_obj_t* btn = lv_btn_create(lox_root);
+      lv_obj_set_pos(btn, kMargin, kContentY + i * 112);
+      lv_obj_set_size(btn, kScreen - 2 * kMargin, 100);
+      style_glass(btn, 22);
+      lv_obj_add_event_cb(btn, on_category, LV_EVENT_CLICKED, reinterpret_cast<void*>(static_cast<intptr_t>(i)));
+      watch(btn);
+      reg(kRegs[i], btn);
+      lv_obj_t* ic = make_label(btn, &font_icons_32, lv_color_hex(g_theme->icon_mono ? g_theme->icon : kSectionAccent[i]));
+      lv_label_set_text(ic, kSectionIcon[i]);
+      lv_obj_align(ic, LV_ALIGN_LEFT_MID, 18, 0);
+      lv_obj_t* n = make_label(btn, &font_inter_20, lv_color_hex(kText));
+      lv_label_set_text(n, kNames[i]);
+      lv_obj_align(n, LV_ALIGN_LEFT_MID, 70, 0);
+      lox_count[i] = make_label(btn, &font_inter_14, lv_color_hex(kTextDim));
+      lv_label_set_text(lox_count[i], "");
+      lv_obj_align(lox_count[i], LV_ALIGN_RIGHT_MID, -18, 0);
+    }
+  }
+  make_home_bar(lox_root);
+  hide(lox_root);
 
   build_weather_screen(screen);
 
@@ -846,8 +1049,24 @@ static void ui_init_impl() {
   lv_obj_add_event_cb(retry_btn, on_retry, LV_EVENT_CLICKED, nullptr);
   watch(retry_btn);
   lv_obj_t* retry_label = make_label(retry_btn, &font_inter_20, lv_color_hex(kText));
-  lv_label_set_text(retry_label, "Try again");
+  lv_label_set_text(retry_label, str::kWifiRetry);
+  lv_obj_set_width(retry_label, 172);
+  lv_label_set_long_mode(retry_label, LV_LABEL_LONG_WRAP);
+  lv_obj_set_style_text_align(retry_label, LV_TEXT_ALIGN_CENTER, 0);
   lv_obj_center(retry_label);
+
+  // "Abbrechen" while connecting: centred, same touch size as the buttons above.
+  msg_cancel_btn = lv_btn_create(message);
+  lv_obj_set_size(msg_cancel_btn, 240, 80);
+  lv_obj_align(msg_cancel_btn, LV_ALIGN_BOTTOM_MID, 0, -16);
+  style_glass(msg_cancel_btn, 20);
+  lv_obj_add_event_cb(msg_cancel_btn, on_connect_cancel, LV_EVENT_CLICKED, nullptr);
+  watch(msg_cancel_btn);
+  reg("msg:cancel", msg_cancel_btn);
+  lv_obj_t* cancel_label = make_label(msg_cancel_btn, &font_inter_20, lv_color_hex(kText));
+  lv_label_set_text(cancel_label, str::kConnectCancel);
+  lv_obj_center(cancel_label);
+  hide(msg_cancel_btn);
   hide(message);
   hide(home_root);
   build_settings_screens(screen);
@@ -856,6 +1075,8 @@ static void ui_init_impl() {
   build_energy_screens(screen);
   build_enset_screen(screen);
   build_play_screen(screen);
+  build_co4_screens(screen);
+  build_co4set_screen(screen);
   lv_obj_move_foreground(kb);
   build_sleep_layer();
   build_reminders(screen);
@@ -918,6 +1139,7 @@ void ui_show_message(const char* title, const char* body, bool retry) {
     hide(retry_btn);
     hide(msg_wifi_btn);
   }
+  hide(msg_cancel_btn);
   hide_settings();
   message_open = true;
   hide(home_root);
@@ -1020,6 +1242,23 @@ bool ui_take_command(LoxoneCommandRequest* out) {
   }
   *out = pending;
   command_pending = false;
+  return true;
+}
+
+void ui_show_connecting() {
+  ui_show_message(str::kConnectingTitle, str::kConnectingBody, false);
+  show(msg_cancel_btn);
+}
+
+bool ui_take_connect_cancel() {
+  if (!connect_cancel_pending) return false;
+  connect_cancel_pending = false;
+  return true;
+}
+
+bool ui_take_offline() {
+  if (!offline_pending) return false;
+  offline_pending = false;
   return true;
 }
 

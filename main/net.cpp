@@ -27,9 +27,26 @@ std::atomic<bool> g_connected{false};
 std::atomic<bool> g_failed{false};
 std::atomic<bool> g_scanning{false};    // no reconnects while a scan runs
 std::atomic<bool> g_hold{false};        // Playground CII mode: stay disconnected
+std::atomic<bool> g_paused{false};      // user: "Abbrechen" / "Ohne Netzwerk starten" (session only)
+bool held() { return g_hold || g_paused; }
 std::atomic<int> g_last_reason{0};      // last WIFI_REASON_* of a disconnect
 std::atomic<int> g_auth_fails{0};       // auth / handshake rejections since wifi_start
 std::atomic<int> g_noap_fails{0};       // "AP not found" since wifi_start
+// Playground "sender follows the gateway": BSSID pinned to the gateway channel (RAM only).
+std::atomic<bool> g_pinned{false};
+std::atomic<bool> g_pin_lost{false};
+std::atomic<int> g_pin_noap{0};
+uint8_t g_pin_bssid[6] = {};
+uint8_t g_pin_ch = 0;
+constexpr int kPinNoApMax = 6;  // 3 immediate + 2/4/8 s backoff, then fall back to any AP
+void clear_pin_config() {
+  wifi_config_t wc = {};
+  if (esp_wifi_get_config(WIFI_IF_STA, &wc) != ESP_OK) return;
+  wc.sta.bssid_set = false;
+  memset(wc.sta.bssid, 0, sizeof(wc.sta.bssid));
+  wc.sta.channel = 0;
+  esp_wifi_set_config(WIFI_IF_STA, &wc);
+}
 esp_netif_t* g_netif = nullptr;
 char g_ssid[33] = "";
 // Reconnect backoff: the first 3 attempts right away (WPA3 routers often
@@ -37,7 +54,7 @@ char g_ssid[33] = "";
 int g_retry = 0;
 esp_timer_handle_t g_retry_timer = nullptr;
 void retry_cb(void*) {
-  if (!g_scanning && !g_hold && g_ssid[0] != '\0' && !g_connected) esp_wifi_connect();
+  if (!g_scanning && !held() && g_ssid[0] != '\0' && !g_connected) esp_wifi_connect();
 }
 void reconnect() {
   int n = g_retry++;
@@ -58,7 +75,9 @@ void reconnect() {
   printf("Wi-Fi retry in %d s\n", s);
 }
 // Bit 0: got IP; bit 1: a disconnect happened (waiters re-check the counters).
-constexpr EventBits_t kBitIp = 1, kBitDisc = 2;
+constexpr EventBits_t kBitIp = 1, kBitDisc = 2, kBitScan = 4;  // bit 2: scan done
+// Highest WLAN-scan generation the UI cancelled ("Abbrechen"); read by the net task.
+std::atomic<uint32_t> g_scan_cancel{0};
 EventGroupHandle_t wifi_events() {
   static StaticEventGroup_t buf;
   static EventGroupHandle_t g = xEventGroupCreateStatic(&buf);
@@ -76,13 +95,13 @@ esp_timer_handle_t g_roam_timer = nullptr;
 int64_t g_low_since = 0, g_last_roam = 0;
 std::atomic<bool> g_roam_scan{false};
 std::atomic<bool> g_roam_pending{false};  // our own disconnect: keep the pin once
-std::atomic<bool> g_pinned{false};
+std::atomic<bool> g_roam_pinned{false};
 int g_roam_rssi = 0;
 uint8_t g_roam_cur[6] = {};
 
 void roam_cb(void*) {
   wifi_ap_record_t ap;
-  if (!g_connected || g_scanning || g_hold || g_roam_scan || esp_wifi_sta_get_ap_info(&ap) != ESP_OK) {
+  if (!g_connected || g_scanning || held() || g_pinned || g_roam_scan || esp_wifi_sta_get_ap_info(&ap) != ESP_OK) {
     g_low_since = 0;
     return;
   }
@@ -122,7 +141,7 @@ void roam_scan_done() {
     if (best < 0 || recs[i].rssi > recs[best].rssi) best = i;
   }
   const uint8_t* c = g_roam_cur;
-  if (best >= 0 && recs[best].rssi >= g_roam_rssi + kRoamGain && g_connected && !g_hold) {
+  if (best >= 0 && recs[best].rssi >= g_roam_rssi + kRoamGain && g_connected && !held()) {
     const uint8_t* b = recs[best].bssid;
     printf("Wi-Fi roam: %02x:%02x:%02x:%02x:%02x:%02x %d dBm -> %02x:%02x:%02x:%02x:%02x:%02x %d dBm\n", c[0], c[1],
            c[2], c[3], c[4], c[5], g_roam_rssi, b[0], b[1], b[2], b[3], b[4], b[5], recs[best].rssi);
@@ -131,7 +150,7 @@ void roam_scan_done() {
       memcpy(wc.sta.bssid, b, 6);
       wc.sta.bssid_set = true;
       esp_wifi_set_config(WIFI_IF_STA, &wc);
-      g_pinned = true;
+      g_roam_pinned = true;
       g_roam_pending = true;
       g_last_roam = esp_timer_get_time();
       esp_wifi_disconnect();  // the disconnect handler reconnects to the pinned BSSID
@@ -143,14 +162,14 @@ void roam_scan_done() {
   free(recs);
 }
 
-void unpin_bssid() {
-  if (!g_pinned) return;
+void roam_unpin() {
+  if (!g_roam_pinned) return;
   wifi_config_t wc;
   if (esp_wifi_get_config(WIFI_IF_STA, &wc) == ESP_OK) {
     wc.sta.bssid_set = false;
     esp_wifi_set_config(WIFI_IF_STA, &wc);
   }
-  g_pinned = false;
+  g_roam_pinned = false;
 }
 
 bool is_auth_reason(int r) {
@@ -160,15 +179,16 @@ bool is_auth_reason(int r) {
 }
 
 void on_event(void*, esp_event_base_t base, int32_t id, void* data) {
-  if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
-    if (g_ssid[0] != '\0' && !g_hold) esp_wifi_connect();  // empty SSID: station only for scanning
-  } else if (base == WIFI_EVENT && id == WIFI_EVENT_SCAN_DONE) {
-    if (g_roam_scan) roam_scan_done();
+  if (base == WIFI_EVENT && id == WIFI_EVENT_SCAN_DONE) {
+    if (g_roam_scan) roam_scan_done();  // background roam scan: not a user scan
+    else xEventGroupSetBits(wifi_events(), kBitScan);
+  } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
+    if (g_ssid[0] != '\0' && !held()) esp_wifi_connect();  // empty SSID: station only for scanning
   } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
     if (g_roam_pending) {
       g_roam_pending = false;  // our roam: reconnect pinned once
     } else {
-      unpin_bssid();  // normal drop: any AP of the SSID again
+      roam_unpin();  // normal drop: any AP of the SSID again
     }
     if (g_connected) diag_wifi_disconnect();
     g_connected = false;
@@ -181,6 +201,13 @@ void on_event(void*, esp_event_base_t base, int32_t id, void* data) {
         reason == WIFI_REASON_NO_AP_FOUND_IN_AUTHMODE_THRESHOLD || reason == WIFI_REASON_NO_AP_FOUND_W_COMPATIBLE_SECURITY) {
       g_noap_fails = g_noap_fails + 1;
       g_failed = true;
+      if (g_pinned && ++g_pin_noap >= kPinNoApMax) {  // pinned AP gone: never stay offline for it
+        clear_pin_config();
+        g_pinned = false;
+        g_pin_lost = true;
+        g_retry = 0;
+        printf("Wi-Fi pinned AP not found %d x: unpinned, connecting to any AP\n", kPinNoApMax);
+      }
     } else if (is_auth_reason(reason)) {
       g_auth_fails = g_auth_fails + 1;
       g_failed = true;
@@ -188,11 +215,12 @@ void on_event(void*, esp_event_base_t base, int32_t id, void* data) {
     printf("Wi-Fi disconnect reason %d (auth %d, no AP %d)\n", reason, g_auth_fails.load(), g_noap_fails.load());
     // Keep trying (also the saved network after a failed boot); the caller
     // decides when to give up or switch. A scan pauses the retries.
-    if (!g_scanning && !g_hold && g_ssid[0] != '\0') reconnect();
+    if (!g_scanning && !held() && g_ssid[0] != '\0') reconnect();
   } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
     g_connected = true;
     g_failed = false;
     g_retry = 0;
+    g_pin_noap = 0;
     xEventGroupSetBits(wifi_events(), kBitIp);
   }
 }
@@ -206,6 +234,7 @@ bool wifi_wait(uint32_t ms) {
 }
 
 void wifi_start(const char* ssid, const char* password, const char* hostname) {
+  g_paused = false;  // a new connect request ends a user pause
   static bool inited = false;
   if (!inited) {
     g_netif = esp_netif_create_default_wifi_sta();
@@ -232,6 +261,8 @@ void wifi_start(const char* ssid, const char* password, const char* hostname) {
   g_retry = 0;
   if (g_retry_timer != nullptr) esp_timer_stop(g_retry_timer);
   g_last_reason = 0;
+  g_pinned = false;  // new credentials: fresh config below has no BSSID
+  g_pin_noap = 0;
   snprintf(g_ssid, sizeof(g_ssid), "%s", ssid);
   wifi_config_t wc = {};
   snprintf(reinterpret_cast<char*>(wc.sta.ssid), sizeof(wc.sta.ssid), "%s", ssid);
@@ -242,7 +273,7 @@ void wifi_start(const char* ssid, const char* password, const char* hostname) {
   wc.sta.bssid_set = false;                        // new/reloaded network: no roam pin
   wc.sta.rm_enabled = 1;                           // 802.11k (CONFIG_ESP_WIFI_11KV_SUPPORT)
   wc.sta.btm_enabled = 1;                          // 802.11v BSS transition
-  g_pinned = false;
+  g_roam_pinned = false;
   g_roam_pending = false;
   g_low_since = 0;
   esp_wifi_set_mode(WIFI_MODE_STA);
@@ -261,10 +292,23 @@ void wifi_hold(bool on) {
     printf("Wi-Fi held (Playground CII mode)\n");
   } else {
     g_retry = 0;
-    if (g_ssid[0] != '\0') esp_wifi_connect();
+    if (g_ssid[0] != '\0' && !g_paused) esp_wifi_connect();
     printf("Wi-Fi released: reconnecting\n");
   }
 }
+void wifi_pause(bool on) {
+  if (on == g_paused) return;
+  g_paused = on;
+  if (on) {
+    if (g_retry_timer != nullptr) esp_timer_stop(g_retry_timer);
+    esp_wifi_disconnect();  // non-blocking: the driver task handles it
+    printf("Wi-Fi paused by the user (session only, saved network kept)\n");
+  } else if (!g_hold) {
+    g_retry = 0;
+    if (g_ssid[0] != '\0') esp_wifi_connect();
+  }
+}
+bool wifi_paused() { return g_paused; }
 bool wifi_failed() { return g_failed; }
 int wifi_auth_fails() { return g_auth_fails; }
 int wifi_noap_fails() { return g_noap_fails; }
@@ -346,6 +390,11 @@ HttpGetResult http_get_raw(const char* url, const char* user, const char* passwo
   cfg.url = url;
   cfg.timeout_ms = timeout_ms;
   cfg.buffer_size = 2048;
+  // Request line + headers are built in buffer_size_tx (default 512). A Co4
+  // bearer JWT alone is ~1.4 KB, so size it from URL + extra header.
+  size_t tx = strlen(url) + 512;
+  if (hdr_name != nullptr && hdr_value != nullptr) tx += strlen(hdr_name) + strlen(hdr_value) + 4;
+  cfg.buffer_size_tx = static_cast<int>(tx < 1024 ? 1024 : (tx > 4096 ? 4096 : tx));
   cfg.disable_auto_redirect = true;
   if (strncmp(url, "https://", 8) == 0) {
     cfg.crt_bundle_attach = esp_crt_bundle_attach;
@@ -380,7 +429,16 @@ HttpGetResult http_get_raw(const char* url, const char* user, const char* passwo
   }
   size_t total = 0;
   bool overflow = false;
+  // timeout_ms bounds connect and each read; this bounds the whole body (a peer
+  // that trickles data would otherwise restart the read timeout forever).
+  const int64_t deadline = esp_timer_get_time() + static_cast<int64_t>(timeout_ms) * 6000;
   for (;;) {
+    if (timeout_ms > 0 && esp_timer_get_time() > deadline) {
+      snprintf(r.error, sizeof(r.error), "body timeout");
+      esp_http_client_close(c);
+      esp_http_client_cleanup(c);
+      return r;
+    }
     if (total >= cap) {
       char dummy;
       if (esp_http_client_read(c, &dummy, 1) > 0) overflow = true;
@@ -411,9 +469,146 @@ HttpGetResult http_get_raw(const char* url, const char* user, const char* passwo
   return r;
 }
 
+// POST helper (Co4 login): like http_get_raw, but sends body first. The answer
+// body is read for every status (OAuth errors come as 400 with JSON). Never
+// logs url paths, bodies or the bearer token.
+HttpGetResult http_post(const char* url, const char* content_type, const char* body, size_t body_len,
+                        const char* bearer, uint8_t* resp, size_t cap, int timeout_ms) {
+  HttpGetResult r = {};
+  char label[40];
+  const char* h = strstr(url, "://");
+  h = h != nullptr ? h + 3 : url;
+  size_t hl = strcspn(h, "/:?");
+  snprintf(label, sizeof(label), "%.*s", static_cast<int>(hl < 39 ? hl : 39), h);
+  if (strncmp(url, "https://", 8) != 0) {
+    snprintf(r.error, sizeof(r.error), "https only");
+    return r;
+  }
+  TlsGuard g(label);
+  if (!g.ok) {
+    snprintf(r.error, sizeof(r.error), "TLS busy");
+    return r;
+  }
+  esp_http_client_config_t cfg = {};
+  cfg.url = url;
+  cfg.method = HTTP_METHOD_POST;
+  cfg.timeout_ms = timeout_ms;
+  cfg.buffer_size = 2048;
+  cfg.buffer_size_tx = 1024;
+  cfg.disable_auto_redirect = true;
+  cfg.crt_bundle_attach = esp_crt_bundle_attach;
+  esp_http_client_handle_t c = esp_http_client_init(&cfg);
+  if (c == nullptr) {
+    snprintf(r.error, sizeof(r.error), "client init failed");
+    return r;
+  }
+  char* auth = nullptr;
+  if (bearer != nullptr && bearer[0] != '\0') {
+    size_t n = strlen(bearer) + 8;
+    auth = static_cast<char*>(heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (auth == nullptr) {
+      snprintf(r.error, sizeof(r.error), "no memory");
+      esp_http_client_cleanup(c);
+      return r;
+    }
+    snprintf(auth, n, "Bearer %s", bearer);
+    esp_http_client_set_header(c, "Authorization", auth);
+  }
+  esp_http_client_set_header(c, "Content-Type", content_type);
+  esp_http_client_set_header(c, "Accept", "application/json");
+  auto done = [&]() {
+    esp_http_client_close(c);
+    esp_http_client_cleanup(c);
+    if (auth != nullptr) {
+      memset(auth, 0, strlen(auth));
+      heap_caps_free(auth);
+    }
+  };
+  esp_err_t err = esp_http_client_open(c, static_cast<int>(body_len));
+  if (err != ESP_OK) {
+    snprintf(r.error, sizeof(r.error), "%s", esp_err_to_name(err));
+    done();
+    return r;
+  }
+  size_t sent = 0;
+  while (sent < body_len) {
+    int n = esp_http_client_write(c, body + sent, static_cast<int>(body_len - sent));
+    if (n <= 0) {
+      snprintf(r.error, sizeof(r.error), "write error");
+      done();
+      return r;
+    }
+    sent += static_cast<size_t>(n);
+  }
+  int64_t content_length = esp_http_client_fetch_headers(c);
+  r.status = esp_http_client_get_status_code(c);
+  if (content_length > 0 && static_cast<size_t>(content_length) > cap) {
+    snprintf(r.error, sizeof(r.error), "Response is %lld bytes (limit %u)", content_length, static_cast<unsigned>(cap));
+    done();
+    return r;
+  }
+  size_t total = 0;
+  bool overflow = false;
+  const int64_t deadline = esp_timer_get_time() + static_cast<int64_t>(timeout_ms) * 6000;
+  for (;;) {
+    if (timeout_ms > 0 && esp_timer_get_time() > deadline) {
+      snprintf(r.error, sizeof(r.error), "body timeout");
+      done();
+      return r;
+    }
+    if (total >= cap) {
+      char dummy;
+      if (esp_http_client_read(c, &dummy, 1) > 0) overflow = true;
+      break;
+    }
+    int n = esp_http_client_read(c, reinterpret_cast<char*>(resp + total), cap - total);
+    if (n < 0) {
+      snprintf(r.error, sizeof(r.error), "read error");
+      done();
+      return r;
+    }
+    if (n == 0) break;
+    total += static_cast<size_t>(n);
+  }
+  done();
+  r.length = total;
+  if (overflow) {
+    snprintf(r.error, sizeof(r.error), "Response exceeded %u bytes", static_cast<unsigned>(cap));
+    return r;
+  }
+  r.ok = true;
+  return r;
+}
+
 const char* wifi_ssid() { return g_ssid; }
 
-int wifi_scan(WifiAp* out, int cap) {
+void wifi_scan_cancel(uint32_t gen) {
+  uint32_t c = g_scan_cancel.load();
+  while (gen > c && !g_scan_cancel.compare_exchange_weak(c, gen)) {
+  }
+}
+
+namespace {
+bool scan_cancelled(uint32_t gen) { return gen != 0 && g_scan_cancel.load() >= gen; }
+
+// One non-blocking scan; waits for SCAN_DONE in 100 ms slices so a cancel stops it.
+esp_err_t scan_once(const wifi_scan_config_t& sc, uint32_t gen) {
+  xEventGroupClearBits(wifi_events(), kBitScan);
+  esp_err_t err = esp_wifi_scan_start(&sc, false);
+  if (err != ESP_OK) return err;
+  for (int t = 0; t < 150; ++t) {  // 15 s upper bound (a full active scan takes ~2-4 s)
+    if (xEventGroupWaitBits(wifi_events(), kBitScan, pdTRUE, pdFALSE, pdMS_TO_TICKS(100)) & kBitScan) return ESP_OK;
+    if (scan_cancelled(gen)) break;
+  }
+  esp_wifi_scan_stop();  // also raises SCAN_DONE
+  xEventGroupWaitBits(wifi_events(), kBitScan, pdTRUE, pdFALSE, pdMS_TO_TICKS(500));
+  esp_wifi_clear_ap_list();
+  return scan_cancelled(gen) ? ESP_ERR_INVALID_STATE : ESP_ERR_TIMEOUT;
+}
+}  // namespace
+
+int wifi_scan(WifiAp* out, int cap, uint32_t gen) {
+  if (scan_cancelled(gen)) return -1;
   wifi_scan_config_t sc = {};
   sc.show_hidden = false;
   // A scan fails while the station is (re)connecting, e.g. to an absent saved
@@ -430,17 +625,21 @@ int wifi_scan(WifiAp* out, int cap) {
   esp_err_t err = ESP_FAIL;
   uint16_t num = 0;
   EXT_RAM_BSS_ATTR static wifi_ap_record_t recs[32];
-  for (int i = 0; i < 5; ++i) {
-    err = esp_wifi_scan_start(&sc, true);
+  for (int i = 0; i < 5 && !scan_cancelled(gen); ++i) {
+    err = scan_once(sc, gen);
     num = 32;
     if (err == ESP_OK) err = esp_wifi_scan_get_ap_records(&num, recs);
     if (err == ESP_OK && num > 0) break;
     printf("Wi-Fi scan attempt %d: %s, %u networks\n", i + 1, esp_err_to_name(err), static_cast<unsigned>(num));
-    vTaskDelay(pdMS_TO_TICKS(700));
+    for (int w = 0; w < 7 && !scan_cancelled(gen); ++w) vTaskDelay(pdMS_TO_TICKS(100));
   }
   if (paused) {
     g_scanning = false;
-    if (g_ssid[0] != '\0') esp_wifi_connect();
+    if (g_ssid[0] != '\0' && !held()) esp_wifi_connect();
+  }
+  if (scan_cancelled(gen)) {
+    printf("Wi-Fi scan %lu cancelled\n", static_cast<unsigned long>(gen));
+    return -1;
   }
   if (err != ESP_OK) return 0;
   int n = 0;
@@ -458,4 +657,89 @@ int wifi_scan(WifiAp* out, int cap) {
     n++;
   }
   return n;
+}
+
+int wifi_pin_select(uint8_t ch, uint8_t bssid_out[6], int8_t* rssi_out) {
+  if (ch < 1 || ch > 13 || g_ssid[0] == '\0' || g_scanning) return -1;
+  wifi_scan_config_t sc = {};
+  sc.ssid = reinterpret_cast<uint8_t*>(g_ssid);
+  sc.channel = ch;
+  sc.show_hidden = false;
+  bool paused = !g_connected && !held();
+  g_scanning = true;  // no reconnect while the scan runs (and blocks a UI scan)
+  if (paused) {
+    if (g_retry_timer != nullptr) esp_timer_stop(g_retry_timer);
+    esp_wifi_disconnect();
+    vTaskDelay(pdMS_TO_TICKS(200));
+  }
+  EXT_RAM_BSS_ATTR static wifi_ap_record_t recs[16];
+  uint16_t num = 0;
+  esp_err_t err = ESP_FAIL;
+  for (int i = 0; i < 2; ++i) {
+    err = scan_once(sc, 0);
+    num = 16;
+    if (err == ESP_OK) err = esp_wifi_scan_get_ap_records(&num, recs);
+    if (err == ESP_OK) break;
+    vTaskDelay(pdMS_TO_TICKS(300));
+  }
+  int best = -1;
+  if (err == ESP_OK) {
+    for (int i = 0; i < num; ++i) {  // sorted by RSSI; filter on the primary channel anyway
+      if (recs[i].primary == ch && strcmp(reinterpret_cast<const char*>(recs[i].ssid), g_ssid) == 0) {
+        best = i;
+        break;
+      }
+    }
+  }
+  int rc;
+  if (best >= 0) {
+    wifi_config_t wc = {};
+    esp_wifi_get_config(WIFI_IF_STA, &wc);
+    wc.sta.bssid_set = true;
+    memcpy(wc.sta.bssid, recs[best].bssid, 6);
+    wc.sta.channel = ch;
+    esp_wifi_set_config(WIFI_IF_STA, &wc);
+    memcpy(g_pin_bssid, recs[best].bssid, 6);
+    g_pin_ch = ch;
+    g_pin_noap = 0;
+    g_pinned = true;
+    if (bssid_out != nullptr) memcpy(bssid_out, recs[best].bssid, 6);
+    if (rssi_out != nullptr) *rssi_out = recs[best].rssi;
+    printf("Wi-Fi pinned to %02X:%02X:%02X:%02X:%02X:%02X ch %u rssi %d\n", g_pin_bssid[0], g_pin_bssid[1],
+           g_pin_bssid[2], g_pin_bssid[3], g_pin_bssid[4], g_pin_bssid[5], ch, recs[best].rssi);
+    rc = 1;
+  } else {
+    clear_pin_config();
+    g_pinned = false;
+    printf("Wi-Fi: no AP of the SSID on ch %u (%s): not pinned\n", ch, esp_err_to_name(err));
+    rc = err == ESP_OK ? 0 : -1;
+  }
+  g_scanning = false;
+  if (paused && g_ssid[0] != '\0' && !held()) {
+    g_retry = 0;
+    esp_wifi_connect();
+  }
+  return rc;
+}
+
+void wifi_unpin() {
+  if (!g_pinned) return;
+  clear_pin_config();  // takes effect on the next (re)connect
+  g_pinned = false;
+  printf("Wi-Fi unpinned\n");
+}
+
+bool wifi_pinned(uint8_t bssid[6], uint8_t* ch) {
+  if (!g_pinned) return false;
+  if (bssid != nullptr) memcpy(bssid, g_pin_bssid, 6);
+  if (ch != nullptr) *ch = g_pin_ch;
+  return true;
+}
+
+bool wifi_pin_lost_take() { return g_pin_lost.exchange(false); }
+
+void wifi_reassoc() {
+  if (g_ssid[0] == '\0' || held() || g_scanning) return;
+  g_retry = 0;
+  esp_wifi_disconnect();  // the disconnect event reconnects with the (new) config
 }

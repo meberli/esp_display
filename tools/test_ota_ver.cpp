@@ -1,27 +1,21 @@
-// Host test for ota_ver_cmp: g++ -std=c++17 -I main -DOTA_VER_HOST tools/test_ota_ver.cpp -o t && ./t
+// Host test for main/ota_ver.h: g++ -std=c++17 -I main tools/test_ota_ver.cpp -o t && ./t
 #include <cstdio>
-#include <cstdlib>
-#include <cstring>
-struct Ver { long n[3]; bool suffix; };
-static Ver parse(const char* s) {
-  Ver v = {{0, 0, 0}, false};
-  if (*s == 'v' || *s == 'V') ++s;
-  for (int i = 0; i < 3; ++i) { char* e = nullptr; v.n[i] = strtol(s, &e, 10); s = e; if (*s != '.') break; ++s; }
-  v.suffix = *s == '-' || *s == '+';
-  return v;
-}
-static int cmp(const char* a, const char* b) {
-  Ver x = parse(a), y = parse(b);
-  for (int i = 0; i < 3; ++i) if (x.n[i] != y.n[i]) return x.n[i] < y.n[i] ? -1 : 1;
-  if (x.suffix != y.suffix) return x.suffix ? -1 : 1;
-  return 0;
-}
+#include "ota_ver.h"
 int main() {
   struct { const char *a, *b; int r; } t[] = {
       {"0.7.5", "0.7.4", 1}, {"v0.7.4", "0.7.4", 0}, {"0.7.10", "0.7.9", 1}, {"0.8.0", "0.7.99", 1},
       {"1.0.0", "0.9.9", 1}, {"0.7.4", "0.7.4-3-gabc", 1}, {"0.7.3", "0.7.4", -1}, {"0.7", "0.7.0", 0}};
+  // offer_cmp(offered, running): release-to-release unchanged, test builds need a strictly greater base.
+  struct { const char *o, *r; int r_; } u[] = {
+      {"0.9.8", "0.9.8-test.8ac6a68", 0},   // the reported bug: same base must not be offered
+      {"v0.9.8", "0.9.8-test.8ac6a68", 0},
+      {"0.9.9", "0.9.8-test.8ac6a68", 1},  {"0.10.0", "0.9.8-test.b5fd8f9", 1},
+      {"1.0.0", "0.9.8-test.b5fd8f9", 1},  {"0.9.7", "0.9.8-test.b5fd8f9", -1},
+      {"0.9.8", "0.9.7", 1},  {"0.9.8", "0.9.8", 0},  {"0.9.7", "0.9.8", -1},
+      {"0.7.4", "0.7.4-3-gabc", 1}};  // non-test dev builds keep semver order
   int fails = 0;
-  for (auto& c : t) if (cmp(c.a, c.b) != c.r) { printf("FAIL %s vs %s\n", c.a, c.b); ++fails; }
+  for (auto& c : t) if (ota_ver::cmp(c.a, c.b) != c.r) { printf("FAIL cmp %s vs %s\n", c.a, c.b); ++fails; }
+  for (auto& c : u) if (ota_ver::offer_cmp(c.o, c.r) != c.r_) { printf("FAIL offer %s on %s\n", c.o, c.r); ++fails; }
   printf("%d failures\n", fails);
   return fails;
 }

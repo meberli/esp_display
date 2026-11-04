@@ -273,8 +273,29 @@ void panel_touch_read_raw(lv_indev_data_t* data) {
   }
 }
 
+// Release debounce: the controller sometimes reports one empty sample in the
+// middle of a drag. That split one scroll into two touches, and the short
+// second one was taken as a tap. A release counts only after kRelSamples
+// empty reads in a row; until then the last point is held.
+constexpr int kRelSamples = 2;
+int rel_n = 0;
+bool held = false;
+lv_coord_t held_x = 0, held_y = 0;
+
 void panel_touch_read(lv_indev_drv_t*, lv_indev_data_t* data) {
   panel_touch_read_raw(data);
+  if (data->state == LV_INDEV_STATE_PRESSED) {
+    rel_n = 0;
+    held = true;
+    held_x = data->point.x;
+    held_y = data->point.y;
+  } else if (held && ++rel_n < kRelSamples) {
+    data->state = LV_INDEV_STATE_PRESSED;
+    data->point.x = held_x;
+    data->point.y = held_y;
+  } else {
+    held = false;
+  }
   // Screen off: the waking touch is swallowed until release (no tap, no swipe).
   if (!ui_power_touch(data->state == LV_INDEV_STATE_PRESSED, data->point.x, data->point.y)) {
     data->state = LV_INDEV_STATE_RELEASED;
@@ -415,7 +436,7 @@ bool panel_lvgl_start() {
   lv_indev_drv_init(&indev_drv);
   indev_drv.type = LV_INDEV_TYPE_POINTER;
   indev_drv.read_cb = panel_touch_read;
-  indev_drv.scroll_limit = 12;
+  indev_drv.scroll_limit = 14;  // > kTapSlop: a tap never starts a scroll
   indev_drv.gesture_limit = 40;
   lv_indev_drv_register(&indev_drv);
   return true;

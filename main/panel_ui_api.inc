@@ -11,7 +11,11 @@ bool ui_take_settings(SettingsRequest* out) {
   return true;
 }
 
-void ui_wifi_scan_done(const WifiAp* aps, int n) {
+void ui_wifi_scan_done(const WifiAp* aps, int n, uint32_t gen) {
+  if (!wl_gen.accept(gen)) {
+    console_printf("UI: Wi-Fi scan %lu result dropped (cancelled or stale)\n", static_cast<unsigned long>(gen));
+    return;
+  }
   ui_ap_n = n < 0 ? 0 : (n > kMaxAps ? kMaxAps : n);
   memcpy(ui_aps, aps, sizeof(WifiAp) * ui_ap_n);
   wl_scanning = false;
@@ -22,7 +26,7 @@ void ui_wifi_scan_done(const WifiAp* aps, int n) {
   } else {
     snprintf(t, sizeof(t), ui_ap_n > 0 ? "%d Netzwerke" : "Keine Netzwerke gefunden", ui_ap_n);
   }
-  lv_label_set_text(wl_status, t);
+  wl_set_status(t, wifi_setup_note[0] != '\0' ? WlTone::Warn : WlTone::Info);
   fill_wifi_list();
 }
 
@@ -57,13 +61,13 @@ void ui_wifi_connect_done(bool ok, const char* ssid, const char* current, int st
 bool ui_wifi_busy() { return wp_connecting || (settings_pending && settings_req.kind == SettingsRequest::Connect); }
 
 // Boot without Wi-Fi or saved network unreachable: open the WLAN selection.
-// why: 0 none saved, 1 rejected (password?), 2 not found, 3 timeout.
+// why: 0 none saved, 1 rejected (password?), 2 not found, 3 timeout, 4 cancelled by the user.
 void ui_wifi_setup_open(const char* saved, int why) {
   if (saved == nullptr || saved[0] == '\0') {
     snprintf(wifi_setup_note, sizeof(wifi_setup_note), "Kein WLAN eingerichtet - Netz wählen");
   } else {
-    snprintf(wifi_setup_note, sizeof(wifi_setup_note), "%s %s - versuche weiter", saved,
-             why == 1 ? "abgelehnt" : "nicht erreichbar");
+    snprintf(wifi_setup_note, sizeof(wifi_setup_note), why == 4 ? "%s: Verbindung abgebrochen" : "%s %s - versuche weiter",
+             saved, why == 1 ? "abgelehnt" : "nicht erreichbar");
   }
   console_printf("UI: WLAN selection (%s)\n", wifi_setup_note);
   if (scr_off) screen_on();
@@ -84,7 +88,17 @@ void ui_wifi_setup_close() {
     hide_settings();
     nav = Nav::Home;
   }
-  ui_show_message(str::kConnectingTitle, str::kConnectingBody, false);
+  ui_show_connecting();
+}
+
+void ui_wifi_setup_leave_offline() {
+  wifi_setup_note[0] = '\0';
+  if (nav == Nav::WifiList || nav == Nav::WifiPass || nav == Nav::Settings) {
+    hide_settings();
+    nav = Nav::Home;
+  }
+  message_open = false;
+  hide(message);
 }
 
 void ui_geocode_done(bool ok, const GeoPlace* places, int n) {
@@ -365,6 +379,11 @@ void ui_meteo_done(bool ok, const MeteoNow& m) {
   }
   home_warn_refresh();
   if (nav == Nav::Rain) rain_refresh();
+  if (nav == Nav::Radar) rain_dots_set();
+  if (nav == Nav::Warn) {
+    if (warn_active()) warn_refresh();
+    else go_home();  // the last warning ended: the page goes away
+  }
 }
 
 bool ui_take_ota(char* url, size_t n, bool* check, bool* own) {

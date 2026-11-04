@@ -87,7 +87,7 @@ def main():
     p.shot("v12shots/v12_pv_home.png")
     tapn(p, "home:energy", 1.5); time.sleep(1.0)
     p.shot("v12shots/v12_pv_strom.png")
-    home(p); tapn(p, "cat:settings", 0.8); tapn(p, "set:energy", 1.0)
+    home(p); tapn(p, "cat:settings", 0.8); tapn(p, "set:g:energy", 0.8); tapn(p, "set:energy", 1.0)
     for _ in range(6): p.swipe(240, 400, 240, 120, 400); time.sleep(0.4)
     time.sleep(1.5); p.shot("v12shots/v12_pv_enset.png")
     home(p)

@@ -27,7 +27,7 @@ def req(ip, path, pin=None, method="GET", body=None, origin=None, timeout=15):
 def main():
     port, ip = sys.argv[1], sys.argv[2]
     p = Panel(port)
-    home(p); tapn(p, "cat:settings"); tapn(p, "set:maint", 1.0)
+    home(p); tapn(p, "cat:settings"); tapn(p, "set:g:sys", 0.8); tapn(p, "set:maint", 1.0)
     s = state(p)
     if "web=1" not in s:
         tapn(p, "maint:web", 1.0); s = state(p)
@@ -71,7 +71,7 @@ def main():
     st, _ = req(ip, "/status", pin)
     check(st == 429, f"locked after 5 wrong PINs -> {st}")
     # switch off again
-    home(p); tapn(p, "cat:settings"); tapn(p, "set:maint", 1.0)
+    home(p); tapn(p, "cat:settings"); tapn(p, "set:g:sys", 0.8); tapn(p, "set:maint", 1.0)
     if "web=1" in state(p): tapn(p, "maint:web", 1.0)
     check("web=0" in state(p), "web switched off again")
     print("RESULT", "OK" if not FAILS else f"{len(FAILS)} FAIL")

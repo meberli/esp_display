@@ -43,6 +43,8 @@ def secrets():
 GENERIC = [
     (rb"private-[0-9a-f]{16,}", "iCal private token"),
     (rb"calendar\.google\.com/calendar/ical/[^\0]{0,80}private", "Google iCal private URL"),
+    (rb"eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.", "JWT (OIDC access/refresh token)"),
+    (rb"client_secret=[A-Za-z0-9_.~-]{8,}", "OAuth client_secret"),
 ]
 
 

@@ -62,6 +62,10 @@ constexpr int kTimeoutChoiceN = 6;
 DisplaySettings settings_load_display();  // default 120 s, hint on, black
 bool settings_save_display(const DisplaySettings& d);
 
+// Design (UiDesign in ui_theme.h): 0 Dark Glass (default), 1 Co4. Read at boot.
+uint8_t settings_load_design();
+bool settings_save_design(uint8_t design);
+
 // Time: SNTP server and time zone (POSIX TZ string; name is for display).
 struct TimeSettings {
   char server[64];
@@ -148,6 +152,9 @@ bool settings_save_energy_flags(const EnergySettings& e);  // on, poll, model, e
 // PV (Growatt via Modbus TCP gateway, read only): "pv_on" (default on).
 bool settings_load_pv_on();
 bool settings_save_pv_on(bool on);
+// Home "Schalter" button target: "relay" or a Loxone action id; "" = first.
+void settings_load_sw_target(char* out, size_t len);
+bool settings_save_sw_target(const char* id);
 // History (internal, excluded from backups): one blob, written at most hourly.
 bool settings_load_energy_hist(EnergyHist* h);
 bool settings_load_pv_hist(PvHist* h);       // "pv_hist" blob (daily PV kWh)
@@ -245,6 +252,7 @@ struct SettingsRequest {
     LoxTest,        // lox: test the Miniserver login (nothing stored)
     SetLoxone,      // lox (+ lox_keep_pass) -> NVS, then restart
   } kind;
+  uint32_t scan_gen;  // Scan: generation (UI cancel / stale-result check)
   WifiCreds creds;
   char query[48];
   Location location;
@@ -261,3 +269,17 @@ struct SettingsRequest {
   LoxoneConfig lox;
   bool lox_keep_pass;
 };
+
+// Co4 Energie. Offline refresh token: secret, NVS key "co4_rt", never exported,
+// logged or shown ("" erases). Zone: "co4_zone" (id), "co4_zname" (name) and
+// "co4_site" (niid of the zone's ZEV site, saved with the zone or derived later).
+bool settings_load_co4_token(char* out, size_t n);
+bool settings_save_co4_token(const char* rt);
+bool settings_load_co4_zone(char* id, size_t idn, char* name, size_t nn);
+bool settings_save_co4_zone(const char* id, const char* name, const char* site);  // id "" or nullptr erases all
+bool settings_load_co4_site(char* site, size_t n);
+bool settings_save_co4_site(const char* site);  // "" erases
+// "co4_exp": login expired (invalid_grant). Shown after reboot as expired
+// instead of "nicht verbunden"; cleared on login and logout.
+bool settings_load_co4_expired();
+bool settings_save_co4_expired(bool expired);

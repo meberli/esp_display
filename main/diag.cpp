@@ -30,6 +30,8 @@
 #include "esp_wifi.h"
 #include "esp_ota_ops.h"
 #include <time.h>
+#include "co4_task.h"
+#include "radar.h"
 
 namespace {
 std::atomic<uint32_t> svc_ok[kSvcCount], svc_err[kSvcCount];
@@ -56,24 +58,29 @@ const char* reset_name(esp_reset_reason_t r) {
 }
 
 void health() {
-  static PvView pv;  // static: keep the diag stack small
+  EXT_RAM_BSS_ATTR static PvView pv;  // static: keep the diag stack small
   pv_get(&pv);
   static wifi_ap_record_t ap;
   int rssi = esp_wifi_sta_get_ap_info(&ap) == ESP_OK ? ap.rssi : 0;
   uint32_t up = static_cast<uint32_t>(esp_timer_get_time() / 1000000);
   unsigned last = clock_last_sync_s();
-  static char svc[300];
+  EXT_RAM_BSS_ATTR static char svc[300];
   size_t u = 0;
   for (int i = 0; i < kSvcCount; ++i)
     u += snprintf(svc + u, sizeof(svc) - u, "%s%s=%lu/%lu", i ? " " : "", kSvcName[i], (unsigned long)svc_err[i].load(),
                   (unsigned long)(svc_ok[i].load() + svc_err[i].load()));
   const esp_partition_t* run = esp_ota_get_running_partition();
-  console_printf("DIAG health up=%lus reset=%s wifi=%ddBm drops=%lu ntp=%s age=%lds | err/req %s | pv %s%s ok=%lu err=%lu | %s %s\n",
+  // Free stack (high-water mark, bytes) of the busiest network tasks; -1 = not running.
+  auto hw = [](const char* name) -> long {
+    TaskHandle_t t = xTaskGetHandle(name);
+    return t != nullptr ? static_cast<long>(uxTaskGetStackHighWaterMark(t)) : -1L;
+  };
+  console_printf("DIAG health up=%lus reset=%s wifi=%ddBm drops=%lu ntp=%s age=%lds | err/req %s | pv %s%s ok=%lu err=%lu | stk net=%ld tcpip=%ld radar=%ld | %s %s\n",
                  (unsigned long)up, reset_name(esp_reset_reason()), rssi, (unsigned long)wifi_drops.load(),
                  clock_synced() ? "ok" : "no", last > 0 ? (long)(up - last) : -1L, svc,
                  !pv.enabled ? "off" : (pv.have && !pv.stale) ? "live" : pv.asleep ? "asleep" : pv.down ? "down" : "connecting",
                  pv.have && pv.stale ? " stale" : "", (unsigned long)pv.ok, (unsigned long)pv.errors,
-                 esp_app_get_description()->version, run != nullptr ? run->label : "?");
+                 hw("net"), hw("tcpip"), hw("radar"), esp_app_get_description()->version, run != nullptr ? run->label : "?");
 }
 
 void fmt_local(int64_t ts, char* out, size_t n) {
@@ -104,7 +111,7 @@ void energy_dump() {
                    d.in_kwh, d.out_kwh, d.water_l, d.cost_chf, d.credit_chf, d.flags);
   }
   // PV production per day (separate "pv_hist"; inverter Eac today).
-  static PvView pv;
+  EXT_RAM_BSS_ATTR static PvView pv;
   pv_get(&pv);
   console_printf("DIAG energy pv today=%ld %.1f kWh%s\n", (long)pv.hist.ymd, pv.hist.today < 0 ? 0.0f : pv.hist.today,
                  pv.hist.today < 0 ? " (no reading yet)" : "");
@@ -171,7 +178,7 @@ void stacks(bool warn_only) {
   // the driver scans one frame out of a stale bounce buffer + DMA restart: the bottom part of
   // the screen is drawn shifted for one frame (the "tear"). So only look up our own tasks
   // (short lock in xTaskGetHandle) and scan their stacks without holding the lock.
-  static const char* const kNames[] = {"ui", "net", "lox", "diag", "httpd", "energy", "pv", "co4en", "tcpip", "wifi"};
+  static const char* const kNames[] = {"ui", "net", "lox", "diag", "httpd", "energy", "pv", "co4en", "tcpip", "wifi", "radar", "co4"};
   UBaseType_t n = 0;
   for (const char* nm : kNames) {
     TaskHandle_t h = xTaskGetHandle(nm);
@@ -239,10 +246,46 @@ void stacks(bool warn_only) {
 #endif
 }
 
+// SCANWIFI: one active scan, every BSSID of the connected SSID (no de-duplication) plus
+// the AP the station is associated with. Other SSIDs and secrets are never printed; nothing
+// is saved. Generic: works for any network (mesh/multi-AP channel check for ESP-NOW).
+void scan_wifi() {
+  static wifi_ap_record_t cur;
+  if (esp_wifi_sta_get_ap_info(&cur) != ESP_OK) {
+    console_printf("SCANWIFI not associated\n");
+    return;
+  }
+  console_printf("SCANWIFI cur bssid=%02X:%02X:%02X:%02X:%02X:%02X ch=%u rssi=%d auth=%d\n", cur.bssid[0], cur.bssid[1],
+                 cur.bssid[2], cur.bssid[3], cur.bssid[4], cur.bssid[5], (unsigned)cur.primary, cur.rssi, (int)cur.authmode);
+  wifi_scan_config_t sc = {};
+  sc.ssid = cur.ssid;  // only the connected SSID
+  sc.show_hidden = false;
+  esp_err_t err = esp_wifi_scan_start(&sc, true);
+  EXT_RAM_BSS_ATTR static wifi_ap_record_t recs[32];
+  uint16_t num = 32;
+  if (err == ESP_OK) err = esp_wifi_scan_get_ap_records(&num, recs);
+  if (err != ESP_OK) {
+    console_printf("SCANWIFI error %s\n", esp_err_to_name(err));
+    return;
+  }
+  int n = 0;
+  uint8_t gw_ch = play_gw_chan();  // 0 when not paired (no marks)
+  if (gw_ch != 0) console_printf("SCANWIFI gw_ch=%u\n", gw_ch);
+  for (int i = 0; i < num; ++i) {
+    if (strcmp(reinterpret_cast<const char*>(recs[i].ssid), reinterpret_cast<const char*>(cur.ssid)) != 0) continue;
+    const uint8_t* b = recs[i].bssid;
+    console_printf("SCANWIFI ap bssid=%02X:%02X:%02X:%02X:%02X:%02X ch=%u rssi=%d auth=%d%s%s\n", b[0], b[1], b[2], b[3], b[4],
+                   b[5], (unsigned)recs[i].primary, recs[i].rssi, (int)recs[i].authmode,
+                   memcmp(b, cur.bssid, 6) == 0 ? " connected" : "", gw_ch != 0 && recs[i].primary == gw_ch ? " gw_ch" : "");
+    ++n;
+  }
+  console_printf("SCANWIFI done %d ap\n", n);
+}
+
 bool read_only(const char* line) {
   return strcmp(line, "DIAGGT") == 0 || strcmp(line, "DIAGHW") == 0 || strcmp(line, "DIAGFB") == 0 || strcmp(line, "DIAGSTATS") == 0 ||
          strcmp(line, "DIAGSTACK") == 0 || strcmp(line, "DIAGENERGY") == 0 || strcmp(line, "DIAGHEALTH") == 0 ||
-         strcmp(line, "DIAGCO4EN") == 0;
+         strcmp(line, "DIAGCO4EN") == 0 || strcmp(line, "DIAGCO4") == 0 || strcmp(line, "DIAGTIME") == 0 || strcmp(line, "SCANWIFI") == 0;
 }
 
 void handle(const char* line) {
@@ -289,6 +332,15 @@ void handle(const char* line) {
   } else if (sscanf(line, "DIAGSAVER %d", &a) == 1 && a >= 0 && a <= 2) {
     ui_saver_runtime(a);  // this boot only: the saved setting is not touched
     console_puts("DIAG OK");
+  } else if (strcmp(line, "DIAGTIME") == 0) {
+    // Active POSIX TZ and the local time the UI shows (read-only).
+    time_t now = time(nullptr);
+    struct tm lt;
+    localtime_r(&now, &lt);
+    const char* tz = getenv("TZ");
+    console_printf("DIAG time tz=%s local=%04d-%02d-%02d %02d:%02d:%02d dst=%d synced=%d\n", tz != nullptr ? tz : "-",
+                   lt.tm_year + 1900, lt.tm_mon + 1, lt.tm_mday, lt.tm_hour, lt.tm_min, lt.tm_sec, lt.tm_isdst,
+                   clock_synced() ? 1 : 0);
   } else if (strncmp(line, "DIAGVER", 7) == 0) {
     // Pretend to run another version for the update check (this boot only).
     const char* v = line[7] == ' ' ? line + 8 : "";
@@ -316,8 +368,19 @@ void handle(const char* line) {
     energy_dump();
   } else if (strcmp(line, "DIAGHEALTH") == 0) {
     health();
+    char rb[120];
+    radar_diag(rb, sizeof rb);
+    console_puts(rb);
+  } else if (strcmp(line, "DIAGCO4") == 0) {
+    char buf[200];
+    co4_diag(buf, sizeof buf);  // tokens only as set/unset
+    console_puts(buf);
+    ui_co4_chart_shape(buf, sizeof buf);
+    console_puts(buf);
   } else if (strcmp(line, "DIAGCO4EN") == 0) {
     play_diag();  // state and counters only, never keys
+  } else if (strcmp(line, "SCANWIFI") == 0) {
+    scan_wifi();
   }
 }
 

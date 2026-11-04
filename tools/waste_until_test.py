@@ -50,7 +50,7 @@ def run(p, saved):
     check(rem(s) == 0 or rem(s) < r0 + 1, "after cutoff: no reminder card " + s)
     # settings row
     home(p)
-    tapn(p, "cat:settings"); tapn(p, "set:cal", 1.0)
+    tapn(p, "cat:settings"); tapn(p, "set:g:info", 0.8); tapn(p, "set:cal", 1.0)
     p.cmd(f"WASTEUNTIL {saved}", expect=("WASTEUNTIL",))
     time.sleep(0.8)
     p.shot("v10shots/v10_waste_setting.png")

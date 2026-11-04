@@ -38,6 +38,11 @@ void ui_show_controls(const LoxoneControl* items, size_t count, size_t supported
 void ui_set_status(const char* text);
 bool ui_take_command(LoxoneCommandRequest* out);
 bool ui_take_retry();
+// Connecting message with "Abbrechen" (boot / retry). ui_take_connect_cancel: tapped.
+void ui_show_connecting();
+bool ui_take_connect_cancel();
+// "Ohne Netzwerk starten" on the WLAN selection: tapped (session only).
+bool ui_take_offline();
 void ui_command_finished(int index, bool ok, const char* command, const char* detail);
 
 // One control per call. The visible page is read first, including a fresh
@@ -81,18 +86,21 @@ struct WeatherDetailDay {
   int kind;  // DayKind (derived from daytime hourly data)
   float wind_max;
   WeatherSlot slot[kWxSlots];
+  float hprecip[24];  // mm per hour, local 00..23 (Open-Meteo hourly)
+  uint8_t hprob[24]; // precipitation probability % per hour
 };
 // days must stay valid only for the call; the UI copies what it needs.
 void ui_set_week(const WeatherDetailDay* days, int count);
 
 // --- Settings (Einstellungen) ---
 bool ui_take_settings(SettingsRequest* out);
-void ui_wifi_scan_done(const WifiAp* aps, int n);
+void ui_wifi_scan_done(const WifiAp* aps, int n, uint32_t gen);
 // current = SSID the panel uses now (the new one, or the old one after a failure).
 void ui_wifi_connect_done(bool ok, const char* ssid, const char* current, int status, const char* old_ssid,
                           bool reverted);
 bool ui_wifi_busy();                                // a connect is queued or running
 void ui_wifi_setup_open(const char* saved, int why);  // boot: WLAN selection instead of a dead end
+void ui_wifi_setup_leave_offline();               // offline start: close the selection, home
 void ui_wifi_setup_close();                         // the saved network is back
 void ui_geocode_done(bool ok, const GeoPlace* places, int n);
 void ui_location_done(bool ok, const char* name);
@@ -170,3 +178,7 @@ void ui_saver_runtime(int saver);              // DIAGSAVER: not saved to NVS
 // Test harness: scroll every container of the visible page to its end and check
 // that the bottom-most clickable widget is visible and tappable.
 bool ui_scroll_check(char* out, size_t n);
+
+// DIAGCO4: shape of the drawn day chart per series (valid points, runs, isolated
+// dots, segments, steepest segment in px) - never values.
+void ui_co4_chart_shape(char* out, size_t n);

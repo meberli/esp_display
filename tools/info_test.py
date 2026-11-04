@@ -95,7 +95,7 @@ def main():
         # settings: station search (search only, keep the defaults)
         tapn(p, "cat:settings")
         shot("settings")
-        tapn(p, "set:oev")
+        tapn(p, "set:g:info", 0.8); tapn(p, "set:oev")
         s = state(p)
         check("trset 8509404|8587407" in s, "default stations Buchs SG / Räfis, Schulhaus: " + s)
         shot("oevset")
@@ -125,7 +125,7 @@ def main():
         shot("calendar")
         home(p)
         tapn(p, "cat:settings")
-        tapn(p, "set:cal")
+        tapn(p, "set:g:info", 0.8); tapn(p, "set:cal")
         shot("calset")
         tapn(p, "calset:ical")
         s = state(p)
@@ -159,7 +159,7 @@ def main():
 
     if "maint" in only:
         tapn(p, "cat:settings")
-        tapn(p, "set:maint")
+        tapn(p, "set:g:sys", 0.8); tapn(p, "set:maint")
         s = state(p)
         check(s.startswith("STATE maint web=0"), "Wartung (web off by default): " + s)
         time.sleep(1.2)

@@ -135,7 +135,7 @@ def main():
 
     # 1) wrong password chosen in Einstellungen -> revert
     tapn(p, "cat:settings")
-    tapn(p, "set:wifi")
+    tapn(p, "set:g:net", 0.8); tapn(p, "set:wifi")
     t0 = time.time()
     if pick_ssid(p, ssid, "wrong-pass-123"):
         s, el = wait(p, lambda s: "connecting=0" in s, 90)
@@ -178,7 +178,7 @@ def main():
 
     # 4) real network chosen again with the right password (WPA3 quirk must not revert)
     tapn(p, "cat:settings")
-    tapn(p, "set:wifi")
+    tapn(p, "set:g:net", 0.8); tapn(p, "set:wifi")
     t0 = time.time()
     if pick_ssid(p, ssid, pw):
         s, el = wait(p, lambda s: not s.startswith("STATE wifipass connecting=1"), 60)

@@ -17,7 +17,7 @@ def main():
     p = Panel(port)
     wait(p, lambda s: "STATE home" in s, 90)
     pages = [("settings", ["cat:settings", "set:disp"]), ("energie", ["home:energy"]), ("bilanz", ["home:energy", "SWIPE"]), ("wetter", ["wx:now"]),
-             ("licht", ["cat:licht"])]
+             ("licht", ["cat:loxone", "cat:licht"])]
     try:
         for name, taps in pages:
             home(p)

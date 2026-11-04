@@ -91,7 +91,10 @@ LoxoneHttpResult loxone_get(LoxoneAuthorizer& auth, const char* path, uint8_t* b
   char url[192];
   snprintf(url, sizeof(url), "http://%s:%d%s", host, static_cast<int>(settings_loxone().port), path);
 
-  HttpGetResult r = http_get(url, user, password, body, cap, 20000);
+  // 5 s per connect/read (was 20 s): an absent Miniserver must not block the
+  // panel; http_get_raw additionally bounds the whole body to 6x this.
+  constexpr int kLoxTimeoutMs = 5000;
+  HttpGetResult r = http_get(url, user, password, body, cap, kLoxTimeoutMs);
   int code = r.status;
   result.status = code;
   if (code <= 0) {
@@ -266,7 +269,7 @@ bool fetch_ll_value(LoxoneAuthorizer& auth, const char* id, const char* command,
     set_detail(result, str::kLoxPathTooLong);
     return false;
   }
-  static uint8_t body[1200];
+  EXT_RAM_BSS_ATTR static uint8_t body[1200];
   size_t length = 0;
   *result = loxone_get(auth, path, body, sizeof(body), &length);
   if (!result->ok) {

@@ -25,7 +25,7 @@ lv_obj_t* play_cnt = nullptr;
 lv_obj_t* play_hex = nullptr;
 lv_obj_t* play_log = nullptr;
 lv_obj_t* play_log_cap = nullptr;
-char play_log_buf[8][96];
+EXT_RAM_BSS_ATTR char play_log_buf[8][96];
 int play_log_n = 0;
 
 void play_hide() {
@@ -209,7 +209,10 @@ void play_apply(const PlayUiMsg& m) {
   if (c.cii)
     n = snprintf(ci, sizeof(ci), "WLAN getrennt \xC2\xB7 Kanalsuche 1-13 \xC2\xB7 kein whatwatt-Forward, nur manuelle Werte");
   else
-    n = snprintf(ci, sizeof(ci), "Mit WLAN: Panel bleibt auf dem WLAN-Kanal");
+    n = c.disc != 0     ? snprintf(ci, sizeof(ci), "Gateway-Suche: WLAN kurz getrennt \xC2\xB7 Kanal %u", c.disc_ch)
+        : c.ap_warn_ch != 0 ? snprintf(ci, sizeof(ci), "Kein Access Point auf Gateway-Kanal %u", c.ap_warn_ch)
+        : c.pinned ? snprintf(ci, sizeof(ci), "Mit WLAN: folgt dem Gateway \xC2\xB7 AP auf Kanal %u", c.pin_ch)
+                   : snprintf(ci, sizeof(ci), "Mit WLAN: Panel bleibt auf dem WLAN-Kanal");
   if (c.state == PlayState::Searching && n > 0)
     snprintf(ci + n, sizeof(ci) - n, "\nSuche: Kanal %u \xC2\xB7 Fehlversuche %u", c.sweep_ch, c.sweep_fails);
   else if (c.state == PlayState::Lost && n > 0)
@@ -232,7 +235,7 @@ void play_apply(const PlayUiMsg& m) {
 }
 
 void play_tick() {
-  static PlayUiMsg m;  // UI task only
+  EXT_RAM_BSS_ATTR static PlayUiMsg m;  // UI task only
   for (int i = 0; i < 8 && play_ui_take(&m); ++i) play_apply(m);
   static uint32_t keep = 0;  // keep the status stream alive while the page is shown
   if (nav == Nav::Playground && now_ms() - keep > 10000) {

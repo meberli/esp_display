@@ -6,6 +6,45 @@
 // (Open-Meteo geocoding). The network work runs in the net task; the UI only
 // queues one SettingsRequest (ui_take_settings) and gets ui_*_done back.
 
+// Co4: the title label itself carries the petrol-to-green header bar, so it
+// stays child 0 (wp_title and the Bilanz screen rely on that).
+// The bar is kHeaderH high so content placed at y >= 56 (cards, lists) stays
+// below it. Screens with an icon left of the title must not move the label
+// afterwards (that shifted the whole bar); they call header_title_at().
+constexpr int32_t kHeaderH = 52;
+void style_header(lv_obj_t* t) {
+  if (!g_theme->header_bar) return;
+  lv_obj_set_pos(t, 0, 0);
+  lv_obj_set_size(t, kScreen, kHeaderH);
+  lv_obj_set_style_pad_left(t, 24, 0);
+  lv_obj_set_style_pad_top(t, 16, 0);
+  lv_obj_set_style_bg_color(t, lv_color_hex(g_theme->grad_a), 0);
+  lv_obj_set_style_bg_grad_color(t, lv_color_hex(g_theme->grad_b), 0);
+  lv_obj_set_style_bg_grad_dir(t, LV_GRAD_DIR_HOR, 0);
+  lv_obj_set_style_bg_opa(t, LV_OPA_COVER, 0);
+  lv_obj_set_style_text_color(t, lv_color_hex(0xFFFFFF), 0);
+  lv_label_set_long_mode(t, LV_LABEL_LONG_CLIP);
+}
+
+// Title text at (x, y) with optional text width w. With a header bar the bar
+// keeps spanning the screen and only the text inset changes.
+void header_title_at(lv_obj_t* t, int32_t x, int32_t y, int32_t w) {
+  if (!g_theme->header_bar) {
+    lv_obj_set_pos(t, x, y);
+    if (w > 0) lv_obj_set_width(t, w);
+    return;
+  }
+  lv_obj_set_style_pad_left(t, x, 0);
+  lv_obj_set_style_pad_right(t, w > 0 ? kScreen - x - w : 0, 0);
+}
+
+// Small status/page text that sits on the header row: readable on the bar.
+void header_note(lv_obj_t* l) {
+  if (!g_theme->header_bar) return;
+  lv_obj_set_style_text_color(l, lv_color_hex(0xFFFFFF), 0);
+  lv_obj_set_style_text_opa(l, LV_OPA_80, 0);
+}
+
 lv_obj_t* make_screen_root(lv_obj_t* screen, const char* title) {
   lv_obj_t* root = lv_obj_create(screen);
   lv_obj_set_pos(root, 0, 0);
@@ -14,6 +53,7 @@ lv_obj_t* make_screen_root(lv_obj_t* screen, const char* title) {
   lv_obj_t* t = make_label(root, &font_inter_20, lv_color_hex(kText));
   lv_obj_set_pos(t, 24, 20);
   lv_label_set_text(t, title);
+  style_header(t);
   make_home_bar(root);
   hide(root);
   return root;
@@ -48,6 +88,7 @@ lv_obj_t* make_row(lv_obj_t* parent, int h, const char* icon, uint32_t icon_colo
   lv_obj_add_event_cb(row, cb, LV_EVENT_CLICKED, reinterpret_cast<void*>(static_cast<intptr_t>(user)));
   watch(row);
   if (icon != nullptr) {
+    if (g_theme->icon_mono) icon_color = g_theme->row_icon;
     lv_obj_t* ic = make_label(row, strcmp(icon, ICON_BOLT) == 0 ? &font_icon_bolt_24 : &font_icons_24,
                               lv_color_hex(icon_color));
     lv_label_set_text(ic, icon);
@@ -332,6 +373,9 @@ void screen_off() {
   if (scr_off) return;
   scr_off = true;
   bool clock = disp.saver != kSaverBlack;
+  // Co4: the clock saver sits on the darkest petrol; "Schwarz" stays black.
+  uint32_t bg = clock && g_theme->header_bar ? g_theme->saver_bg : 0x000000;
+  lv_obj_set_style_bg_color(sleep_layer, lv_color_hex(bg), 0);
   if (clock) {
     hide(sleep_hint);
   } else if (disp.hint) {
@@ -401,12 +445,17 @@ void build_sleep_layer() {
 
   saver_digital = lv_obj_create(sleep_layer);
   style_plain(saver_digital);
-  lv_obj_set_size(saver_digital, 440, 240);
+  lv_obj_set_size(saver_digital, 440, g_theme->logo ? 300 : 240);
   dig_time = make_label(saver_digital, &font_clock_150, lv_color_hex(kText));
   lv_label_set_text(dig_time, "--:--");
   lv_obj_align(dig_time, LV_ALIGN_TOP_MID, 0, 10);
   dig_date = make_label(saver_digital, &font_inter_20, lv_color_hex(kTextDim));
-  lv_obj_align(dig_date, LV_ALIGN_BOTTOM_MID, 0, -16);
+  lv_obj_align(dig_date, LV_ALIGN_BOTTOM_MID, 0, g_theme->logo ? -76 : -16);
+  if (g_theme->logo) {  // moves with the drift, like the clock
+    lv_obj_t* logo = lv_img_create(saver_digital);
+    lv_img_set_src(logo, &img_co4_logo);
+    lv_obj_align(logo, LV_ALIGN_BOTTOM_MID, 0, -10);
+  }
   lv_obj_set_style_text_align(dig_date, LV_TEXT_ALIGN_CENTER, 0);
   lv_obj_set_width(dig_date, 440);
   hide(saver_digital);
@@ -544,7 +593,9 @@ void open_settings() {
   refresh_time_settings();
   camset_value();
   enset_summary();
-  show(set_root);
+  co4set_summary();
+  if (set_group >= 0 && set_group < kSetGroups && set_grp_root[set_group] != nullptr) show(set_grp_root[set_group]);
+  else show(set_root);
 }
 
 void settings_back() {
@@ -564,7 +615,7 @@ void fill_wifi_list() {
     lv_obj_t* row = make_row(wl_list, 56, bars, kCyan, on_wifi_row, i);
     lv_obj_t* name = make_label(row, &font_inter_sb16, lv_color_hex(kText));
     lv_obj_set_width(name, 260);
-    lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
+    label_dot1(name);
     lv_label_set_text(name, ap.ssid);
     lv_obj_align(name, LV_ALIGN_LEFT_MID, 54, 0);
     char info[24];
@@ -583,6 +634,34 @@ void fill_wifi_list() {
   }
 }
 
+constexpr int kWlListY = 122;  // below the status banner (58..114)
+
+// Status banner (Dark Glass): icon + up to 2 lines, never clipped.
+void wl_set_status(const char* text, WlTone tone) {
+  lv_label_set_text(wl_status, text != nullptr ? text : "");
+  uint32_t c = tone == WlTone::Warn ? kAmber : tone == WlTone::Busy ? kAccent : kTextDim;
+  lv_label_set_text(wl_icon, tone == WlTone::Warn ? ICON_WARNING : ICON_WIFI3);
+  lv_obj_set_style_text_color(wl_icon, lv_color_hex(c), 0);
+  lv_obj_set_style_border_color(wl_banner, lv_color_hex(tone == WlTone::Warn ? kAmber : kBorder), 0);
+  lv_obj_set_style_border_opa(wl_banner, tone == WlTone::Warn ? LV_OPA_60 : LV_OPA_COVER, 0);
+}
+
+// Opened by the firmware: two button rows (Abbrechen | Nochmals versuchen,
+// then "Ohne Netzwerk starten" full width); otherwise one row.
+void wl_layout(bool setup) {
+  if (setup) {
+    lv_obj_set_size(wl_list, kScreen - 2 * kMargin, 214);
+    lv_obj_set_y(wl_left, 344);
+    lv_obj_set_y(wl_right, 344);
+    show(wl_offline);
+  } else {
+    lv_obj_set_size(wl_list, kScreen - 2 * kMargin, 270);
+    lv_obj_set_y(wl_left, 400);
+    lv_obj_set_y(wl_right, 400);
+    hide(wl_offline);
+  }
+}
+
 void open_wifi_list() {
   nav = Nav::WifiList;
   hide_settings();
@@ -591,10 +670,66 @@ void open_wifi_list() {
   unreg_prefix("wifi:");
   lv_obj_clean(wl_list);
   wl_scanning = true;
-  lv_label_set_text(wl_status, "Suche Netzwerke ...");
+  wl_set_status(wifi_setup_note[0] != '\0' ? wifi_setup_note : "Suche Netzwerke ...",
+                wifi_setup_note[0] != '\0' ? WlTone::Warn : WlTone::Busy);
+  wl_layout(wifi_setup_note[0] != '\0');
   SettingsRequest r = {};
   r.kind = SettingsRequest::Scan;
+  r.scan_gen = wl_gen.start();
   queue_settings(r);
+  // Opened by the firmware (saved network unreachable): offer the way back.
+  lv_label_set_text(lv_obj_get_child(wl_right, 0), wifi_setup_note[0] != '\0' ? str::kWifiRetry : str::kWifiRescan);
+}
+
+// Stop a running scan: the net task stops the driver scan (core 0), a late
+// result is dropped by the generation check in ui_wifi_scan_done.
+void wifi_scan_abort() {
+  if (!wl_scanning) return;
+  wifi_scan_cancel(wl_gen.cur);
+  wl_gen.cancel();
+  wl_scanning = false;
+  if (settings_pending && settings_req.kind == SettingsRequest::Scan) settings_pending = false;  // not started yet
+  wl_set_status(wifi_setup_note[0] != '\0' ? wifi_setup_note : str::kWifiScanCancelled,
+                wifi_setup_note[0] != '\0' ? WlTone::Warn : WlTone::Info);
+}
+
+// "Abbrechen" / swipe back. Opened by the firmware: back to the error screen
+// (saved credentials untouched, retried in the background; "Nochmals versuchen"
+// and "WLAN" there). Otherwise back to the settings.
+void wifi_list_leave() {
+  wifi_scan_abort();
+  if (wifi_setup_note[0] != '\0') {
+    nav = Nav::Home;
+    ui_show_message(str::kWifiFailedTitle, wifi_setup_note, true);
+    return;
+  }
+  settings_back();
+}
+
+void on_wl_cancel(lv_event_t*) {
+  if (gesture_consumed) return;
+  wifi_list_leave();
+}
+
+void on_wl_right(lv_event_t*) {
+  if (gesture_consumed) return;
+  if (wifi_setup_note[0] == '\0') {
+    wifi_scan_abort();
+    open_wifi_list();
+    return;
+  }
+  // "Nochmals versuchen": reconnect with the saved credentials (main: ui_take_retry).
+  wifi_scan_abort();
+  nav = Nav::Home;
+  ui_show_connecting();
+  retry_pending = true;
+}
+
+// "Ohne Netzwerk starten": main pauses Wi-Fi for this session and shows home.
+void on_wl_offline(lv_event_t*) {
+  if (gesture_consumed) return;
+  wifi_scan_abort();
+  offline_pending = true;
 }
 
 void on_wifi_row(lv_event_t* e) {
@@ -635,7 +770,7 @@ void fill_loc_list() {
     lv_obj_align(name, LV_ALIGN_TOP_LEFT, 54, 10);
     lv_obj_t* reg_l = make_label(row, &font_inter_14, lv_color_hex(kTextDim));
     lv_obj_set_width(reg_l, 340);
-    lv_label_set_long_mode(reg_l, LV_LABEL_LONG_DOT);
+    label_dot1(reg_l);
     lv_label_set_text(reg_l, ui_places[i].region);
     lv_obj_align(reg_l, LV_ALIGN_BOTTOM_LEFT, 54, -10);
     char key[16];
@@ -704,7 +839,7 @@ void open_loxset(bool first_run) {
   lv_textarea_set_placeholder_text(lox_pass_ta, c.pass[0] != '\0' ? "Passwort (unver\xC3\xA4ndert)" : "Passwort");
   lv_label_set_text(lox_status, first_run ? "Miniserver eintragen (optional) oder \"\xC3\x9C" "berspringen\"."
                                           : "Adresse, Benutzer und Passwort des Miniservers");
-  show(lox_root);
+  show(loxset_root);
   if (c.host[0] == '\0') show_keyboard(lox_host_ta);
 }
 
@@ -839,7 +974,9 @@ void on_settings_row(lv_event_t* e) {
   if (which == 8) open_maint();
   if (which == 9) open_enset();
   if (which == 10) open_play();
-  if (which == 11) open_loxset(false);
+  if (which == 11) open_co4set();
+  if (which == 12) sw_cycle_target();
+  if (which == 13) open_loxset(false);
 }
 
 void on_msg_wifi(lv_event_t*) {
@@ -889,35 +1026,155 @@ lv_obj_t* make_caption(lv_obj_t* parent, int y, const char* text) {
   return l;
 }
 
+// --- Design switch (confirm, save, restart) ---
+lv_obj_t* design_confirm = nullptr;
+uint8_t design_pending = 0;
+
+void on_design_confirm(lv_event_t* e) {
+  if (gesture_consumed) return;
+  hide(design_confirm);
+  if (lv_event_get_user_data(e) == nullptr) return;  // Abbrechen
+  settings_save_design(design_pending);
+  lv_timer_t* t = lv_timer_create(
+      [](lv_timer_t*) {
+        disp_save_flush(true);  // like restart_now (panel_ui_api.inc)
+        esp_restart();
+      },
+      300, nullptr);
+  lv_timer_set_repeat_count(t, 1);
+}
+
+void on_design_btn(lv_event_t* e) {
+  int i = static_cast<int>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e)));
+  lv_obj_t* b = lv_event_get_target(e);
+  if (&ui_theme_get(i) == g_theme) {  // already active: keep it checked
+    lv_obj_add_state(b, LV_STATE_CHECKED);
+    return;
+  }
+  lv_obj_clear_state(b, LV_STATE_CHECKED);
+  design_pending = static_cast<uint8_t>(i);
+  show(design_confirm);
+  lv_obj_move_foreground(design_confirm);
+}
+
+void build_design_confirm(lv_obj_t* screen) {
+  design_confirm = lv_obj_create(screen);
+  lv_obj_set_size(design_confirm, kScreen - 2 * kMargin, 200);
+  lv_obj_center(design_confirm);
+  style_glass(design_confirm, 24);
+  lv_obj_set_style_border_color(design_confirm, lv_color_hex(kAccent), 0);
+  lv_obj_set_style_border_width(design_confirm, 2, 0);
+  lv_obj_set_style_pad_all(design_confirm, 20, 0);
+  lv_obj_clear_flag(design_confirm, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_t* t = make_label(design_confirm, &font_inter_sb16, lv_color_hex(kText));
+  lv_label_set_text(t, "Design wechseln?");
+  lv_obj_set_pos(t, 0, 0);
+  lv_obj_t* d = make_label(design_confirm, &font_inter_14, lv_color_hex(kTextDim));
+  lv_obj_set_width(d, kScreen - 2 * kMargin - 40);
+  lv_label_set_long_mode(d, LV_LABEL_LONG_WRAP);
+  lv_label_set_text(d, "Das Panel startet dazu neu. Deine Einstellungen bleiben erhalten.");
+  lv_obj_set_pos(d, 0, 30);
+  const char* names[2] = {"Abbrechen", "Neu starten"};
+  const char* keys[2] = {"design:no", "design:yes"};
+  for (int i = 0; i < 2; ++i) {
+    lv_obj_t* b = lv_btn_create(design_confirm);
+    lv_obj_set_size(b, 170, 52);
+    lv_obj_align(b, i == 0 ? LV_ALIGN_BOTTOM_LEFT : LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+    lv_obj_set_style_radius(b, 16, 0);
+    lv_obj_set_style_bg_color(b, lv_color_hex(i == 0 ? kBorder : kAccent), 0);
+    lv_obj_add_event_cb(b, on_design_confirm, LV_EVENT_CLICKED, i == 0 ? nullptr : reinterpret_cast<void*>(1));
+    lv_obj_t* l = make_label(b, &font_inter_sb16, lv_color_hex(i == 0 ? kText : 0x0B2129));
+    lv_label_set_text(l, names[i]);
+    lv_obj_center(l);
+    reg(keys[i], b);
+  }
+  hide(design_confirm);
+}
+
+// Settings menu: few top-level entries, related screens grouped. The leaf
+// screens, their widget keys and their NVS keys are unchanged; only the way
+// to them got one level more. "Anzeige" has a single screen and opens it
+// directly. Energy *data* is not shown from here: it lives on the home
+// Energie tile (Co4 if set up, else whatwatt Go); only its setup is here.
+struct SetLeaf { const char* name; const char* icon; uint32_t color; lv_obj_t** val; const char* key; int id; };
+
+void make_set_row(lv_obj_t* list, const char* name, const char* icon, uint32_t color, lv_obj_t** val, const char* key,
+                  lv_event_cb_t cb, int id) {
+  lv_obj_t* row = make_row(list, 72, icon, color, cb, id);
+  reg(key, row);
+  lv_obj_t* l = make_label(row, &font_inter_sb16, lv_color_hex(kText));
+  lv_label_set_text(l, name);
+  lv_obj_align(l, LV_ALIGN_TOP_LEFT, 56, 13);
+  lv_obj_t* v = make_label(row, &font_inter_14, lv_color_hex(kTextDim));
+  lv_obj_set_width(v, 320);
+  label_dot1(v);
+  lv_obj_align(v, LV_ALIGN_BOTTOM_LEFT, 56, -13);
+  if (val != nullptr) *val = v;
+  else lv_label_set_text(v, "");
+  lv_obj_t* chev = make_label(row, &font_icons_24, lv_color_hex(kTextDim));
+  lv_label_set_text(chev, ICON_CHEVRON);
+  lv_obj_align(chev, LV_ALIGN_RIGHT_MID, -14, 0);
+}
+
+void on_set_group(lv_event_t* e) {
+  if (gesture_consumed) return;
+  int g = static_cast<int>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e)));
+  console_printf("Activate settings group %d\n", g);
+  if (g == kSetGroupDisplay) {
+    open_display();
+    return;
+  }
+  set_group = g;
+  open_settings();
+}
+
 void build_settings_screens(lv_obj_t* screen) {
   set_root = make_screen_root(screen, "Einstellungen");
-  // Scrollable list: eight rows do not fit on one screen.
   lv_obj_t* set_list = make_list(set_root, 56, 404);
-  constexpr int kRows = 12;
-  // Row order on screen; the callback gets the row id (Wartung stays 8, Energie is 9, Miniserver 11).
-  const char* names[kRows] = {"WLAN", "Miniserver", "Wetter-Ort", "Bildschirm", "Uhrzeit", "Kameras", "\xC3\x96V", "Kalender",
-                              "Erinnerungen", "Energie", "Wartung", "Playground"};
-  const char* icons[kRows] = {ICON_WIFI3, ICON_ROUTER, ICON_PLACE, ICON_SCREEN, ICON_SCHEDULE, ICON_VIDEOCAM, ICON_TRAIN,
-                              ICON_EVENT, ICON_NOTIFY, ICON_BOLT, ICON_MEMORY, ICON_ROUTER};
-  const uint32_t colors[kRows] = {kAccent, kGreen, kAmber, kPurple, kGreen, kTeal, kAccent, kPurple, kAmber, kAmber, kOrange, kTeal};
-  lv_obj_t** vals[kRows] = {&set_wifi_val, &set_lox_val, &set_loc_val, &set_disp_val, &set_time_val, &set_cam_val,
-                            &set_tr_val,   &set_cal_val, &set_rem_val,  &set_en_val,   &set_maint_val, &set_play_val};
-  const char* keys[kRows] = {"set:wifi", "set:lox", "set:loc", "set:disp", "set:time", "set:cams",
-                             "set:oev",  "set:cal", "set:rem",  "set:energy", "set:maint", "set:play"};
-  const int ids[kRows] = {0, 11, 1, 2, 3, 4, 5, 6, 7, 9, 8, 10};
-  for (int i = 0; i < kRows; ++i) {
-    lv_obj_t* row = make_row(set_list, 72, icons[i], colors[i], on_settings_row, ids[i]);
-    reg(keys[i], row);
-    lv_obj_t* name = make_label(row, &font_inter_sb16, lv_color_hex(kText));
-    lv_label_set_text(name, names[i]);
-    lv_obj_align(name, LV_ALIGN_TOP_LEFT, 56, 13);
-    *vals[i] = make_label(row, &font_inter_14, lv_color_hex(kTextDim));
-    lv_obj_set_width(*vals[i], 320);
-    lv_label_set_long_mode(*vals[i], LV_LABEL_LONG_DOT);
-    lv_obj_align(*vals[i], LV_ALIGN_BOTTOM_LEFT, 56, -13);
-    lv_obj_t* chev = make_label(row, &font_icons_24, lv_color_hex(kTextDim));
-    lv_label_set_text(chev, ICON_CHEVRON);
-    lv_obj_align(chev, LV_ALIGN_RIGHT_MID, -14, 0);
+  static const SetLeaf g_net[] = {
+      {"WLAN", ICON_WIFI3, kAccent, &set_wifi_val, "set:wifi", 0},
+      {"Uhrzeit", ICON_SCHEDULE, kGreen, &set_time_val, "set:time", 3},
+      {"Miniserver", ICON_ROUTER, kGreen, &set_lox_val, "set:lox", 13},
+  };
+  static const SetLeaf g_info[] = {
+      {"Wetter-Ort", ICON_PLACE, kAmber, &set_loc_val, "set:loc", 1},
+      {"\xC3\x96V", ICON_TRAIN, kAccent, &set_tr_val, "set:oev", 5},
+      {"Kalender", ICON_EVENT, kPurple, &set_cal_val, "set:cal", 6},
+      {"Kameras", ICON_VIDEOCAM, kTeal, &set_cam_val, "set:cams", 4},
+      {"Erinnerungen", ICON_NOTIFY, kAmber, &set_rem_val, "set:rem", 7},
+      {"Schalter-Taste", ICON_TOGGLE, kGreen, &set_sw_val, "set:swtarget", 12},
+  };
+  static const SetLeaf g_en[] = {
+      {"Co4", ICON_BOLT, kGreen, &set_co4_val, "set:co4", 11},
+      {"whatwatt Go & PV", ICON_BOLT, kAmber, &set_en_val, "set:energy", 9},
+  };
+  static const SetLeaf g_sys[] = {
+      {"Wartung & Update", ICON_MEMORY, kOrange, &set_maint_val, "set:maint", 8},
+      {"Playground", ICON_ROUTER, kTeal, &set_play_val, "set:play", 10},
+  };
+  struct Group { const char* name; const char* sub; const char* icon; uint32_t color; const char* key; const SetLeaf* leaf; int n; };
+  const Group groups[kSetGroups] = {
+      {"Netzwerk & Zeit", "WLAN \xC2\xB7 Zeit \xC2\xB7 Miniserver", ICON_WIFI3, kAccent, "set:g:net", g_net, 3},
+      {"Anzeige", "Ausschalten \xC2\xB7 Bildschirmschoner \xC2\xB7 Design", ICON_SCREEN, kPurple, "set:disp", nullptr, 0},
+      {"Orte & Infos", "Wetter \xC2\xB7 \xC3\x96V \xC2\xB7 Kalender \xC2\xB7 Kameras \xC2\xB7 Erinnerungen \xC2\xB7 Schalter", ICON_PLACE, kAmber, "set:g:info", g_info, 6},
+      {"Energie-Quellen", "Co4 \xC2\xB7 whatwatt Go \xC2\xB7 PV", ICON_BOLT, kGreen, "set:g:energy", g_en, 2},
+      {"System", "Info \xC2\xB7 Update \xC2\xB7 Diagnose \xC2\xB7 Playground", ICON_MEMORY, kOrange, "set:g:sys", g_sys, 2},
+  };
+  for (int g = 0; g < kSetGroups; ++g) {
+    lv_obj_t* sub = nullptr;
+    make_set_row(set_list, groups[g].name, groups[g].icon, groups[g].color, g == kSetGroupDisplay ? &set_disp_val : &sub,
+                 groups[g].key, on_set_group, g);
+    if (sub != nullptr) lv_label_set_text(sub, groups[g].sub);
+    if (groups[g].leaf == nullptr) continue;
+    set_grp_root[g] = make_screen_root(screen, groups[g].name);
+    lv_obj_t* list = make_list(set_grp_root[g], 56, 404);
+    for (int i = 0; i < groups[g].n; ++i) {
+      const SetLeaf& L = groups[g].leaf[i];
+      make_set_row(list, L.name, L.icon, L.color, L.val, L.key, on_settings_row, L.id);
+    }
+    lv_obj_t* gp = lv_obj_create(list);
+    lv_obj_set_size(gp, 10, 8);
+    style_plain(gp);
   }
   lv_obj_t* pad = lv_obj_create(set_list);  // room above the home bar at the end of the list
   lv_obj_set_size(pad, 10, 8);
@@ -948,7 +1205,7 @@ void build_settings_screens(lv_obj_t* screen) {
   lv_obj_t* hd = make_label(hint_row, &font_inter_14, lv_color_hex(kTextDim));
   lv_label_set_text(hd, "Bei Schwarz: dezentes \"wake me up\"");
   lv_obj_set_width(hd, 320);
-  lv_label_set_long_mode(hd, LV_LABEL_LONG_DOT);
+  label_dot1(hd);
   lv_obj_align(hd, LV_ALIGN_BOTTOM_LEFT, 16, -16);
   disp_hint_sw = lv_switch_create(hint_row);
   lv_obj_set_size(disp_hint_sw, 60, 32);
@@ -956,6 +1213,17 @@ void build_settings_screens(lv_obj_t* screen) {
   lv_obj_clear_flag(disp_hint_sw, LV_OBJ_FLAG_CLICKABLE);  // the whole row toggles
   lv_obj_set_style_bg_color(disp_hint_sw, lv_color_hex(kBorder), static_cast<lv_style_selector_t>(LV_PART_MAIN));
   lv_obj_set_style_bg_color(disp_hint_sw, lv_color_hex(kAccent), static_cast<lv_style_selector_t>(LV_PART_INDICATOR) | LV_STATE_CHECKED);
+
+  // Design: Dark Glass or Co4. Fixed per boot, so a change restarts after asking.
+  make_page_scrollable(disp_root);
+  make_caption(disp_root, 400, "Design");
+  for (int i = 0; i < kDesignCount; ++i) {
+    char key[10];
+    snprintf(key, sizeof(key), "design:%d", i);
+    lv_obj_t* b = make_choice(disp_root, kMargin + i * 222, 422, 210, 56, ui_theme_get(i).name, on_design_btn, i, key);
+    if (&ui_theme_get(i) == g_theme) lv_obj_add_state(b, LV_STATE_CHECKED);
+  }
+  build_design_confirm(lv_obj_get_screen(disp_root));
 
   // Uhrzeit: NTP server and time zone.
   time_root = make_screen_root(screen, "Uhrzeit");
@@ -982,11 +1250,30 @@ void build_settings_screens(lv_obj_t* screen) {
   lv_label_set_long_mode(time_status, LV_LABEL_LONG_DOT);
 
   wl_root = make_screen_root(screen, "WLAN");
-  wl_status = make_label(wl_root, &font_inter_14, lv_color_hex(kTextDim));
-  lv_obj_set_pos(wl_status, 24, 48);
-  lv_obj_set_width(wl_status, 432);
+  wl_banner = lv_obj_create(wl_root);
+  lv_obj_set_pos(wl_banner, kMargin, 58);
+  lv_obj_set_size(wl_banner, kScreen - 2 * kMargin, 56);
+  style_glass(wl_banner, 14);
+  lv_obj_set_style_pad_all(wl_banner, 0, 0);
+  lv_obj_clear_flag(wl_banner, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_clear_flag(wl_banner, LV_OBJ_FLAG_CLICKABLE);
+  wl_icon = make_label(wl_banner, &font_icons_24, lv_color_hex(kCyan));
+  lv_label_set_text(wl_icon, ICON_WIFI3);  // colour set by wl_set_status (theme)
+  lv_obj_align(wl_icon, LV_ALIGN_LEFT_MID, 14, 0);
+  wl_status = make_label(wl_banner, &font_inter_16, lv_color_hex(kText));
+  lv_obj_set_width(wl_status, kScreen - 2 * kMargin - 64);
+  lv_obj_set_height(wl_status, 42);  // 2 lines of 16 px, then "..."
   lv_label_set_long_mode(wl_status, LV_LABEL_LONG_DOT);
-  wl_list = make_list(wl_root, 76, 380);
+  lv_obj_align(wl_status, LV_ALIGN_LEFT_MID, 50, 0);
+  lv_label_set_text(wl_status, "");
+  wl_list = make_list(wl_root, kWlListY, 270);
+  wl_left = make_choice(wl_root, kMargin, 400, 214, 56, str::kWifiCancel, on_wl_cancel, 0, "wl:cancel");
+  wl_right = make_choice(wl_root, kMargin + 226, 400, 214, 56, str::kWifiRescan, on_wl_right, 0, "wl:retry");
+  wl_offline = make_choice(wl_root, kMargin, 408, kScreen - 2 * kMargin, 52, str::kWifiOffline, on_wl_offline, 0,
+                           "wl:offline");
+  lv_obj_set_style_bg_color(wl_offline, lv_color_hex(kAccent), 0);
+  lv_obj_set_style_bg_opa(wl_offline, LV_OPA_30, 0);
+  hide(wl_offline);
 
   wp_root = make_screen_root(screen, "WLAN");
   wp_title = lv_obj_get_child(wp_root, 0);
@@ -1004,23 +1291,23 @@ void build_settings_screens(lv_obj_t* screen) {
   lv_obj_set_pos(loc_status, 24, 116);
   loc_list = make_list(loc_root, 140, 316);
 
-  lox_root = make_screen_root(screen, "Miniserver");
-  lox_host_ta = make_ta(lox_root, 56, "Adresse, z.B. 192.168.1.10 oder host:8080");
+  loxset_root = make_screen_root(screen, "Miniserver");
+  lox_host_ta = make_ta(loxset_root, 56, "Adresse, z.B. 192.168.1.10 oder host:8080");
   reg("lox:host", lox_host_ta);
-  lox_user_ta = make_ta(lox_root, 116, "Benutzer");
+  lox_user_ta = make_ta(loxset_root, 116, "Benutzer");
   reg("lox:user", lox_user_ta);
-  lox_pass_ta = make_ta(lox_root, 176, "Passwort");
+  lox_pass_ta = make_ta(loxset_root, 176, "Passwort");
   lv_textarea_set_password_mode(lox_pass_ta, true);
   lv_textarea_set_password_bullet(lox_pass_ta, "*");
   reg("lox:pass", lox_pass_ta);
-  lox_status = make_label(lox_root, &font_inter_14, lv_color_hex(kTextDim));
+  lox_status = make_label(loxset_root, &font_inter_14, lv_color_hex(kTextDim));
   lv_obj_set_pos(lox_status, 24, 234);
   lv_obj_set_width(lox_status, 432);
   lv_label_set_long_mode(lox_status, LV_LABEL_LONG_WRAP);
-  make_choice(lox_root, kMargin, 300, 100, 56, "WLAN", on_lox_btn, 0, "lox:wifi");
-  make_choice(lox_root, kMargin + 111, 300, 100, 56, "Testen", on_lox_btn, 1, "lox:test");
-  make_choice(lox_root, kMargin + 222, 300, 100, 56, "Speichern", on_lox_btn, 2, "lox:save");
-  make_choice(lox_root, kMargin + 333, 300, 100, 56, "\xC3\x9C" "berspringen", on_lox_btn, 3, "lox:skip");
+  make_choice(loxset_root, kMargin, 300, 100, 56, "WLAN", on_lox_btn, 0, "lox:wifi");
+  make_choice(loxset_root, kMargin + 111, 300, 100, 56, "Testen", on_lox_btn, 1, "lox:test");
+  make_choice(loxset_root, kMargin + 222, 300, 100, 56, "Speichern", on_lox_btn, 2, "lox:save");
+  make_choice(loxset_root, kMargin + 333, 300, 100, 56, "\xC3\x9C" "berspringen", on_lox_btn, 3, "lox:skip");
 
   kb = lv_keyboard_create(screen);
   lv_obj_set_size(kb, kScreen, 220);

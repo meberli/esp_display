@@ -28,7 +28,7 @@ def main():
     p = Panel(a.port)
     wait(p, lambda s: "STATE home" in s, 60)
     tapn(p, "cat:settings")
-    tapn(p, "set:maint")
+    tapn(p, "set:g:sys", 0.8); tapn(p, "set:maint")
     tapn(p, "maint:ota")
     t0 = time.time()
     last = -2

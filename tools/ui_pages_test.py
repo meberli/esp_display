@@ -50,8 +50,8 @@ def main():
     p = Panel(port)
     wait(p, lambda s: "STATE home" in s, 90)
     home(p); chk(p, "home")
-    for cat in ("cat:fav", "cat:licht", "cat:storen", "cat:schalter"):
-        home(p); tapn(p, cat, 1.0); chk(p, cat)
+    for cat in ("cat:fav", "cat:licht", "cat:storen"):  # cat:schalter: real device, never tapped
+        home(p); tapn(p, "cat:loxone", 1.0); tapn(p, cat, 1.0); chk(p, cat)
     home(p); tapn(p, "cat:kameras", 2.0); chk(p, "kameras")
     home(p); tapn(p, "wx:now", 1.0); chk(p, "wetter")
     p.swipe(260, 240, 476, 240, 300); time.sleep(1.0); chk(p, "warnungen")
