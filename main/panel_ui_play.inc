@@ -42,6 +42,7 @@ void on_play_btn(lv_event_t* e) {
   if (which == 4) play_cmd_kvtext(!play_last_kvtext);
   if (which == 5) play_cmd_pair_fast();
   if (which == 6) play_cmd_cii(!play_last_cii);
+  if (which == 7) open_scope();
   if (which == 3) {
     play_cmd_send(lv_textarea_get_text(play_key_ta), lv_textarea_get_text(play_val_ta),
                   lv_textarea_get_text(play_unit_ta));
@@ -84,6 +85,9 @@ lv_obj_t* play_btn(lv_obj_t* parent, int x, int y, int w, const char* text, int 
 void build_play_screen(lv_obj_t* screen) {
   play_root = make_screen_root(screen, "Playground \xC2\xB7 CO4EN");
   make_page_scrollable(play_root);
+  // SenseCAP D1: oscilloscope / logic analyzer on the RP2040 (panel_ui_scope.inc).
+  if (rp_link_supported()) make_choice(play_root, kScreen - kMargin - 150, 12, 150, 40, "Oszi / Logik", on_play_btn, 7,
+                                       "play:scope");
 #if LV_USE_QRCODE
   play_qr = lv_qrcode_create(play_root, 132, lv_color_hex(0x000000), lv_color_hex(0xFFFFFF));
   lv_obj_set_pos(play_qr, kMargin + 6, 62);

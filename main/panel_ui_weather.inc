@@ -807,6 +807,10 @@ void swipe_page(int dir) {
     return;
   }
   if (nav == Nav::Warn) return;  // single page
+  if (nav == Nav::Scope) {
+    if (dir < 0) scope_back();
+    return;
+  }
   if (nav == Nav::TransitSet || nav == Nav::CalSet || nav == Nav::Maint || nav == Nav::RemSet ||
       nav == Nav::Playground) {
     if (dir < 0) settings_back();

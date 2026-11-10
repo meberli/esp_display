@@ -171,6 +171,7 @@ void info_hide_all() {
   hide(maint_root);
   hide(remset_root);
   play_hide();
+  sc_hide();
   co4_hide_all();
   radar_stop();
 }
@@ -1774,6 +1775,9 @@ bool info_describe(char* out, size_t n) {
     }
     case Nav::Playground:
       snprintf(out, n, "playground state=%d fwd=%d", static_cast<int>(play_last_state), play_last_fwd ? 1 : 0);
+      return true;
+    case Nav::Scope:
+      scope_describe(out, n);
       return true;
     case Nav::TextEdit: {
       char v[256];

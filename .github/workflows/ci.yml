@@ -56,6 +56,8 @@ jobs:
           g++ -std=c++17 -Wall -I main tools/test_co4_chart.cpp -o /tmp/tcc && /tmp/tcc
           g++ -std=c++17 -Wall -I main -I components/ArduinoJson/src tools/test_radar.cpp main/radar_parse.cpp -o /tmp/trd && /tmp/trd
           g++ -std=c++17 -Wall -I main tools/test_map_ne.cpp main/map_ne.cpp -o /tmp/tmap && /tmp/tmap
+          gcc -std=c99 -Wall -Wextra -c rp2040/libraries/RpScope/src/rp_scope.c -o /tmp/rp_scope.o
+          g++ -std=c++17 -Wall -Wextra -I main -I rp2040/libraries/RpScope/src tools/test_scope.cpp main/scope_view.cpp /tmp/rp_scope.o -o /tmp/tsc && /tmp/tsc
 
   build:
     runs-on: ubuntu-latest

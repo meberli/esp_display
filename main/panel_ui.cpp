@@ -42,6 +42,8 @@
 #include "ui_text.h"
 #include "energy_task.h"
 #include "espnow_play.h"
+#include "rp_link.h"
+#include "scope_view.h"
 #include "pv_task.h"
 #include "energy_mix.h"
 #include "panel_hw.h"
@@ -108,7 +110,7 @@ enum class Nav : uint8_t {
   Home, Category, Weather, Settings, WifiList, WifiPass, Location, Display, Time,
   Cameras, CamSettings, CamId, CamSearch, CamKey,
   Transit, Calendar, Rain, Radar, Warn, TransitSet, StationSearch, CalSet, TextEdit, Maint, RemSet, Energy, EnSet,
-  Playground, Co4, Co4Set, Co4Login, Co4Zones, LoxMenu, LoxSet
+  Playground, Co4, Co4Set, Co4Login, Co4Zones, LoxMenu, LoxSet, Scope
 };
 
 const char* kShutterLabel[2] = {"Auf", "Ab"};
@@ -342,6 +344,12 @@ void play_hide();
 void play_tick();
 void play_kb_ready(lv_obj_t* ta);
 void open_play();
+// Playground > Oszi / Logik (panel_ui_scope.inc, SenseCAP D1 only)
+void sc_hide();
+void open_scope();
+void scope_back();
+void build_scope_screen(lv_obj_t* screen);
+void scope_describe(char* out, size_t n);
 void info_hide_views();
 void home_chips_refresh();
 void home_warn_refresh();
@@ -630,6 +638,7 @@ void dots_set(lv_obj_t* s, int n, int active) {
 #include "panel_ui_rem.inc"
 #include "panel_ui_energy.inc"
 #include "panel_ui_play.inc"
+#include "panel_ui_scope.inc"
 #include "panel_ui_co4.inc"
 
 }  // namespace
@@ -1075,6 +1084,7 @@ static void ui_init_impl() {
   build_energy_screens(screen);
   build_enset_screen(screen);
   build_play_screen(screen);
+  build_scope_screen(screen);
   build_co4_screens(screen);
   build_co4set_screen(screen);
   lv_obj_move_foreground(kb);

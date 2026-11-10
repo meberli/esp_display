@@ -2,7 +2,8 @@
 
 // Seeed SenseCAP Indicator D1: ESP32-S3 (QFN56 rev 0.1, 8 MB octal PSRAM),
 // 8 MB flash (Winbond ef/4017), 4" 480x480 ST7701S RGB panel, FT6336U touch,
-// PCA9535 I/O expander, RP2040 coprocessor (not used, never commanded).
+// PCA9535 I/O expander, RP2040 coprocessor (only talked to by the
+// Playground scope, rp_link.cpp, once its page is opened).
 // Values from Seeed's BSP (SenseCAP_Indicator_ESP32 components/bsp,
 // sensecap_indicator_board.c / lcd_panel_config.c, screen "GX").
 
@@ -40,6 +41,10 @@ constexpr uint8_t kExpAddr2 = 0x39;
 
 constexpr int kPinUartTx = 43;
 constexpr int kPinUartRx = 44;
+
+// UART to the RP2040 (Seeed: ESP32 GPIO19 -> RP2040 GPIO17 RX, RP2040 GPIO16 TX -> ESP32 GPIO20).
+constexpr int kPinRpTx = 19;
+constexpr int kPinRpRx = 20;
 
 // No relay on this board (capability kBoardHasRelay = false).
 constexpr int kPinRelay1 = -1;
