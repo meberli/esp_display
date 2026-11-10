@@ -1072,6 +1072,11 @@ void on_category(lv_event_t* event) {
     sw_toggle();
     return;
   }
+  if (which == 8) {
+    console_printf("Activate scope\n");
+    open_scope();
+    return;
+  }
   if (which < kSecFav || which > kSecShutter) {
     return;
   }

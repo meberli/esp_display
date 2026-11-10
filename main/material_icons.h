@@ -12,8 +12,9 @@
 //                  keyboard_arrow_up, public, desktop_windows, videocam,
 //                  add, delete, key, train, directions_bus, event, recycling,
 //                  warning, system_update, memory, calendar_month, backup,
-//                  router, info, notifications
-//   font_icons_38 also: videocam
+//                  router, info, notifications, arrow_back, tune, zoom_in,
+//                  zoom_out, chevron_left
+//   font_icons_38 also: videocam, monitor_heart (Oszi, SenseCAP D1)
 //   font_icons_16: water_drop, air, wb_twilight, nights_stay, bedtime, warning,
 //                  schedule, train, directions_bus, event, recycling
 // Material Symbols: Copyright Google LLC, Apache License 2.0
@@ -71,6 +72,12 @@ LV_FONT_DECLARE(font_icons_16)
 #define ICON_BACKUP "\xEE\xA1\xA4" // U+E864 (24)
 #define ICON_ROUTER "\xEE\x8C\xA8" // U+E328 (24)
 #define ICON_INFO "\xEE\xA2\x8E"  // U+E88E (24)
+#define ICON_BACK "\xEE\x97\x84"  // U+E5C4 arrow_back (24)
+#define ICON_TUNE "\xEE\x90\xA9"  // U+E429 tune (24)
+#define ICON_ZOOM_IN "\xEE\xA3\xBF"  // U+E8FF (24)
+#define ICON_ZOOM_OUT "\xEE\xA4\x80"  // U+E900 (24)
+#define ICON_CHEVRON_L "\xEE\x97\x8B"  // U+E5CB chevron_left (24)
+#define ICON_SCOPE "\xEE\xAA\xA2"  // U+EAA2 monitor_heart (38)
 // Weather
 #define ICON_W_SUN "\xEE\xA0\x9A"         // U+E81A sunny
 #define ICON_W_PARTLY "\xEF\x85\xB2"      // U+F172 partly_cloudy_day

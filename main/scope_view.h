@@ -11,8 +11,8 @@
 
 namespace scope {
 
-constexpr int kPlotW = 450;  // 10 divisions of 45 px
-constexpr int kPlotH = 256;  // 8 divisions of 32 px
+constexpr int kPlotW = 480;  // full screen width: 10 divisions of 48 px (RPS_MAX_COLS)
+constexpr int kPlotH = 336;  // 8 divisions of 42 px
 constexpr int kDivX = 10, kDivY = 8;
 constexpr float kVref = 3.3f;
 

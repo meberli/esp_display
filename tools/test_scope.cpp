@@ -303,14 +303,15 @@ static void test_render() {
   scope::View v{500, 0, 2048, 0, false};
   scope::render_analog(px, f, v);
   const uint16_t c0 = scope::rgb565(scope::kChColor[0]);
-  // 1.65 V at 500 mV/div, 32 px/div: y = 255 - 1.65*64 = ~149.
+  // ~1.657 V at 500 mV/div (kPlotH / 8 px per div): y = kPlotH - 1 - 1.657 * 2 * kPlotH / 8.
+  const int want = scope::kPlotH - 1 - static_cast<int>(scope::counts_to_volts(128 * 16 + 8) * 2.0f * scope::kPlotH / 8 + 0.5f);
   int hits = 0, row = -1;
   for (int y = 0; y < scope::kPlotH; ++y)
     if (px[y * scope::kPlotW + 200] == c0) { ++hits; row = y; }
-  CHECK(hits >= 1 && hits <= 2 && row >= 147 && row <= 151);
-  // Trigger marker at x = 450 * 450 / 4500 = 45 (orange).
+  CHECK(hits >= 1 && hits <= 2 && row >= want - 2 && row <= want + 2);
+  // Trigger marker at x = kPlotW * 450 / 4500 = kPlotW / 10 (orange).
   const uint16_t tr = scope::rgb565(0xFF9F43);
-  CHECK(px[0 * scope::kPlotW + 45] == tr);
+  CHECK(px[0 * scope::kPlotW + scope::kPlotW / 10] == tr);
   // Out-of-range values are clipped, no crash.
   for (int c = 0; c < 450; ++c) { f.amin[0][c] = 0; f.amax[0][c] = 255; }
   scope::View z{100, -8, 0, 0, true};
@@ -319,13 +320,13 @@ static void test_render() {
   memset(&f, 0, sizeof(f));
   f.type = RPS_T_LOGIC;
   f.nch = 4;
-  f.cols = 100;  // stretched to 450 px
+  f.cols = 100;  // stretched to kPlotW px
   f.n = f.view_n = 100;
   for (int c = 0; c < 100; ++c) f.lbits[c] = static_cast<uint8_t>(0x2 | ((c & 1) ? 0x8 : 0x4) | 0x10 | 0x40);
   scope::render_logic(px, f);
   const uint16_t l0 = scope::rgb565(scope::kChColor[0]);
   CHECK(px[10 * scope::kPlotW + 100] == l0);         // D0 high line
-  CHECK(px[(64 - 10) * scope::kPlotW + 100] != l0);  // D0 never low
+  CHECK(px[(scope::kPlotH / 4 - 10) * scope::kPlotW + 100] != l0);  // D0 never low
   scope::render_empty(px, true);
 }
 

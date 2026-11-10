@@ -11,6 +11,7 @@
 #include "sys.h"
 #include "lvgl.h"
 
+#include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -344,7 +345,7 @@ void play_hide();
 void play_tick();
 void play_kb_ready(lv_obj_t* ta);
 void open_play();
-// Playground > Oszi / Logik (panel_ui_scope.inc, SenseCAP D1 only)
+// Oszi / Logik (panel_ui_scope.inc, SenseCAP D1 only, home button)
 void sc_hide();
 void open_scope();
 void scope_back();
@@ -869,23 +870,27 @@ static void ui_init_impl() {
 
   // Four icon-only buttons in one row (432 px: 4 x 64 + 3 x 122.7):
   // Loxone (opens the category menu), Schalter (toggles the chosen target
-  // directly), Kameras, Einstellungen.
+  // directly), Kameras, Einstellungen. SenseCAP D1: a fifth one, Oszi / Logik
+  // (RP2040 scope, panel_ui_scope.inc), before Einstellungen (5 x 64 + 4 x 28).
   struct HomeButton {
     const char* icon;  // nullptr: drawn Loxone glyph
     const char* name;
     uint32_t color;
-    int which;  // on_category: 4 settings, 5 cameras, 6 Loxone menu, 7 switch toggle
+    int which;  // on_category: 4 settings, 5 cameras, 6 Loxone menu, 7 switch toggle, 8 scope
   };
-  static const HomeButton kButtons[4] = {
+  const bool scope_btn = rp_link_supported();
+  const HomeButton kButtons[5] = {
       {nullptr, "cat:loxone", kSectionAccent[0], 6},
       {ICON_TOGGLE, "cat:schalter", kSectionAccent[3], 7},
       {ICON_VIDEOCAM, "cat:kameras", kTeal, 5},
+      scope_btn ? HomeButton{ICON_SCOPE, "cat:scope", kAccent, 8} : HomeButton{ICON_SETTINGS, "cat:settings", kPurple, 4},
       {ICON_SETTINGS, "cat:settings", kPurple, 4},
   };
-  for (int i = 0; i < 4; ++i) {
+  const int n_buttons = scope_btn ? 5 : 4;
+  for (int i = 0; i < n_buttons; ++i) {
     const HomeButton& b = kButtons[i];
     lv_obj_t* btn = lv_btn_create(home_root);
-    lv_obj_set_pos(btn, 24 + (i * 368) / 3, 300);
+    lv_obj_set_pos(btn, 24 + (i * 368) / (n_buttons - 1), 300);
     lv_obj_set_size(btn, 64, 64);
     style_tile(btn, b.color);
     lv_obj_add_event_cb(btn, on_category, LV_EVENT_CLICKED,
