@@ -333,7 +333,9 @@ void tr_refresh_view() {
   }
   for (int r = shown; r < kTrRows; ++r) hide(tr_row[r]);
   if (!b.ok && b.fetched == 0) {
-    lv_label_set_text(tr_status, tr_inflight ? "Lade Abfahrten ..." : "Keine Daten (opendata.ch nicht erreichbar)");
+    // A fetch that is due but not started yet (page just opened) is not a failure.
+    const bool due = static_cast<int32_t>(now_ms() - tr_next_ms[tr_idx]) >= 0;
+    lv_label_set_text(tr_status, tr_inflight || due ? "Lade Abfahrten ..." : "Keine Daten (opendata.ch nicht erreichbar)");
   } else if (shown == 0) {
     lv_label_set_text(tr_status, "Keine Abfahrten");
   } else {
