@@ -41,6 +41,7 @@ int x0_ = 0, y0_ = 0, x1_ = 0, y1_ = 0;
 uint32_t t0 = 0, dur = 0;
 int cur_x = 0, cur_y = 0;
 bool auto_release = false;
+int rel_reads = 0;  // indev reads that saw the release (LVGL must see at least 2)
 
 char line[320];  // long enough for TYPE <update URL>
 size_t line_len = 0;
@@ -250,6 +251,7 @@ void handle(char* cmd) {
     }
   } else if (strcmp(cmd, "RELEASE") == 0) {
     sim = sim == Sim::Idle ? Sim::Idle : Sim::ReleaseHold;
+    rel_reads = 0;
     t0 = now_ms();
     console_puts("OK");
   } else if (sscanf(cmd, "SWIPE %d %d %d %d %d", &a, &b, &c, &d, &e) == 5) {
@@ -400,6 +402,7 @@ bool harness_touch_override(lv_indev_data_t* data) {
         cur_y = y1_;
         if (auto_release) {
           sim = Sim::ReleaseHold;
+          rel_reads = 0;
           t0 = now;
         } else {
           sim = Sim::Hold;
@@ -419,11 +422,13 @@ bool harness_touch_override(lv_indev_data_t* data) {
       data->state = LV_INDEV_STATE_PRESSED;
       return true;
     case Sim::ReleaseHold:
-      // Report released at the last point for a moment, then hand back to GT911.
+      // Report released at the last point for a moment, then hand back to the
+      // touch driver. Time alone was not enough: with slow UI loops (scope page)
+      // LVGL missed the release and merged back-to-back TAPs into one drag.
       data->point.x = cur_x;
       data->point.y = cur_y;
       data->state = LV_INDEV_STATE_RELEASED;
-      if (now - t0 > 60) {
+      if (++rel_reads >= 2 && now - t0 > 60) {
         sim = Sim::Idle;
       }
       return true;
