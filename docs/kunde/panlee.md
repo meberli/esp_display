@@ -24,7 +24,6 @@
 ## Updates
 
 - Updates laufen über das Internet oder die Wartung im Browser. Ein Anschluss an den PC ist dafür nicht nötig.
-
 - **Firmware prüfen** (Einstellungen › System › Wartung & Update) findet neue Versionen für den Panlee automatisch, sobald ein neues Release erschienen ist.
 - Alternativ spielst du eine Update-Datei von deinem Installateur über die Wartung im Browser ein ([allgemein.md](allgemein.md#8-wartung-im-browser-sicherung-wiederherstellung-firmware)). Das Panel nimmt nur Dateien an, die für den Panlee bestimmt sind.
 
