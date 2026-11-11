@@ -1228,7 +1228,11 @@ lv_obj_t* make_bar(lv_obj_t* parent, int x, int y, int w, int h, uint32_t color,
 lv_obj_t* wx_handle(lv_obj_t* parent, int x) { return make_bar(parent, x, 190, 5, 80, kAccent, LV_OPA_50); }
 
 // Home bar at the bottom: swipe up from the bottom edge goes home.
-void make_home_bar(lv_obj_t* parent) { make_bar(parent, 200, 468, 80, 4, 0xFFFFFF, LV_OPA_30); }
+// Floating: stays at the bottom when the page scrolls (it scrolled into the
+// Design buttons on the Bildschirm page).
+void make_home_bar(lv_obj_t* parent) {
+  lv_obj_add_flag(make_bar(parent, 200, 468, 80, 4, 0xFFFFFF, LV_OPA_30), LV_OBJ_FLAG_FLOATING);
+}
 
 lv_obj_t* make_divider(lv_obj_t* parent, int x, int y, int w, int h) {
   lv_obj_t* d = make_bar(parent, x, y, w, h, kBorder, LV_OPA_COVER);
