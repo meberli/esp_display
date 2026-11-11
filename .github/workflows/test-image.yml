@@ -1,9 +1,11 @@
 # Signed test images: same clean, signed build as release.yml, but no tag and
 # no release. Runs automatically on every push to master (ref = pushed commit,
-# both boards; newer pushes cancel older push builds) and on demand (Actions >
+# all boards; newer pushes cancel older push builds) and on demand (Actions >
 # "Test image" > Run workflow). The version is marked
 # "<version.txt>-test.<shortsha>" (sorts below the release, so the normal OTA
-# update still offers the next release). Artifact: app images only (no
+# update still offers the next release). Targets: one board, "both" (Guition +
+# SenseCAP D1, unchanged meaning) or "all" (Guition + SenseCAP D1 + Panlee;
+# push builds use "all"). Artifact: app images only (no
 # bootloader, partition table or otadata), kept 7 days.
 name: Test image
 
@@ -20,7 +22,7 @@ on:
       target:
         description: Board
         type: choice
-        options: [sensecap_d1, guition, both]
+        options: [sensecap_d1, guition, panlee, both, all]
         default: sensecap_d1
 
 permissions:
@@ -35,7 +37,7 @@ concurrency:
 
 env:
   REF: ${{ inputs.ref || github.sha }}
-  TARGET: ${{ inputs.target || 'both' }}
+  TARGET: ${{ inputs.target || 'all' }}
 
 jobs:
   build:
@@ -71,7 +73,7 @@ jobs:
           if [ -z "$APP_SIGNING_KEY" ]; then echo "::error::secret APP_SIGNING_KEY missing - test image must be signed"; exit 1; fi
           mkdir -p secure && umask 077 && printf '%s\n' "$APP_SIGNING_KEY" > secure/signing_key.pem
       - name: Build Guition
-        if: env.TARGET == 'guition' || env.TARGET == 'both'
+        if: env.TARGET == 'guition' || env.TARGET == 'both' || env.TARGET == 'all'
         shell: bash
         run: |
           . "$IDF_PATH/export.sh"
@@ -83,7 +85,7 @@ jobs:
           grep -q "^CONFIG_PANEL_ICAL_URL=\"\"$" sdkconfig
           cp build/loxone_panel.bin out/
       - name: Build SenseCAP Indicator D1
-        if: env.TARGET == 'sensecap_d1' || env.TARGET == 'both'
+        if: env.TARGET == 'sensecap_d1' || env.TARGET == 'both' || env.TARGET == 'all'
         shell: bash
         run: |
           . "$IDF_PATH/export.sh"
@@ -96,6 +98,20 @@ jobs:
           grep -q "^CONFIG_PANEL_WINDY_API_KEY=\"\"$" build-d1/sdkconfig
           grep -q "^CONFIG_PANEL_ICAL_URL=\"\"$" build-d1/sdkconfig
           cp build-d1/loxone_panel_sensecap_d1.bin out/
+      - name: Build Panlee ZX3D95CE01S
+        if: env.TARGET == 'panlee' || env.TARGET == 'all'
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh"
+          PL="-B build-panlee -DSDKCONFIG=build-panlee/sdkconfig -DPANEL_BOARD=panlee"
+          idf.py $PL set-target esp32s3
+          idf.py $PL build
+          espsecure verify-signature --version 2 --keyfile tools/esp_display_signing_pub.pem build-panlee/loxone_panel_panlee.bin
+          python tools/check_secrets.py --generic build-panlee/loxone_panel_panlee.bin
+          grep -q "^CONFIG_PANEL_BOARD_PANLEE=y$" build-panlee/sdkconfig
+          grep -q "^CONFIG_PANEL_WINDY_API_KEY=\"\"$" build-panlee/sdkconfig
+          grep -q "^CONFIG_PANEL_ICAL_URL=\"\"$" build-panlee/sdkconfig
+          cp build-panlee/loxone_panel_panlee.bin out/
       - name: Remove signing key
         if: always()
         shell: bash
@@ -115,10 +131,11 @@ jobs:
             echo "app slots (reference only, flash into the booted/target OTA slot):"
             [ -e loxone_panel.bin ] && grep -E "^ota_[01]" ../partitions.csv | sed 's/^/  guition: /'
             [ -e loxone_panel_sensecap_d1.bin ] && grep -E "^ota_[01]" ../partitions_sensecap.csv | sed 's/^/  sensecap_d1: /'
+            [ -e loxone_panel_panlee.bin ] && grep -E "^ota_[01]" ../partitions.csv | sed 's/^/  panlee: /'
             true
           } > info.txt
           ls -la
-          if ls | grep -viE '^(loxone_panel(_sensecap_d1)?\.bin|sha256\.txt|info\.txt)$'; then echo "::error::unexpected file in artifact"; exit 1; fi
+          if ls | grep -viE '^(loxone_panel(_sensecap_d1|_panlee)?\.bin|sha256\.txt|info\.txt)$'; then echo "::error::unexpected file in artifact"; exit 1; fi
       - uses: actions/upload-artifact@v4
         with:
           name: test-image-${{ env.TARGET }}-${{ steps.ver.outputs.version }}

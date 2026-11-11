@@ -45,6 +45,14 @@ int main() {
   expect(strcmp(asset, "loxone_panel.bin") == 0, "asset guition");
   ota_board_asset("loxone_panel_sensecap_d1", asset, sizeof(asset));
   expect(strcmp(asset, "loxone_panel_sensecap_d1.bin") == 0, "asset d1");
+  ota_board_asset("loxone_panel_panlee", asset, sizeof(asset));
+  expect(strcmp(asset, "loxone_panel_panlee.bin") == 0, "asset panlee");
+  auto p = image("loxone_panel_panlee");
+  expect(ota_board_check_image(p.data(), p.size(), "loxone_panel_panlee", found) == kOtaBoardOk, "panlee on panlee");
+  expect(ota_board_check_image(p.data(), p.size(), "loxone_panel", found) == kOtaBoardMismatch, "panlee image on guition");
+  expect(ota_board_check_image(g.data(), g.size(), "loxone_panel_panlee", found) == kOtaBoardMismatch,
+         "guition image on panlee");
+  expect(!ota_board_same("loxone_panel_panlee", "loxone_panel"), "prefix panlee");
   printf("%d failures\n", fails);
   return fails;
 }

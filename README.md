@@ -162,6 +162,13 @@ idf.py -B build-d1 -DSDKCONFIG=build-d1/sdkconfig -DPANEL_BOARD=sensecap_d1 set-
 idf.py -B build-d1 -DSDKCONFIG=build-d1/sdkconfig -DPANEL_BOARD=sensecap_d1 build
 ```
 
+Panlee ZX3D95CE01S (`sdkconfig.defaults.panlee` wird angehängt, Ausgabe `build-panlee/loxone_panel_panlee.bin`, Details in [docs/entwickler/panlee.md](docs/entwickler/panlee.md)):
+
+```powershell
+idf.py -B build-panlee -DSDKCONFIG=build-panlee/sdkconfig -DPANEL_BOARD=panlee set-target esp32s3
+idf.py -B build-panlee -DSDKCONFIG=build-panlee/sdkconfig -DPANEL_BOARD=panlee build
+```
+
 Die Apps sind signiert (Secure Boot v2 App-Signatur, RSA-3072). Lokal braucht der Build einen Schlüssel unter `secure/signing_key.pem` (gitignored); für reine Compile-Tests genügt ein Wegwerf-Schlüssel (`espsecure generate-signing-key --version 2 --scheme rsa3072 secure/signing_key.pem`). Ein so gebautes Image wird von Panels mit Release-Firmware per OTA nicht akzeptiert. Prüfen: `espsecure verify-signature --version 2 --keyfile tools/esp_display_signing_pub.pem <bin>`.
 
 > **Immer den Port explizit mit `-p` angeben.** Ohne `-p` sucht `idf.py` selbst und erwischt unter Umständen ein anderes Gerät (z. B. einen 3D-Drucker).
@@ -236,7 +243,7 @@ Releases entstehen per Tag-Workflow (`.github/workflows/release.yml`):
 2. Tag pushen: `git tag v0.7.2 && git push origin v0.7.2`.
 3. GitHub Actions baut im Container `espressif/idf:v6.1` aus einem **sauberen Checkout** – ohne `sdkconfig.defaults.local` und ohne `panel_config.h`. Der Workflow bricht ab, falls eine dieser Dateien im Repo liegt, und prüft, dass Windy-Key und iCal-URL im `sdkconfig` leer sind.
 4. Beide Apps werden mit dem Secret `APP_SIGNING_KEY` signiert, die Signatur geprüft und `tools/check_secrets.py` laufen gelassen.
-5. Das Release erhält `loxone_panel.bin`, `loxone_panel_sensecap_d1.bin` und je eine `.sha256`.
+5. Das Release erhält `loxone_panel.bin`, `loxone_panel_sensecap_d1.bin`, `loxone_panel_panlee.bin` und je eine `.sha256`.
 
 Releases entstehen **nur** über einen `v*`-Tag; Pushes und Pull Requests laufen nur durch CI (Host-Tests und Build mit Wegwerf-Schlüssel).
 
@@ -246,14 +253,14 @@ Zusätzlicher Geheimnis-Check gegen das fertige Binary (gibt nur Namen und Läng
 python tools/check_secrets.py loxone_panel.bin   # erwartet: 0 secret value(s) found
 ```
 
-Das Panel lädt standardmässig `https://github.com/meberli/esp_display/releases/latest/download/loxone_panel.bin` (änderbar unter Wartung → Update-URL) oder nimmt ein Upload über die Web-Wartung an. Auf dem SenseCAP D1 die Update-URL auf `…/loxone_panel_sensecap_d1.bin` stellen – ein Image für das andere Board wird abgelehnt.
+Mit der Standard-Update-URL (`https://github.com/meberli/esp_display/releases/latest/download/loxone_panel.bin`) fragt das Panel die GitHub-API nach dem neuesten Release und nimmt das Asset seines eigenen Boards (`<project_name>.bin`: `loxone_panel.bin`, `loxone_panel_sensecap_d1.bin` oder `loxone_panel_panlee.bin`). Eine eigene Update-URL (Wartung → Update-URL) wird direkt geladen. Alternativ nimmt das Panel ein Upload über die Web-Wartung an. Ein Image für ein anderes Board wird immer abgelehnt.
 
 ### Test-Image (manuell)
 
 Für Tests ohne Release gibt es den Workflow „Test image“ (`.github/workflows/test-image.yml`):
 
 1. GitHub → **Actions** → **Test image** → **Run workflow**.
-2. `ref` (Branch oder Commit, Standard `cursor/esp-idf-migration`) und `target` (`sensecap_d1`, `guition` oder `both`) wählen.
+2. `ref` (Branch oder Commit, Standard `master`) und `target` (`sensecap_d1`, `guition`, `panlee`, `both` = Guition + D1 oder `all` = alle drei) wählen. Die Auswahl kommt aus der `test-image.yml` des Branches unter „Use workflow from“ (Standard: Default-Branch).
 3. Der Build läuft wie beim Release (sauberer Checkout, signiert mit `APP_SIGNING_KEY`, Signatur- und Geheimnis-Check). Die Version heisst `<version.txt>-test.<kurz-sha>`; sie gilt als älter als das gleichnamige Release, das nächste Release wird also wieder als Update angeboten.
 4. Artefakt `test-image-<target>-<version>` (7 Tage aufbewahrt): nur die signierte App-`.bin` je Board, `sha256.txt` und `info.txt` (Ref, Commit, Version, Board, App-Slot-Offsets). Kein Bootloader, keine Partitionstabelle, kein otadata – das Image ist für OTA bzw. Upload über die Web-Wartung gedacht.
 

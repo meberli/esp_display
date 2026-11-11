@@ -1,7 +1,9 @@
 # Release build for OTA: on a tag "v*", build the app in a clean checkout
 # (no sdkconfig.defaults.local, no panel_config.h: no Wi-Fi, Loxone, Windy or
-# iCal secrets in the image) and attach loxone_panel.bin (Guition) and
-# loxone_panel_sensecap_d1.bin (SenseCAP Indicator D1) to the release.
+# iCal secrets in the image) and attach loxone_panel.bin (Guition),
+# loxone_panel_sensecap_d1.bin (SenseCAP Indicator D1) and
+# loxone_panel_panlee.bin (Panlee ZX3D95CE01S) to the release. The on-device
+# update check picks "<project_name>.bin" (ota_board_asset).
 # The panel keeps its secrets in NVS (settings_seed_from_build on the first
 # boot of a locally built firmware).
 name: Release
@@ -59,13 +61,28 @@ jobs:
           idf.py $D1 set-target esp32s3
           idf.py $D1 build
           espsecure verify-signature --version 2 --keyfile tools/esp_display_signing_pub.pem build-d1/loxone_panel_sensecap_d1.bin
-          rm -f secure/signing_key.pem
           python tools/check_secrets.py --generic build-d1/loxone_panel_sensecap_d1.bin
           cp build-d1/loxone_panel_sensecap_d1.bin loxone_panel_sensecap_d1.bin
           sha256sum loxone_panel_sensecap_d1.bin > loxone_panel_sensecap_d1.bin.sha256
           grep -q "^CONFIG_PANEL_BOARD_SENSECAP_D1=y$" build-d1/sdkconfig
           grep -q "^CONFIG_PANEL_WINDY_API_KEY=\"\"$" build-d1/sdkconfig
           grep -q "^CONFIG_PANEL_ICAL_URL=\"\"$" build-d1/sdkconfig
+      - name: Build Panlee ZX3D95CE01S
+        shell: bash
+        run: |
+          git config --global --add safe.directory '*'
+          . "$IDF_PATH/export.sh"
+          PL="-B build-panlee -DSDKCONFIG=build-panlee/sdkconfig -DPANEL_BOARD=panlee"
+          idf.py $PL set-target esp32s3
+          idf.py $PL build
+          espsecure verify-signature --version 2 --keyfile tools/esp_display_signing_pub.pem build-panlee/loxone_panel_panlee.bin
+          rm -f secure/signing_key.pem
+          python tools/check_secrets.py --generic build-panlee/loxone_panel_panlee.bin
+          cp build-panlee/loxone_panel_panlee.bin loxone_panel_panlee.bin
+          sha256sum loxone_panel_panlee.bin > loxone_panel_panlee.bin.sha256
+          grep -q "^CONFIG_PANEL_BOARD_PANLEE=y$" build-panlee/sdkconfig
+          grep -q "^CONFIG_PANEL_WINDY_API_KEY=\"\"$" build-panlee/sdkconfig
+          grep -q "^CONFIG_PANEL_ICAL_URL=\"\"$" build-panlee/sdkconfig
       - name: Remove signing key
         if: always()
         shell: bash
@@ -78,4 +95,6 @@ jobs:
             loxone_panel.bin.sha256
             loxone_panel_sensecap_d1.bin
             loxone_panel_sensecap_d1.bin.sha256
+            loxone_panel_panlee.bin
+            loxone_panel_panlee.bin.sha256
           generate_release_notes: true

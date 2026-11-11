@@ -64,6 +64,7 @@ idf.py -B build-panlee -DSDKCONFIG=build-panlee/sdkconfig -DPANEL_BOARD=panlee -
 
 ## Release und OTA
 
-- **Offen / Lücke:** `ci.yml`, `test-image.yml` und `release.yml` bauen Panlee **nicht**. Ein GitHub-Release enthält deshalb kein `loxone_panel_panlee.bin`. Das Panel meldet bei „Firmware prüfen“ über die Standard-URL „Kein Update für dieses Board“.
-- Updates gehen derzeit über ein lokal signiertes Image und den Upload in der Web-Wartung, oder über eine eigene Update-URL auf ein Panlee-Image.
+- `ci.yml` baut Panlee bei jedem Push mit Wegwerf-Schlüssel, `test-image.yml` hat die Targets `panlee` und `all`, `release.yml` hängt `loxone_panel_panlee.bin` (signiert, mit `.sha256`) an jedes Release.
+- „Firmware prüfen“ mit der Standard-URL holt das neueste Release über die GitHub-API und nimmt das Asset `loxone_panel_panlee.bin` (`ota_board_asset()` aus dem Projektnamen). Releases, die vor dieser Änderung entstanden sind, haben kein Panlee-Asset: Dort meldet das Panel „Kein Update für dieses Board“.
+- Alternativ: signiertes Test-Image (`target=panlee`) per Upload in der Web-Wartung.
 - Die Board-Prüfung lehnt Guition- oder D1-Images auf dem Panlee ab und umgekehrt.

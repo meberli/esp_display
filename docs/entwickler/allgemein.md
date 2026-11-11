@@ -269,27 +269,26 @@ Die Board-ID ist der CMake-Projektname in `esp_app_desc_t.project_name`. `ota_bo
 ### 7.1 `ci.yml` (jeder Push, jeder PR)
 
 - **host-tests:** Mojibake-Prüfung aller Textdateien (ausser Schriften), danach alle Host-Tests mit `g++ -std=c++17` (iCal, OTA-Version/-Board, UI-Text, Retry, Loxone-Cache, Settings-Schema, Abfall, Energie, CO4EN, Co4, PV, Wetter, Schalter-Ziel, ÖV, Radar, Karte, Scope inkl. `rp_scope.c`).
-- **build:** im Container `espressif/idf:v6.1` mit **Wegwerf-Schlüssel**: Guition und SenseCAP D1, danach `check_secrets.py --generic` für beide Images.
-- Panlee wird in CI nicht gebaut (**offen**, siehe [panlee.md](panlee.md)).
+- **build:** im Container `espressif/idf:v6.1` mit **Wegwerf-Schlüssel**: Guition, SenseCAP D1 und Panlee, danach `check_secrets.py --generic` für alle drei Images.
 
 ### 7.2 `test-image.yml` (signiertes Test-Image)
 
-- Auslöser: jeder Push auf `master` (ohne reine `.md`-Änderungen, beide Boards) oder manuell über Actions › „Test image“ › „Run workflow“ mit `ref` (Standard `master`) und `target` (`sensecap_d1` Standard, `guition`, `both`).
+- Auslöser: jeder Push auf `master` (ohne reine `.md`-Änderungen, alle drei Boards = `all`) oder manuell über Actions › „Test image“ › „Run workflow“ mit `ref` (Standard `master`) und `target`: `sensecap_d1` (Standard), `guition`, `panlee`, `both` (Guition + SenseCAP D1, Bedeutung unverändert) oder `all` (alle drei).
+- **Wichtig:** GitHub nimmt für „Run workflow“ die Workflow-Datei des Branches, der im Dialog unter „Use workflow from“ gewählt ist (Standard: Default-Branch). Die Auswahl `panlee`/`all` erscheint nur, wenn dieser Branch die neue `test-image.yml` enthält. `ref` bestimmt nur, welcher Code gebaut wird.
 - Ablauf wie beim Release: sauberer Checkout, Prüfung auf lokale Geheimnisdateien, Version wird zu `<version.txt>-test.<7-stelliger SHA>`, Signatur mit `APP_SIGNING_KEY`, `espsecure verify-signature`, `check_secrets.py --generic`, Prüfung der leeren Geheimnis-Optionen.
-- Artefakt `test-image-<target>-<version>`, 7 Tage aufbewahrt: nur `loxone_panel.bin` und/oder `loxone_panel_sensecap_d1.bin`, `sha256.txt`, `info.txt` (Ref, Commit, Version, Board, Slot-Offsets). Kein Bootloader, keine Partitionstabelle. Andere Dateien lassen den Job scheitern.
+- Artefakt `test-image-<target>-<version>`, 7 Tage aufbewahrt: nur `loxone_panel.bin`, `loxone_panel_sensecap_d1.bin` und/oder `loxone_panel_panlee.bin`, `sha256.txt`, `info.txt` (Ref, Commit, Version, Board, Slot-Offsets). Kein Bootloader, keine Partitionstabelle. Andere Dateien lassen den Job scheitern.
 - Gedacht für den Upload über die Web-Wartung. Es entsteht weder Tag noch Release.
 - Ein neuerer Push auf `master` bricht einen älteren Push-Build ab, manuelle Läufe haben eigene Gruppen je Ref/Target.
-- Panlee ist kein `target` (**offen**).
 
 ### 7.3 `release.yml` (Tag `v*`)
 
 1. `version.txt` erhöhen und committen.
 2. Tag setzen, am sichersten mit `tools/tag_release.ps1 <version>`: prüft, dass `HEAD` auf `origin/<branch>` gepusht ist, dass `version.txt` im getaggten Commit passt und der Tag noch nicht existiert. Dann taggt und pusht es.
 3. Der Workflow prüft, dass Tag und `version.txt` übereinstimmen, dass keine lokalen Geheimnisdateien vorhanden sind und dass `APP_SIGNING_KEY` gesetzt ist.
-4. Build Guition und SenseCAP D1, Signaturprüfung, `check_secrets.py --generic`, Prüfung der leeren Geheimnis-Optionen, Schlüssel löschen.
-5. GitHub-Release mit `loxone_panel.bin`, `loxone_panel_sensecap_d1.bin` und je einer `.sha256`, Release-Notes automatisch. Die erste sinnvolle Zeile der Notes zeigt das Panel als „Neu: …“ an.
+4. Build Guition, SenseCAP D1 und Panlee, Signaturprüfung, `check_secrets.py --generic`, Prüfung der leeren Geheimnis-Optionen, Schlüssel löschen.
+5. GitHub-Release mit `loxone_panel.bin`, `loxone_panel_sensecap_d1.bin`, `loxone_panel_panlee.bin` und je einer `.sha256`, Release-Notes automatisch. Die erste sinnvolle Zeile der Notes zeigt das Panel als „Neu: …“ an.
 
-Releases entstehen nur über einen `v*`-Tag. Ein Panlee-Asset (`loxone_panel_panlee.bin`) wird vom Workflow nicht gebaut (**offen**).
+Releases entstehen nur über einen `v*`-Tag. Das Panel sucht im neuesten Release das Asset `<project_name>.bin` (`ota_board_asset()`), also `loxone_panel.bin`, `loxone_panel_sensecap_d1.bin` bzw. `loxone_panel_panlee.bin`. Releases vor diesem Stand enthalten kein Panlee-Asset.
 
 ---
 

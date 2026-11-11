@@ -75,7 +75,11 @@ jobs:
           idf.py build
           idf.py -B build-d1 -DSDKCONFIG=build-d1/sdkconfig -DPANEL_BOARD=sensecap_d1 set-target esp32s3
           idf.py -B build-d1 -DSDKCONFIG=build-d1/sdkconfig -DPANEL_BOARD=sensecap_d1 build
+          idf.py -B build-panlee -DSDKCONFIG=build-panlee/sdkconfig -DPANEL_BOARD=panlee set-target esp32s3
+          idf.py -B build-panlee -DSDKCONFIG=build-panlee/sdkconfig -DPANEL_BOARD=panlee build
           rm -f secure/signing_key.pem
           python tools/check_secrets.py --generic build/loxone_panel.bin
           python tools/check_secrets.py --generic build-d1/loxone_panel_sensecap_d1.bin
+          python tools/check_secrets.py --generic build-panlee/loxone_panel_panlee.bin
+          grep -q "^CONFIG_PANEL_BOARD_PANLEE=y$" build-panlee/sdkconfig
           idf.py size | tail -n 15

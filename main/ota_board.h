@@ -1,7 +1,8 @@
 #pragma once
 // Board check for OTA images. The board ID is the CMake project name, which
 // the build embeds in esp_app_desc_t.project_name ("loxone_panel" = Guition,
-// "loxone_panel_sensecap_d1" = SenseCAP Indicator D1). Pure functions, host
+// "loxone_panel_sensecap_d1" = SenseCAP Indicator D1, "loxone_panel_panlee" =
+// Panlee ZX3D95CE01S). Pure functions, host
 // tested in tools/test_ota_board.cpp.
 
 #include <stddef.h>
