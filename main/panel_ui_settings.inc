@@ -1316,10 +1316,16 @@ void build_settings_screens(lv_obj_t* screen) {
   lv_obj_set_pos(lox_status, 24, 234);
   lv_obj_set_width(lox_status, 432);
   lv_label_set_long_mode(lox_status, LV_LABEL_LONG_WRAP);
-  make_choice(loxset_root, kMargin, 300, 100, 56, "WLAN", on_lox_btn, 0, "lox:wifi");
-  make_choice(loxset_root, kMargin + 111, 300, 100, 56, "Testen", on_lox_btn, 1, "lox:test");
-  make_choice(loxset_root, kMargin + 222, 300, 100, 56, "Speichern", on_lox_btn, 2, "lox:save");
-  make_choice(loxset_root, kMargin + 333, 300, 100, 56, "\xC3\x9C" "berspringen", on_lox_btn, 3, "lox:skip");
+  // Widths by text: "Überspringen" was clipped in an equal 100 px button.
+  lv_obj_t* lox_btns[4] = {
+      make_choice(loxset_root, kMargin, 300, 82, 56, "WLAN", on_lox_btn, 0, "lox:wifi"),
+      make_choice(loxset_root, kMargin + 88, 300, 92, 56, "Testen", on_lox_btn, 1, "lox:test"),
+      make_choice(loxset_root, kMargin + 186, 300, 110, 56, "Speichern", on_lox_btn, 2, "lox:save"),
+      make_choice(loxset_root, kMargin + 302, 300, 130, 56, "\xC3\x9C" "berspringen", on_lox_btn, 3, "lox:skip")};
+  for (lv_obj_t* b : lox_btns) {
+    lv_obj_set_style_pad_left(b, 4, 0);
+    lv_obj_set_style_pad_right(b, 4, 0);
+  }
 
   kb = lv_keyboard_create(screen);
   lv_obj_set_size(kb, kScreen, 220);
