@@ -2,6 +2,11 @@
 
 Native ESP-IDF-Firmware (6.1, LVGL 8.4) für 4-Zoll-Touchpanels mit 480×480 Pixeln: das Guition ESP32-4848S040C in der 86-mm-Unterputzdose und den Seeed SenseCAP Indicator D1. Das Panel steuert Licht, Storen und Schalter über einen lokalen Loxone Miniserver. Dazu zeigt es Wetter mit MeteoSchweiz-Warnungen, Webcams, ÖV-Abfahrten, Kalender, Abfuhrtermine und Erinnerungen an – im dunklen Glas-Look („Dark Glass“, Standard) oder im Design „Co4“.
 
+## Dokumentation
+
+- [Kundendoku](docs/kunde/README.md): Anschluss, Einrichtung und Bedienung, allgemein und je Gerät (Panlee, Guition, SenseCAP D1)
+- [Entwicklerdoku](docs/entwickler/README.md): Architektur, Build und Targets, Geheimnisse, Signatur/OTA, CI, Web-Wartungs-API, Release, je Gerät inkl. RP2040-Scope
+
 ## Screenshots
 
 Echte Screenshots vom Panel (über den Test-Harness aufgenommen). Netzwerk- und Miniserver-Namen sind unkenntlich gemacht.

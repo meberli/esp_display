@@ -1,0 +1,69 @@
+# Panlee ZX3D95CE01S-TR-V12 – Entwicklerdoku
+
+Target `panlee`. Projektname bzw. Board-ID `loxone_panel_panlee`, Image `build-panlee/loxone_panel_panlee.bin`. Allgemeines steht in [allgemein.md](allgemein.md).
+
+## Hardware
+
+| | |
+|---|---|
+| Board | Panlee / Wireless-Tag ZX3D95CE01S-TR-V12 (Familie WT32S3-86S) |
+| Modul | WT32-S3-WROVER-N16R8: ESP32-S3, 16 MB Quad-Flash, 8 MB Octal-PSRAM |
+| Display | 3,95" IPS 480×480, 16-bit RGB, Controller **GC9503V** (3-Wire-SPI-Init, 9 Bit) |
+| Touch | FT6336-Klasse (FT5x06-Registersatz) auf I²C 0x38 (Fallback 0x48), 400 kHz, gepollt (INT GPIO4 ungenutzt) |
+| Sensor | SHT20-Footprint auf I²C 0x40 (nur TR-Variante, evtl. unbestückt) |
+| RS485 | Transceiver mit automatischer Richtungsumschaltung, TX GPIO2 / RX GPIO1, auch auf J2 |
+| Relais | keines (`kBoardHasRelay = false`) |
+| Konsole | UART0 GPIO43/44 auf dem Debug-Stecker und J2 |
+
+Quellen laut `main/board_pins_panlee.h`: Wireless-Tag-Datenblatt WT32S3-86S / ZX3D95CE01S-TR-4848 V1.5 EN, `wireless-tag-com/ZX3D95CE01S-TR-4848` (`main/board.h`, `sdkconfig`) und `strange-v/ha_deck` (LGFX). Der Kommentar dort verweist auf `docs/panlee.md`, diese Datei gibt es im Repo nicht. **Offen**: Dieses Dokument übernimmt die Rolle, oder der Verweis wird angepasst.
+
+### Pins (`main/board_pins_panlee.h`)
+
+| Funktion | GPIO |
+|---|---|
+| LCD SPI CS / SCK / MOSI | 38 / 45 / 48 (SCK und MOSI = RGB B0/B1, nach dem Init an das RGB-Peripheral zurückgegeben) |
+| LCD Reset | RC an VSYNC, wird über GPIO41 gepulst |
+| DE, VSYNC, HSYNC, PCLK | 40, 41, 42, 39 |
+| B0–B4 | 45, 48, 47, 0, 21 |
+| G0–G5 | 14, 13, 12, 11, 16, 17 |
+| R0–R4 | 18, 8, 3, 46, 10 |
+| Backlight | 5, aktiv high (älteres chinesisches Datenblatt: GPIO4, als Tippfehler behandelt) |
+| Touch/I²C SDA, SCL, INT | 15, 6, 4 |
+| UART0 TX, RX | 43, 44 |
+| RS485 TX, RX | 2, 1 (keine DE/RE-Leitung) |
+| J2 EXT_IO1–4 | 9, 20, 19, 7 |
+
+## Treiber (`main/panel_hw_panlee.cpp`)
+
+- GC9503V-Init per Bit-Banging über die RGB-Datenleitungen B0/B1, danach Rückgabe an `LCD_DATA_OUT0/1` (wie LGFX).
+- RGB-Timing nach ha_deck: HSYNC FP 8 / Puls 10 / BP 50, VSYNC FP 8 / Puls 10 / BP 20. PCLK 12 MHz wie Guition (LGFX nutzt 15 MHz) für Reserve bei der PSRAM-Bandbreite.
+- Ein Framebuffer in PSRAM, Bounce-Buffer **2 × 20 Zeilen** (ca. 38 KB internes DMA-RAM).
+- Backlight GPIO5 über LEDC, 10 Bit.
+- Touch-Rohkoordinaten werden direkt verwendet (keine Rotation).
+- SHT20 wird beim Start nur erkannt und in `DIAGHW` gemeldet (`sht20=0/1`). Messwerte werden **nicht** angezeigt.
+- RS485 und die J2-IOs werden von der Firmware **nicht** angesteuert.
+
+## sdkconfig
+
+`sdkconfig.defaults.panlee` setzt nur `CONFIG_PANEL_BOARD_PANLEE=y`. Flash QIO 16 MB, Octal-PSRAM 80 MHz und `partitions.csv` entsprechen dem Guition.
+
+## Bekannte Punkte
+
+- **Flackern:** Commit `b2159ca` (idempotente Label-Updates, stille Loxone-Retries, 20-Zeilen-Bounce-Buffer) adressiert das Flackern. Rückmeldung zum Verhalten mit 0.9.10 steht noch aus (**offen**).
+- **WLAN/Loxone optional:** Das Panel startet ohne beides und lässt alles am Gerät eintragen (gilt für alle Boards, wurde für Panlee eingeführt).
+
+## Bauen und Flashen
+
+```sh
+idf.py -B build-panlee -DSDKCONFIG=build-panlee/sdkconfig -DPANEL_BOARD=panlee set-target esp32s3
+idf.py -B build-panlee -DSDKCONFIG=build-panlee/sdkconfig -DPANEL_BOARD=panlee build
+idf.py -B build-panlee -DSDKCONFIG=build-panlee/sdkconfig -DPANEL_BOARD=panlee -p <PORT> flash monitor
+```
+
+**Offen:** über welchen Stecker bzw. Adapter das Board am bequemsten geflasht wird (USB-Seriell am Debug-Stecker vs. USB) und wie der Bootmodus ausgelöst wird. Im Repo nicht dokumentiert.
+
+## Release und OTA
+
+- **Offen / Lücke:** `ci.yml`, `test-image.yml` und `release.yml` bauen Panlee **nicht**. Ein GitHub-Release enthält deshalb kein `loxone_panel_panlee.bin`. Das Panel meldet bei „Firmware prüfen“ über die Standard-URL „Kein Update für dieses Board“.
+- Updates gehen derzeit über ein lokal signiertes Image und den Upload in der Web-Wartung, oder über eine eigene Update-URL auf ein Panlee-Image.
+- Die Board-Prüfung lehnt Guition- oder D1-Images auf dem Panlee ab und umgekehrt.
