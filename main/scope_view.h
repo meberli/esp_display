@@ -13,6 +13,11 @@ namespace scope {
 
 constexpr int kPlotW = 480;  // full screen width: 10 divisions of 48 px (RPS_MAX_COLS)
 constexpr int kPlotH = 336;  // 8 divisions of 42 px
+// Logic lanes (kPlotH / 4 px each): high line kLogicHiPad below the lane top,
+// low line kLogicLoPad above the lane bottom. The larger bottom pad keeps D3 low
+// clear of the readouts at the plot bottom and groups each lane's levels.
+constexpr int kLogicHiPad = 10;
+constexpr int kLogicLoPad = 26;
 constexpr int kDivX = 10, kDivY = 8;
 constexpr float kVref = 3.3f;
 

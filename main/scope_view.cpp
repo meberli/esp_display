@@ -185,7 +185,7 @@ void render_logic(uint16_t* px, const rps_frame_t& f) {
   const int lane = kPlotH / RPS_LOGIC_CH;
   for (int ch = 0; ch < RPS_LOGIC_CH; ++ch) {
     uint16_t c = rgb565(kChColor[ch]);
-    int yh = ch * lane + 10, yl = ch * lane + lane - 10;
+    int yh = ch * lane + kLogicHiPad, yl = ch * lane + lane - kLogicLoPad;
     int prev = -1;
     for (int x = 0; x < kPlotW; ++x) {
       uint8_t b = static_cast<uint8_t>((f.lbits[col_of(x, f.cols)] >> (2 * ch)) & 3u);

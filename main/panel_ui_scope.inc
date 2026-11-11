@@ -552,7 +552,7 @@ void build_scope_screen(lv_obj_t* screen) {
   const int lane = scope::kPlotH / 4;
   for (int i = 0; i < 4; ++i) {
     sc_lane[i] = sc_plate(sc_root, scope::kChColor[i]);
-    lv_obj_set_pos(sc_lane[i], 6, kScPlotY + i * lane + lane / 2 - 10);
+    lv_obj_set_pos(sc_lane[i], 6, kScPlotY + i * lane + (scope::kLogicHiPad + lane - scope::kLogicLoPad) / 2 - 10);  // between high and low
     lv_label_set_text(sc_lane[i], kScLane[i]);
     hide(sc_lane[i]);
   }

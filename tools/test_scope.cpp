@@ -325,8 +325,12 @@ static void test_render() {
   for (int c = 0; c < 100; ++c) f.lbits[c] = static_cast<uint8_t>(0x2 | ((c & 1) ? 0x8 : 0x4) | 0x10 | 0x40);
   scope::render_logic(px, f);
   const uint16_t l0 = scope::rgb565(scope::kChColor[0]);
-  CHECK(px[10 * scope::kPlotW + 100] == l0);         // D0 high line
-  CHECK(px[(scope::kPlotH / 4 - 10) * scope::kPlotW + 100] != l0);  // D0 never low
+  CHECK(px[scope::kLogicHiPad * scope::kPlotW + 100] == l0);         // D0 high line
+  CHECK(px[(scope::kPlotH / 4 - scope::kLogicLoPad) * scope::kPlotW + 100] != l0);  // D0 never low
+  // D3 low line stays above the bottom readouts (last 24 px of the plot).
+  const uint16_t l3 = scope::rgb565(scope::kChColor[3]);
+  CHECK(px[(scope::kPlotH - scope::kLogicLoPad) * scope::kPlotW + 100] == l3);
+  CHECK(scope::kPlotH - scope::kLogicLoPad < scope::kPlotH - 24);
   scope::render_empty(px, true);
 }
 
