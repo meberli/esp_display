@@ -42,7 +42,7 @@ Die Bilder in dieser Anleitung stammen teils von älteren Firmware-Versionen. Te
 2. Ist noch kein Miniserver eingetragen, öffnet sich beim allerersten Start einmal das Formular **Miniserver**. Du kannst es ausfüllen oder **Überspringen** wählen (siehe Abschnitt 4).
 3. **WLAN einrichten:** Einstellungen › Netzwerk & Zeit › WLAN (siehe Abschnitt 3).
 4. Danach lädt das Panel automatisch Uhrzeit, Wetter und die anderen Inhalte.
-5. Weitere Einstellungen nach Bedarf: Wetter-Ort, ÖV-Haltestellen, Kalender, Kameras, Erinnerungen, Bildschirm.
+5. Weitere Einstellungen nach Bedarf: Wetter-Ort, MeteoSchweiz-PLZ, ÖV-Haltestellen, Kalender, Kameras, Erinnerungen, Bildschirm.
 
 ---
 
@@ -98,7 +98,7 @@ Danach liest das Panel die Steuerungen vom Miniserver und zeigt sie unter **Loxo
 |---|---|
 | **Netzwerk & Zeit** | WLAN, Uhrzeit (Zeitserver und Zeitzone), Miniserver |
 | **Anzeige** | Ausschalten nach, Bildschirmschoner, Design |
-| **Orte & Infos** | Wetter-Ort, ÖV, Kalender, Kameras, Erinnerungen, Schalter-Taste |
+| **Orte & Infos** | Wetter-Ort, MeteoSchweiz-PLZ, ÖV, Kalender, Kameras, Erinnerungen, Schalter-Taste |
 | **Energie-Quellen** | Co4, whatwatt Go & PV |
 | **System** | Wartung & Update, Playground |
 
@@ -141,7 +141,8 @@ Nach dem Aufwecken zeigt das Panel immer die Startseite.
 
 - Unwetterwarnungen erscheinen als Hinweis auf der Startseite. Antippen zeigt die Details.
 - Die Niederschlagsprognose zeigt die nächsten 2 Stunden in 10-Minuten-Schritten.
-- Beides gilt für die im Panel hinterlegte Postleitzahl (Standard Buchs SG). Diese ist unabhängig vom Wetter-Ort und lässt sich am Gerät zurzeit nicht ändern (**offen**). Eine Änderung ist über die Wiederherstellung einer angepassten Sicherung möglich.
+- Beides gilt für die eingestellte Postleitzahl, unabhängig vom Wetter-Ort. Standard ist 9470 (Buchs SG).
+- **Einstellungen › Orte & Infos › MeteoSchweiz-PLZ**: Eingabefeld antippen, die normale 4-stellige Postleitzahl eintippen (z. B. 8001) und mit OK bestätigen. Erlaubt sind 1000 bis 9999. „Standard verwenden“ stellt wieder 9470 ein.
 - Die Daten stammen aus einer inoffiziellen Schnittstelle von MeteoSchweiz und können ohne Vorwarnung ausfallen.
 
 ![Regen und Warnungen](../screenshots/regen_warnungen.png)

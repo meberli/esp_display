@@ -52,6 +52,9 @@ int main() {
   CHECK(!str("lox_host", "http://x"));
   CHECK(str("meteo_plz", "9470"));
   CHECK(!str("meteo_plz", "94a0"));
+  CHECK(str("meteo_plz", "947000"));  // legacy backups (PLZ + 00) still restore
+  CHECK(!str("meteo_plz", "9470000"));
+  CHECK(!str("meteo_plz", "947"));
   CHECK(!str("st0_id", ""));
   // lengths and control characters
   CHECK(!str("wifi_ssid", ""));

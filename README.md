@@ -26,7 +26,7 @@ Echte Screenshots vom Panel (über den Test-Harness aufgenommen). Netzwerk- und 
 - **Loxone asynchron und offline** – die Struktur (`LoxAPP3.json`) lädt ein eigener Task (`lox`), die UI bleibt bedienbar. Die zuletzt geladene Struktur liegt als Cache in NVS (max. 4 KB); ist der Miniserver beim Start nicht erreichbar, zeigt das Panel die Kacheln aus dem Cache. Fehlversuche wiederholt es mit Backoff (10 s, 30 s, 2 min, dann alle 5 min).
 - **Relais** – das eingebaute Relais (GPIO40) als lokale Kachel unter „Schalter“, beim Boot aus.
 - **Wetter** – Open-Meteo (HTTPS, ohne Key): aktuell, Heute/Morgen, Tagesansicht mit Stundenverlauf. Ort frei wählbar (Geocoding).
-- **MeteoSchweiz** – Unwetterwarnungen (Badge auf Home, Details in der Regenansicht) und Niederschlagsprognose für die nächsten 2 Stunden in 10-min-Schritten (radarbasiert), über die PLZ (inoffizielle Schnittstelle, siehe unten).
+- **MeteoSchweiz** – Unwetterwarnungen (Badge auf Home, Details in der Regenansicht) und Niederschlagsprognose für die nächsten 2 Stunden in 10-min-Schritten (radarbasiert), über die 4-stellige PLZ, am Gerät unter Einstellungen → Orte & Infos → MeteoSchweiz-PLZ (inoffizielle Schnittstelle, siehe unten).
 - **Webcams** – Windy Webcams API, Suche nach ID oder Ort (25 km), Bilder 1:1 ohne Hochskalieren, Refresh alle 2 min.
 - **ÖV** – Abfahrtstafel über transport.opendata.ch, Haltestellensuche, Kurzinfo auf Home.
 - **Kalender & Abfall** – privater iCal-Familienkalender und Abfuhrkalender (Abfallkalender-API Kanton St. Gallen, Gemeinde per BFS-Nr. wählbar, Abruf beim Start und einmal täglich), Übersicht auf eigener Seite und Kurzinfo auf Home.

@@ -100,10 +100,13 @@ config PANEL_OTA_URL
         (HTTPS with the certificate bundle, or HTTP on the LAN).
 
 config PANEL_METEO_PLZ
-    string "MeteoSchweiz location (PLZ + 2 digits)"
-    default "947000"
+    string "MeteoSchweiz PLZ (4 digits)"
+    default "9470"
     help
-        Postcode for warnings and the precipitation nowcast: 947000 = 9470 Buchs SG.
+        Swiss postcode for warnings and the precipitation nowcast (9470 = Buchs SG),
+        changeable on the panel (Einstellungen > Orte & Infos > MeteoSchweiz-PLZ).
+        The firmware appends "00" for the MeteoSchweiz API. An old 6-digit value
+        ending in 00 (947000) is still accepted and converted.
 
 menu "Co4 Energie"
 

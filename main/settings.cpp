@@ -7,6 +7,7 @@
 
 #include "config_load.h"
 #include "info.h"
+#include "meteo_plz.h"
 #include <ArduinoJson.h>
 #include "esp_heap_caps.h"
 #include "nvs.h"
@@ -412,10 +413,30 @@ const char* settings_text_default(TextSetting which) {
   }
 }
 
+static bool settings_load_text_raw(TextSetting which, char* out, size_t n, bool* own);
+
 bool settings_load_text(TextSetting which, char* out, size_t n, bool* own) {
   if (own != nullptr) *own = false;
   out[0] = '\0';
   if (which >= kTextSettingN) return false;
+  if (which == kTextPlz) {  // always the 4-digit PLZ (legacy "947000" -> "9470")
+    char raw[16];
+    bool o = false;
+    bool have = settings_load_text_raw(which, raw, sizeof(raw), &o);
+    if (have && meteo_plz_normalize(raw, out, n)) {
+      if (own != nullptr) *own = o;
+      return true;
+    }
+    if (o) console_printf("Settings: meteo_plz in NVS invalid, using the default\n");
+    if (!meteo_plz_normalize(settings_text_default(which), out, n)) snprintf(out, n, "9470");
+    return true;
+  }
+  return settings_load_text_raw(which, out, n, own);
+}
+
+static bool settings_load_text_raw(TextSetting which, char* out, size_t n, bool* own) {
+  if (own != nullptr) *own = false;
+  out[0] = '\0';
   nvs_handle_t h;
   if (nvs_open(kNs, NVS_READONLY, &h) == ESP_OK) {
     bool ok = get_str(h, kTextKey[which], out, n) && out[0] != '\0';
@@ -435,6 +456,11 @@ bool settings_load_text(TextSetting which, char* out, size_t n, bool* own) {
 
 bool settings_save_text(TextSetting which, const char* value) {
   if (which >= kTextSettingN) return false;
+  char plz[8];
+  if (which == kTextPlz && value != nullptr && value[0] != '\0') {  // store 4 digits only
+    if (!meteo_plz_normalize(value, plz, sizeof(plz))) return false;
+    value = plz;
+  }
   Tx tx;
   if (value == nullptr || value[0] == '\0') tx.erase(kTextKey[which]);
   else tx.str(kTextKey[which], value);

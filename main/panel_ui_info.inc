@@ -157,7 +157,19 @@ int64_t days_from_civil_ui(int y, unsigned m, unsigned d) {  // H. Hinnant
 void txt_go_back() {
   if (txt_back == Nav::Maint) open_maint();
   else if (txt_back == Nav::EnSet) open_enset();
+  else if (txt_back == Nav::Settings) open_settings();  // MeteoSchweiz-PLZ (Orte & Infos)
   else open_calset();
+}
+
+// The text editor shows the number keyboard for the PLZ.
+bool txt_numeric(lv_obj_t* ta) { return ta != nullptr && ta == txt_ta && txt_which == kTextPlz; }
+
+// "9470 (Standard) · Warnungen und Regen"
+void plz_summary(char* out, size_t n) {
+  char v[16];
+  bool own = false;
+  settings_load_text(kTextPlz, v, sizeof(v), &own);
+  snprintf(out, n, "%s%s \xC2\xB7 Warnungen und Regen", v, own ? "" : " (Standard)");
 }
 
 void open_enset();
@@ -1096,9 +1108,14 @@ void open_text(uint8_t which, Nav back) {
   lv_label_set_text(txt_cur, sum);
   lv_textarea_set_text(txt_ta, "");
   lv_textarea_set_password_mode(txt_ta, which == kUrlIcal);
+  bool plz = which == kTextPlz;  // 4 digits, number keyboard (txt_numeric)
+  lv_textarea_set_accepted_chars(txt_ta, plz ? "0123456789" : nullptr);
+  lv_textarea_set_max_length(txt_ta, plz ? 4 : 255);
+  lv_textarea_set_placeholder_text(txt_ta, plz ? "PLZ, z.B. 9470" : "Neue Adresse");
   lv_label_set_text(txt_status, which == kUrlIcal ? "Neue geheime iCal-Adresse eingeben, dann OK"
                                 : which == kUrlWaste ? "Basis-Adresse der API (https://...), dann OK"
                                 : which == kTextWasteBfs ? "BFS-Nummer der Gemeinde (Buchs SG = 3271), dann OK"
+                                : which == kTextPlz ? "Postleitzahl, 4 Ziffern (Buchs SG = 9470), dann OK"
                                 : which == kTextWasteZone ? "Zone/Tour genau wie in der API, dann OK"
                                 : which == kTextEnHost ? "IP oder Name, ohne http:// (leer = keine), dann OK"
                                 : which == kTextEnHtWin ? "z.B. 06:00-10:00,17:00-21:00 (leer = Standard)"
@@ -1156,6 +1173,10 @@ bool txt_kb_ready(lv_obj_t* ta) {
   if (settings_pending || txt_busy) return true;
   if ((txt_which == kUrlOta || txt_which == kUrlWaste) && strncmp(v, "https://", 8) != 0) {
     lv_label_set_text(txt_status, "Adresse muss mit https:// beginnen");
+    return true;
+  }
+  if (txt_which == kTextPlz && !meteo_plz_valid(v)) {
+    lv_label_set_text(txt_status, "PLZ: 4 Ziffern (1000-9999), z.B. 9470");
     return true;
   }
   if (txt_which == kTextWasteBfs) {

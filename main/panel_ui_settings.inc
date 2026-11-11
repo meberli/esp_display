@@ -588,6 +588,11 @@ void open_settings() {
   maint_refresh();
   lv_label_set_text(set_wifi_val, cur_ssid[0] != '\0' ? cur_ssid : "nicht verbunden");
   lv_label_set_text(set_loc_val, cur_place);
+  if (set_plz_val != nullptr) {
+    char plz[48];
+    plz_summary(plz, sizeof(plz));
+    lv_label_set_text(set_plz_val, plz);
+  }
   lv_label_set_text(set_lox_val, settings_loxone().host[0] != '\0' ? settings_loxone().host : "nicht eingerichtet");
   refresh_display_settings();
   refresh_time_settings();
@@ -956,7 +961,9 @@ void on_kb_event(lv_event_t* e) {
 
 void on_ta_click(lv_event_t* e) {
   if (gesture_consumed) return;
-  show_keyboard(lv_event_get_target(e));
+  lv_obj_t* ta = lv_event_get_target(e);
+  show_keyboard(ta);
+  if (txt_numeric(ta)) lv_keyboard_set_mode(kb, LV_KEYBOARD_MODE_NUMBER);  // e.g. PLZ
 }
 
 void on_settings_row(lv_event_t* e) {
@@ -977,6 +984,7 @@ void on_settings_row(lv_event_t* e) {
   if (which == 11) open_co4set();
   if (which == 12) sw_cycle_target();
   if (which == 13) open_loxset(false);
+  if (which == 14) open_text(kTextPlz, Nav::Settings);
 }
 
 void on_msg_wifi(lv_event_t*) {
@@ -1138,6 +1146,7 @@ void build_settings_screens(lv_obj_t* screen) {
   };
   static const SetLeaf g_info[] = {
       {"Wetter-Ort", ICON_PLACE, kAmber, &set_loc_val, "set:loc", 1},
+      {"MeteoSchweiz-PLZ", ICON_WARNING, kAmber, &set_plz_val, "set:plz", 14},
       {"\xC3\x96V", ICON_TRAIN, kAccent, &set_tr_val, "set:oev", 5},
       {"Kalender", ICON_EVENT, kPurple, &set_cal_val, "set:cal", 6},
       {"Kameras", ICON_VIDEOCAM, kTeal, &set_cam_val, "set:cams", 4},
@@ -1156,7 +1165,7 @@ void build_settings_screens(lv_obj_t* screen) {
   const Group groups[kSetGroups] = {
       {"Netzwerk & Zeit", "WLAN \xC2\xB7 Zeit \xC2\xB7 Miniserver", ICON_WIFI3, kAccent, "set:g:net", g_net, 3},
       {"Anzeige", "Ausschalten \xC2\xB7 Bildschirmschoner \xC2\xB7 Design", ICON_SCREEN, kPurple, "set:disp", nullptr, 0},
-      {"Orte & Infos", "Wetter \xC2\xB7 \xC3\x96V \xC2\xB7 Kalender \xC2\xB7 Kameras \xC2\xB7 Erinnerungen \xC2\xB7 Schalter", ICON_PLACE, kAmber, "set:g:info", g_info, 6},
+      {"Orte & Infos", "Wetter \xC2\xB7 PLZ \xC2\xB7 \xC3\x96V \xC2\xB7 Kalender \xC2\xB7 Kameras \xC2\xB7 Erinnerungen \xC2\xB7 Schalter", ICON_PLACE, kAmber, "set:g:info", g_info, 7},
       {"Energie-Quellen", "Co4 \xC2\xB7 whatwatt Go \xC2\xB7 PV", ICON_BOLT, kGreen, "set:g:energy", g_en, 2},
       {"System", "Info \xC2\xB7 Update \xC2\xB7 Diagnose \xC2\xB7 Playground", ICON_MEMORY, kOrange, "set:g:sys", g_sys, 2},
   };

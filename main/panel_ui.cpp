@@ -36,6 +36,7 @@
 #include <time.h>
 #include "material_icons.h"
 #include "settings.h"
+#include "meteo_plz.h"
 #include "co4_task.h"
 #include "co4_chart_plot.h"
 #include "map_ne.h"
@@ -183,6 +184,7 @@ lv_obj_t* set_grp_root[kSetGroups] = {};
 int set_group = -1;  // open settings group, -1: top level
 lv_obj_t* set_wifi_val = nullptr;
 lv_obj_t* set_loc_val = nullptr;
+lv_obj_t* set_plz_val = nullptr;  // Orte & Infos > MeteoSchweiz-PLZ
 lv_obj_t* set_disp_val = nullptr;
 lv_obj_t* set_time_val = nullptr;
 // Uhrzeit (NTP) screen
@@ -369,6 +371,9 @@ void open_trset();
 void open_calset();
 void open_maint();
 void txt_go_back();
+void open_text(uint8_t which, Nav back);
+bool txt_numeric(lv_obj_t* ta);
+void plz_summary(char* out, size_t n);
 void trset_refresh();
 void calset_refresh();
 void maint_refresh();

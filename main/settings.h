@@ -107,7 +107,8 @@ bool settings_save_station(int i, const Station& st);
 //           from the gitignored sdkconfig.defaults.local)
 // kUrlWaste: Abfallkalender-API base URL (https only)
 // kUrlOta: firmware image for "Update aus dem Internet"
-// kTextPlz: MeteoSchweiz location (PLZ + 2 digits, "947000" = 9470 Buchs SG)
+// kTextPlz: MeteoSchweiz location, 4-digit PLZ ("9470" = Buchs SG). Load and save
+//           normalise (legacy "947000" -> "9470"); meteo_plz_query() adds "00".
 // kTextWasteBfs: Gemeinde (BFS number) for the Abfallkalender-API
 // kTextWasteZone: zone / tour key of the API answer (multi-tour Gemeinden; empty = all)
 enum TextSetting : uint8_t {

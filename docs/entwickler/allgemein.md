@@ -180,7 +180,7 @@ NVS bleibt bei 0x9000, damit Einstellungen den Wechsel vom alten Factory-Layout 
 | `PANEL_WINDY_API_KEY`, `PANEL_ICAL_URL` | Build-Defaults für Geheimnisse, **nur** über `sdkconfig.defaults.local` setzen |
 | `PANEL_WASTE_API`, `PANEL_WASTE_BFS` | Abfallkalender-API und Gemeinde |
 | `PANEL_OTA_URL` | Standard-Update-URL (GitHub „latest release“) |
-| `PANEL_METEO_PLZ` | MeteoSchweiz-Ort (PLZ + 2 Ziffern) |
+| `PANEL_METEO_PLZ` | MeteoSchweiz-PLZ, 4 Ziffern (Standard `9470`; ein alter Wert `947000` wird umgewandelt) |
 | `CO4EN_LINK_MISS_MAX`, `CO4EN_RESWEEP_MIN_S`, `CO4EN_RESWEEP_MAX_S` | CO4EN-Gateway-Suche |
 | `PANEL_CO4_REALM_URL`, `PANEL_CO4_CLIENT_ID`, `PANEL_CO4_SCOPE`, `PANEL_CO4_BFF_URL` | Co4: öffentlicher Keycloak-Client (Device Authorization Grant, ohne Client-Secret) und BFF |
 
@@ -197,7 +197,7 @@ Alle Einstellungen liegen in NVS, Namespace `panel`.
 - **Geheimnisse** (`wifi_pass`, `lox_pass`, `windy_key`, `windy_dflt`, `ical_url`, `ical_dflt`) werden am Display maskiert, nie geloggt und nur nach Bestätigung am Panel exportiert.
 - Weitere Gruppen: Ort (`loc_*`), NTP/Zeitzone, Kameras (`cams_n`, `cam_ids`, max. 12), ÖV (`st0_*`, `st1_*`), Bildschirm (`scr_to`, `scr_hint`, `scr_saver`, `ui_design`), Kalender/Abfall (`ical_url`, `waste_api`, `waste_bfs`, `waste_zone`), OTA (`ota_url`, nur https), MeteoSchweiz (`meteo_plz`), Erinnerungen (`rem_*`, `cal_*`, `wst_*`), Loxone (`lox_*`), Energie (`en_*`, `wa_*`), PV (`pv_*`), Schalter-Taste (`sw_target`), Co4 (`co4_zone`, `co4_zname`, `co4_site`).
 - Der Struktur-Cache der Loxone-Steuerungen liegt ebenfalls in NVS (`loxone_cache.cpp`, max. 4 KB).
-- **Offen:** Die MeteoSchweiz-PLZ (`meteo_plz`, `kTextPlz`) hat am Gerät keine Eingabezeile. Sie kommt aus dem Build-Default `PANEL_METEO_PLZ` oder aus einem Restore. Ausserdem erlaubt das Schema genau 4 Ziffern, der Kconfig-Default hat aber 6 (PLZ + 2 Ziffern, `947000`). Ob ein Restore mit 6 Ziffern abgelehnt wird oder die API 4 Ziffern akzeptiert, ist zu prüfen.
+- **MeteoSchweiz-PLZ** (`meteo_plz`, `kTextPlz`): gespeichert wird die normale 4-stellige PLZ (`9470`). Eingabe am Gerät unter Orte & Infos › MeteoSchweiz-PLZ (Zahlentastatur, max. 4 Zeichen, Prüfung 1000–9999 mit `meteo_plz_valid()`). `settings_load_text()` normalisiert jeden Wert mit `meteo_plz_normalize()`: alte 6-stellige Werte mit Endung `00` aus NVS, Restore oder `sdkconfig` (`947000`) werden zu `9470`, Ungültiges fällt auf den Build-Default zurück. `settings_save_text()` speichert nur 4 Ziffern. Das Schema erlaubt 4–6 Ziffern, damit alte Sicherungen weiter importiert werden. Für die Anfrage an `app-prod-ws.meteoswiss-app.ch/v1/plzDetail` hängt `meteo_plz_query()` `00` an. Code: `main/meteo_plz.cpp`, Host-Test `tools/test_meteo_plz.cpp`.
 
 ---
 
@@ -268,7 +268,7 @@ Die Board-ID ist der CMake-Projektname in `esp_app_desc_t.project_name`. `ota_bo
 
 ### 7.1 `ci.yml` (jeder Push, jeder PR)
 
-- **host-tests:** Mojibake-Prüfung aller Textdateien (ausser Schriften), danach alle Host-Tests mit `g++ -std=c++17` (iCal, OTA-Version/-Board, UI-Text, Retry, Loxone-Cache, Settings-Schema, Abfall, Energie, CO4EN, Co4, PV, Wetter, Schalter-Ziel, ÖV, Radar, Karte, Scope inkl. `rp_scope.c`).
+- **host-tests:** Mojibake-Prüfung aller Textdateien (ausser Schriften), danach alle Host-Tests mit `g++ -std=c++17` (iCal, OTA-Version/-Board, UI-Text, Retry, Loxone-Cache, MeteoSchweiz-PLZ, Settings-Schema, Abfall, Energie, CO4EN, Co4, PV, Wetter, Schalter-Ziel, ÖV, Radar, Karte, Scope inkl. `rp_scope.c`).
 - **build:** im Container `espressif/idf:v6.1` mit **Wegwerf-Schlüssel**: Guition, SenseCAP D1 und Panlee, danach `check_secrets.py --generic` für alle drei Images.
 
 ### 7.2 `test-image.yml` (signiertes Test-Image)

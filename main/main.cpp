@@ -28,6 +28,7 @@
 #include "weather_derive.h"
 #include "webcams.h"
 #include "info.h"
+#include "meteo_plz.h"
 #include "maint.h"
 #include "ota_check.h"
 #include "board_pins.h"
@@ -647,9 +648,9 @@ void net_task(void*) {
         break;
       }
       case NetOp::Meteo: {
-        char plz[16];
-        settings_load_text(kTextPlz, plz, sizeof(plz), nullptr);
-        res.ok = meteo_fetch(plz, &g_meteo);
+        char plz[16], q[16];
+        settings_load_text(kTextPlz, plz, sizeof(plz), nullptr);  // 4 digits ("9470")
+        res.ok = meteo_plz_query(plz, q, sizeof(q)) && meteo_fetch(q, &g_meteo);  // API: PLZ + "00"
         break;
       }
       case NetOp::Ota:

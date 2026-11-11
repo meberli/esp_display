@@ -42,7 +42,7 @@ const KeySpec kSchema[] = {
     {"waste_bfs", KeyType::Str, 4, 4, kKeyDigits, 0},
     {"waste_zone", KeyType::Str, 1, 95, 0, 0},
     {"ota_url", KeyType::Str, 9, 255, kKeyUrl | kKeyHttpsOnly, 0},
-    {"meteo_plz", KeyType::Str, 4, 4, kKeyDigits, 0},
+    {"meteo_plz", KeyType::Str, 4, 6, kKeyDigits, 0},  // 4-digit PLZ; 6 = legacy "947000" (converted on load)
     {"rem_on", KeyType::U8, 0, 1, 0, 0},
     {"rem_src", KeyType::U8, 0, 3, 0, 0},
     {"rem_lcal", KeyType::U8, 0, kLeadN - 1, 0, 0},
