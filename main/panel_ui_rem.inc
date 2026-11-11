@@ -221,7 +221,13 @@ void set_checked(lv_obj_t* o, bool on) {
   else lv_obj_clear_state(o, LV_STATE_CHECKED);
 }
 
+lv_obj_t* rem_wnote = nullptr;  // "Abfuhr: Hinweis am Vortag ab 19:00 bis am Sammeltag 09:00 ..."
+
 void remset_refresh() {
+  if (rem_wnote != nullptr)  // showed literal "..." instead of the configured times
+    lv_label_set_text_fmt(rem_wnote, "Abfuhr: Hinweis am Vortag ab %02u:%02u bis am Sammeltag %02u:%02u "
+                          "(Einstellungen > Kalender)", waste_from_min / 60, waste_from_min % 60,
+                          waste_until_min / 60, waste_until_min % 60);
   set_checked(rem_sw[0], rem_cfg.on);
   set_checked(rem_sw[1], rem_cfg.cal);
   set_checked(rem_sw[2], rem_cfg.waste);
@@ -326,12 +332,11 @@ void build_reminders(lv_obj_t* screen) {
   make_value_row(remset_root, 264, "Ganzt\xC3\xA4gig: Am Vortag ab", ICON_SCHEDULE, kPurple, on_rem_from, 0, "rem:from",
                  &rem_from_val);
   rem_switch_row(remset_root, 344, 52, "Abfallkalender", ICON_RECYCLE, kGreen, 2, "rem:waste");
-  lv_obj_t* wnote = make_label(remset_root, &font_inter_14, lv_color_hex(kTextDim));
-  lv_obj_set_pos(wnote, kMargin, 404);
-  lv_obj_set_width(wnote, kScreen - 2 * kMargin);
-  lv_label_set_long_mode(wnote, LV_LABEL_LONG_WRAP);
-  lv_label_set_text(wnote, "Abfuhr: Hinweis am Vortag ab ... bis am Sammeltag ... "
-                           "(Einstellungen > Kalender)");
+  rem_wnote = make_label(remset_root, &font_inter_14, lv_color_hex(kTextDim));
+  lv_obj_set_pos(rem_wnote, kMargin, 404);
+  lv_obj_set_width(rem_wnote, kScreen - 2 * kMargin);
+  lv_label_set_long_mode(rem_wnote, LV_LABEL_LONG_WRAP);
+  lv_label_set_text(rem_wnote, "");  // times filled in remset_refresh()
   hide(remset_root);
 
   // Reminder card (parent follows the active screen, see rem_render).
