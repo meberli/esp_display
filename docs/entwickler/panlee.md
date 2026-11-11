@@ -7,15 +7,19 @@ Target `panlee`. Projektname bzw. Board-ID `loxone_panel_panlee`, Image `build-p
 | | |
 |---|---|
 | Board | Panlee / Wireless-Tag ZX3D95CE01S-TR-V12 (Familie WT32S3-86S) |
-| Modul | WT32-S3-WROVER-N16R8: ESP32-S3, 16 MB Quad-Flash, 8 MB Octal-PSRAM |
+| Modul | WT32-S3-WROVER-N16R8: ESP32-S3 (ESP32-S3R8), 16 MB Quad-Flash, 8 MB eingebettetes Octal-PSRAM (esptool: „Embedded PSRAM 8MB (AP_3v3)“) |
 | Display | 3,95" IPS 480×480, 16-bit RGB, Controller **GC9503V** (3-Wire-SPI-Init, 9 Bit) |
 | Touch | FT6336-Klasse (FT5x06-Registersatz) auf I²C 0x38 (Fallback 0x48), 400 kHz, gepollt (INT GPIO4 ungenutzt) |
 | Sensor | SHT20-Footprint auf I²C 0x40 (nur TR-Variante, evtl. unbestückt) |
 | RS485 | Transceiver mit automatischer Richtungsumschaltung, TX GPIO2 / RX GPIO1, auch auf J2 |
 | Relais | keines (`kBoardHasRelay = false`) |
 | Konsole | UART0 GPIO43/44 auf dem Debug-Stecker und J2 |
+| Speisung | → offen, Angabe Michael (Spannung, Anschluss/Klemme) |
+| Unterputzdose | → offen, Angabe Michael (passende Dose) |
+| Montage | → offen, Angabe Michael (Befestigung, Rahmen) |
+| Boot-/Reset-Tasten bzw. Pads | → offen, Angabe Michael (Lage von IO0/BOOT und RESET auf der Platine) |
 
-Quellen laut `main/board_pins_panlee.h`: Wireless-Tag-Datenblatt WT32S3-86S / ZX3D95CE01S-TR-4848 V1.5 EN, `wireless-tag-com/ZX3D95CE01S-TR-4848` (`main/board.h`, `sdkconfig`) und `strange-v/ha_deck` (LGFX). Der Kommentar dort verweist auf `docs/panlee.md`, diese Datei gibt es im Repo nicht. **Offen**: Dieses Dokument übernimmt die Rolle, oder der Verweis wird angepasst.
+Quellen laut `main/board_pins_panlee.h`: Wireless-Tag-Datenblatt WT32S3-86S / ZX3D95CE01S-TR-4848 V1.5 EN, `wireless-tag-com/ZX3D95CE01S-TR-4848` (`main/board.h`, `sdkconfig`) und `strange-v/ha_deck` (LGFX). Der Kommentar in `board_pins_panlee.h` verweist auf dieses Dokument.
 
 ### Pins (`main/board_pins_panlee.h`)
 
@@ -60,7 +64,18 @@ idf.py -B build-panlee -DSDKCONFIG=build-panlee/sdkconfig -DPANEL_BOARD=panlee b
 idf.py -B build-panlee -DSDKCONFIG=build-panlee/sdkconfig -DPANEL_BOARD=panlee -p <PORT> flash monitor
 ```
 
-**Offen:** über welchen Stecker bzw. Adapter das Board am bequemsten geflasht wird (USB-Seriell am Debug-Stecker vs. USB) und wie der Bootmodus ausgelöst wird. Im Repo nicht dokumentiert.
+### Flashen über USB-Seriell-Adapter
+
+- Adapter: USB-Seriell-Wandler mit 3,3-V-Pegel, z. B. FTDI FT232R, an UART0 (TX GPIO43, RX GPIO44, GND) am Debug-Stecker.
+- Am Adapter sind nur **RTS/CTS** verdrahtet, **kein DTR**. Der automatische Reset in den Bootloader von esptool funktioniert deshalb nicht. Bootmodus von Hand: **IO0 (BOOT) gedrückt halten, RESET kurz drücken, IO0 loslassen**, dann flashen. Nach dem Flashen RESET drücken, damit die App startet.
+- Lage der Boot-/Reset-Tasten bzw. Pads auf der Platine: → offen, Angabe Michael.
+- **Nur die App flashen** (`idf.py ... app-flash`, schreibt ins aktuelle OTA-Slot-Layout) oder per OTA/Web-Upload aktualisieren. **Nie** `idf.py flash` bzw. einen Full-Flash/`erase-flash` auf einem eingerichteten Panel: das überschreibt Bootloader, Partitionstabelle und otadata und löscht mit `erase-flash` auch NVS (WLAN, Miniserver, alle Einstellungen).
+- Der `flash monitor`-Befehl oben ist nur für die Erstinbetriebnahme eines leeren Boards gedacht.
+
+```sh
+# Bootmodus von Hand (IO0 halten, RESET), dann:
+idf.py -B build-panlee -DSDKCONFIG=build-panlee/sdkconfig -DPANEL_BOARD=panlee -p <PORT> app-flash
+```
 
 ## Release und OTA
 

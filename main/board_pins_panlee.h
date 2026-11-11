@@ -8,7 +8,7 @@
 // capacitive touch (FT5x06 register set), onboard RS485 with automatic
 // direction control, SHT20 footprint on the I2C bus (0x40, TR variant).
 //
-// Sources (see docs/panlee.md):
+// Sources (see docs/entwickler/panlee.md):
 //  [DS]  WT32S3-86S / ZX3D95CE01S-TR-4848 datasheet V1.5 EN (Wireless-Tag)
 //  [WT]  wireless-tag-com/ZX3D95CE01S-TR-4848 main/board.h + sdkconfig
 //  [LGFX] strange-v/ha_deck hd_device_wt32s3_86s/LGFX.hpp (working ESPHome

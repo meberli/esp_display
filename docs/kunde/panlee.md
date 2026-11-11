@@ -4,13 +4,15 @@
 
 ## Anschluss und Stromversorgung
 
-- Versorgung und Anschlussklemmen nach den Angaben des Herstellers (Wireless-Tag/Panlee). Die genaue Versorgungsspannung ist in dieser Anleitung noch nicht festgehalten (**offen**).
+- Gerät: Panlee ZX3D95CE01S-TR-V12 (ESP32-S3, 16 MB Flash, 8 MB PSRAM).
+- Speisung (Spannung, Anschluss): → offen, Angabe Michael.
 - Nach dem Einschalten erscheint nach wenigen Sekunden die Startseite.
 - **Netzspannung (230 V):** Wird das Panel an Netzspannung angeschlossen, darf die Installation nur eine Elektrofachperson mit Bewilligung nach **NIV** ausführen.
 
 ## Montage
 
-- Unterputzmontage in einer Gerätedose. Welche Dose genau passt, ist hier noch offen (Herstellerangabe beachten).
+- Passende Unterputzdose: → offen, Angabe Michael.
+- Befestigung und Rahmen: → offen, Angabe Michael.
 - Vor Arbeiten an der Dose immer die Sicherung ausschalten.
 
 ## Besonderheiten
@@ -20,6 +22,8 @@
 - Einen eingebauten Temperatur-/Feuchtesensor zeigt die Firmware nicht an.
 
 ## Updates
+
+- Updates laufen über das Internet oder die Wartung im Browser. Ein Anschluss an den PC ist dafür nicht nötig.
 
 - **Firmware prüfen** (Einstellungen › System › Wartung & Update) findet neue Versionen für den Panlee automatisch, sobald ein neues Release erschienen ist.
 - Alternativ spielst du eine Update-Datei von deinem Installateur über die Wartung im Browser ein ([allgemein.md](allgemein.md#8-wartung-im-browser-sicherung-wiederherstellung-firmware)). Das Panel nimmt nur Dateien an, die für den Panlee bestimmt sind.
