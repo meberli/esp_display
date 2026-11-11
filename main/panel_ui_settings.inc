@@ -574,6 +574,7 @@ void clock_tick(lv_timer_t*) {
   info_tick();
 }
 
+void remset_refresh();
 void open_settings() {
   if (message_open) return;
   nav = Nav::Settings;
@@ -599,6 +600,8 @@ void open_settings() {
   camset_value();
   enset_summary();
   co4set_summary();
+  remset_refresh();    // "Erinnerungen" summary was empty until the page was opened once
+  sw_home_refresh();   // "Schalter-Taste" summary (empty without Loxone controls)
   if (set_group >= 0 && set_group < kSetGroups && set_grp_root[set_group] != nullptr) show(set_grp_root[set_group]);
   else show(set_root);
 }
