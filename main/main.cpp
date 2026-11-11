@@ -1091,7 +1091,10 @@ void ui_task(void*) {
     console_printf("Loxone cache: %u controls\n", static_cast<unsigned>(controls_n));
     ui_show_controls(controls, controls_n, controls_n, cache_server[0] != '\0' ? cache_server : "Loxone");
   } else {
-    ui_show_controls(controls, 0, 0, have_wifi ? str::kStatusConnecting : str::kStatusNoWifi);
+    // Status text, not a server name: ui_show_controls() keeps its argument as the
+    // server name, which publish_status() shows again on every category page.
+    ui_show_controls(controls, 0, 0, "");
+    ui_set_status(have_wifi ? str::kStatusConnecting : str::kStatusNoWifi);
   }
   if (lox_on) ui_set_lox_state(2);
   if (lox_setup_ask) {  // first run: Miniserver form once (WLAN button, Überspringen)
