@@ -1,0 +1,14 @@
+indicator_rp2040_scope - SenseCAP Indicator RP2040 firmware for esp_display
+
+This sketch is a modified version of Seeed Studio's factory RP2040 firmware
+"indicator_rp2040" v1.0.1 from SenseCAP_Indicator_RP2040
+(https://github.com/Seeed-Solution/SenseCAP_Indicator_RP2040,
+examples/indicator_rp2040), Copyright (c) Seeed Technology Co., Ltd.
+(Seeed Studio), licensed under the GNU General Public License version 3.
+
+Modifications (Playground oscilloscope / logic analyzer: scope_rp2040.cpp,
+scope_rp2040.h and the changes in indicator_rp2040_scope.ino)
+Copyright (c) 2026 Michael Eberli, also under GPL-3.0 (see LICENSE).
+
+The sketch uses the RpScope library (../../libraries/RpScope), which is
+separate, original code under the MIT license.

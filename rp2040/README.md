@@ -2,12 +2,14 @@
 
 `indicator_rp2040_scope/` is Seeed's factory RP2040 sketch
 ([SenseCAP_Indicator_RP2040](https://github.com/Seeed-Solution/SenseCAP_Indicator_RP2040),
-`examples/indicator_rp2040` v1.0.1, **GPL-3.0**, so this sketch is GPL-3.0 as well)
+`examples/indicator_rp2040` v1.0.1, **GPL-3.0**, so this sketch is GPL-3.0-only as well,
+see `indicator_rp2040_scope/LICENSE` and `NOTICE`)
 plus the Playground oscilloscope / logic analyzer (`scope_rp2040.*`).
 Sensors (SCD41, SGP40, AHT20), SD logging, buzzer and the sensor packets
 0xB2..0xB5 are unchanged; the 5 s sensor round only runs while no capture is active.
 
-`libraries/RpScope/` (protocol, COBS, measurements, decimation) is shared with
+`libraries/RpScope/` (protocol, COBS, measurements, decimation; own code, **MIT**,
+`libraries/RpScope/LICENSE`) is shared with
 the ESP32 firmware (`main/rp_link.cpp`, `main/scope_view.cpp`) and the host
 test `tools/test_scope.cpp`.
 

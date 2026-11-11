@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (c) Seeed Technology Co., Ltd. (original indicator_rp2040 v1.0.1)
+// Copyright (c) 2026 Michael Eberli (modifications). See LICENSE and NOTICE.
 // SenseCAP Indicator RP2040 firmware for esp_display: Seeed's factory sketch
 // (SenseCAP_Indicator_RP2040 examples/indicator_rp2040 v1.0.1, GPL-3.0,
 // https://github.com/Seeed-Solution/SenseCAP_Indicator_RP2040) plus the

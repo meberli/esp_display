@@ -314,7 +314,7 @@ Das Panel fragt `http://<Adresse>/api/v1/report` des whatwatt Go im LAN ab (Eins
 - **Windy Webcams** – <https://api.windy.com/webcams>, eigener API-Key nötig (Free Tier). Gemäss Windy-Bedingungen: Link zur Webcam-Seite und „Webcams provided by windy.com“ werden angezeigt, Bild-URLs nicht gespeichert, Bilder nicht hochskaliert.
 - **transport.opendata.ch** – ÖV-Abfahrten, <https://transport.opendata.ch>, Fair-Use (Abfragen sparsam halten).
 - **Loxone** – lokaler Miniserver; nicht mit Loxone Electronics GmbH verbunden.
-- **Schriften & Icons** – Inter 4.0 (SIL Open Font License 1.1, Design „Dark Glass“), Montserrat (SIL Open Font License 1.1, Design „Co4“, Lizenztext `main/fonts/OFL-Montserrat.txt`), Material Symbols Rounded (Apache License 2.0).
+- **Schriften & Icons** – Inter 4.0 (SIL Open Font License 1.1, Design „Dark Glass“), Montserrat (SIL Open Font License 1.1, Design „Co4“, Lizenztext `main/fonts/OFL-Montserrat.txt`), Material Symbols Rounded (Apache License 2.0). Inter-Lizenztext: `main/fonts/OFL-Inter.txt`.
 
 ## Quellen (Hardware)
 
@@ -329,4 +329,7 @@ Das Panel fragt `http://<Adresse>/api/v1/report` des whatwatt Go im LAN ab (Eins
 
 ## Lizenz
 
-Lizenz: noch offen. Bis eine Lizenz festgelegt ist, gelten keine Nutzungsrechte über das gesetzlich Erlaubte hinaus. Eingebundene Drittkomponenten (LVGL, ArduinoJson, Schriften, Icons) behalten ihre eigenen Lizenzen.
+- Das Projekt steht unter der **MIT-Lizenz** ([LICENSE](LICENSE)), Copyright (c) 2026 Michael Eberli.
+- Ausnahme: Der RP2040-Sketch `rp2040/indicator_rp2040_scope/` basiert auf Seeeds `indicator_rp2040` und bleibt **GPL-3.0** ([LICENSE](rp2040/indicator_rp2040_scope/LICENSE), [NOTICE](rp2040/indicator_rp2040_scope/NOTICE)). Er läuft als eigenes Programm auf dem RP2040 und spricht mit dem ESP32 nur über UART.
+- Die Protokoll-Library `rp2040/libraries/RpScope/` ist eigener Code unter MIT und wird auch in die ESP32-Firmware kompiliert.
+- Drittkomponenten (ESP-IDF, LVGL, esp_jpeg/TJpgDec, ArduinoJson, Schriften, Icons, Kartendaten) behalten ihre eigenen Lizenzen: siehe [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

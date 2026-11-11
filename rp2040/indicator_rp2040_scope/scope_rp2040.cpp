@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (c) 2026 Michael Eberli. Part of the GPL-3.0 sketch, see LICENSE and NOTICE.
 // See scope_rp2040.h.
 //
 // Buffer: one static 128 KiB ring, either 65536 x uint16 ADC samples or

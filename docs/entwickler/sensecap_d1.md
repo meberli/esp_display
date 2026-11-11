@@ -135,7 +135,10 @@ Die ESP32-Firmware braucht den Scope-Sketch nicht. Ohne ihn bleibt nur die Oszi-
 
 ### Lizenz
 
-Der RP2040-Sketch ist GPL-3.0, weil er auf Seeeds GPL-Sketch aufbaut. `RpScope` wird auch in die ESP32-Firmware kompiliert. Die Lizenz des Gesamtprojekts ist laut Haupt-README noch **offen**, die Wechselwirkung mit GPL-3.0 ist zu klären.
+- `rp2040/indicator_rp2040_scope/` ist **GPL-3.0-only** (`LICENSE`, `NOTICE`), weil der Sketch auf Seeeds GPL-3.0-Sketch `indicator_rp2040` v1.0.1 aufbaut. SPDX-Kopf in `.ino`, `scope_rp2040.cpp/.h`.
+- `rp2040/libraries/RpScope/` ist eigener Code unter **MIT** (`LICENSE`, SPDX `MIT`). Geprüft: kein aus dem Seeed-Sketch kopierter Code (eigene COBS-Implementierung, Seeed nutzt PacketSerial). Übernommen ist nur die Protokolltatsache, dass `0xA3` Seeeds Shutdown-Kommando ist.
+- Die ESP32-Firmware (MIT) enthält RpScope, aber keinen GPL-Code. Sketch und Firmware sind getrennte Programme, die nur über UART kommunizieren.
+- Übersicht aller Drittlizenzen: [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md).
 
 ## Release und OTA
 

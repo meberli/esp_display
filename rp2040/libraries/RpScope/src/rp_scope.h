@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Michael Eberli
 // Playground scope: ESP32-S3 <-> RP2040 protocol and capture helpers.
 // Shared verbatim by the RP2040 sketch (rp2040/indicator_rp2040_scope), the
 // ESP32 firmware (main/rp_link.cpp, main/scope_view.cpp) and the host tests

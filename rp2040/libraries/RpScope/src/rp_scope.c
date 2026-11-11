@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Michael Eberli
 // See rp_scope.h. Pure C99: shared by the RP2040 sketch, the ESP32 firmware
 // and the host tests.
 #include "rp_scope.h"

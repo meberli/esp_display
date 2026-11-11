@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (c) 2026 Michael Eberli. Part of the GPL-3.0 sketch, see LICENSE and NOTICE.
 // Playground scope on the SenseCAP Indicator RP2040: analog (ADC + DMA) and
 // logic (PIO + DMA) capture at the Grove connectors, results to the ESP32-S3
 // over the existing COBS UART link. Protocol: libraries/RpScope/src/rp_scope.h.
