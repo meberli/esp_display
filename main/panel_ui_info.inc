@@ -1617,11 +1617,13 @@ void build_info_screens(lv_obj_t* screen) {
   lv_textarea_set_password_bullet(txt_ta, "*");
   lv_textarea_set_max_length(txt_ta, 255);
   reg("text:ta", txt_ta);
-  make_choice(txt_root, kMargin, 178, kScreen - 2 * kMargin, 48, "Standard verwenden", on_txt_default, 0, "text:default");
+  // Hint/error line right under the field and the button above y 250: the
+  // keyboard (220 px, 10 px above the bottom) covered the line at y 240.
   txt_status = make_label(txt_root, &font_inter_14, lv_color_hex(kTextDim));
-  lv_obj_set_pos(txt_status, 24, 240);
+  lv_obj_set_pos(txt_status, 24, 170);
   lv_obj_set_width(txt_status, 432);
-  lv_label_set_long_mode(txt_status, LV_LABEL_LONG_WRAP);
+  label_dot1(txt_status);
+  make_choice(txt_root, kMargin, 194, kScreen - 2 * kMargin, 48, "Standard verwenden", on_txt_default, 0, "text:default");
 
   // Einstellungen > Wartung
   maint_root = make_screen_root(screen, "Wartung");
