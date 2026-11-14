@@ -42,6 +42,7 @@
 #include "map_ne.h"
 #include "radar.h"
 #include "ui_text.h"
+#include "lox_glyph_36.h"
 #include "energy_task.h"
 #include "espnow_play.h"
 #include "rp_link.h"
@@ -447,47 +448,17 @@ lv_obj_t* lox_count[3] = {};
 lv_obj_t* sw_btn = nullptr;
 lv_obj_t* sw_icon = nullptr;
 
-// Official Loxone bracket mark: four thick L-corners with rounded outer bends
-// and gaps at the mid-sides. Drawn as four 90° arcs (no bitmap). 36 x 36 px,
-// monochrome like the font icons, always Loxone lime (the home tile stays the
-// glass card). Geometry is the official mark scaled from the 225 px tile
-// (centres 96.5, Rout 65, stroke 17.5) and snapped to the 36 px grid.
+// Official Loxone bracket mark: 36x36 alpha image (lox_glyph_36.h), monochrome
+// like the font icons, always Loxone lime. A 36x36 baked bitmap is used instead
+// of live lv_arc widgets: four thin 90° arcs (Rout 10, stroke 3) looked
+// fragmented on the Panlee. Same pixels on every board.
 void make_lox_glyph(lv_obj_t* parent) {
-  lv_obj_t* g = lv_obj_create(parent);
-  lv_obj_remove_style_all(g);
-  lv_obj_set_size(g, 36, 36);
-  lv_obj_clear_flag(g, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_clear_flag(g, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_center(g);
-  static const int16_t kCx[4] = {15, 20, 15, 20};
-  static const int16_t kCy[4] = {15, 15, 20, 20};
-  // LVGL: 0° = 3 o'clock, clockwise. TL W→N, TR N→E, BR E→S, BL S→W.
-  static const uint16_t kStart[4] = {180, 270, 0, 90};
-  static const uint16_t kEnd[4] = {270, 360, 90, 180};
-  constexpr int kRout = 10;
-  constexpr int kStroke = 3;
-  const lv_color_t col = lv_color_hex(kLoxMark);
-  for (int i = 0; i < 4; ++i) {
-    lv_obj_t* a = lv_arc_create(g);
-    lv_obj_remove_style_all(a);
-    lv_obj_set_size(a, 2 * kRout, 2 * kRout);
-    lv_obj_set_pos(a, kCx[i] - kRout, kCy[i] - kRout);
-    lv_obj_clear_flag(a, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_clear_flag(a, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_style_pad_all(a, 0, 0);
-    lv_obj_set_style_bg_opa(a, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(a, 0, 0);
-    lv_obj_set_style_arc_width(a, kStroke, LV_PART_MAIN);
-    lv_obj_set_style_arc_color(a, col, LV_PART_MAIN);
-    lv_obj_set_style_arc_opa(a, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_arc_rounded(a, false, LV_PART_MAIN);
-    lv_obj_set_style_arc_width(a, 0, LV_PART_INDICATOR);
-    lv_obj_set_style_arc_opa(a, LV_OPA_TRANSP, LV_PART_INDICATOR);
-    lv_obj_set_style_opa(a, LV_OPA_TRANSP, LV_PART_KNOB);
-    lv_arc_set_rotation(a, 0);
-    lv_arc_set_bg_angles(a, kStart[i], kEnd[i]);
-    lv_arc_set_angles(a, 0, 0);
-  }
+  lv_obj_t* img = lv_img_create(parent);
+  lv_img_set_src(img, &kLoxGlyph);
+  lv_obj_set_style_img_recolor(img, lv_color_hex(kLoxMark), 0);
+  lv_obj_set_style_img_recolor_opa(img, LV_OPA_COVER, 0);
+  lv_obj_clear_flag(img, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_center(img);
 }
 lv_obj_t* empty_hint = nullptr;
 lv_obj_t* message = nullptr;
