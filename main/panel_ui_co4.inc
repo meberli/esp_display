@@ -635,8 +635,17 @@ void co4_enter(int page) {
 void energy_home_open() {
   co4_get(co4_v);
   const bool co4_ok = co4_v->state == Co4State::LoggedIn && co4_v->zone_set;
-  const bool direct = settings_load_energy().on || settings_load_pv_on();
+  const EnergySettings e = settings_load_energy();
+  const bool whatwatt_ready = e.on && e.host[0] != '\0';
+  const bool direct = whatwatt_ready || settings_load_pv_on();
   console_printf("Energie tile: source=%s\n", co4_ok ? "co4" : direct ? "direct" : "none");
+  if (energy_home_opens_setup(whatwatt_ready, co4_ok)) {
+    // Tile shows "einrichten": open whatwatt-Adresse (Suchen) when there is no
+    // host, otherwise the Energie settings (feature switched off).
+    if (e.host[0] == '\0') open_text(kTextEnHost, Nav::EnSet);
+    else open_enset();
+    return;
+  }
   if (co4_ok || !direct) co4_enter(0);
   else energy_enter(0);
 }

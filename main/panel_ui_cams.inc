@@ -122,8 +122,19 @@ void cam_refresh_view() {
   }
 }
 
+void open_camkey();
+void open_camset();
 void cam_enter() {
   if (message_open || cam_root == nullptr) return;
+  char key[72];
+  bool own = false;
+  bool have_key = settings_load_windy_key(key, sizeof(key), &own);
+  memset(key, 0, sizeof(key));
+  if (cameras_home_opens_setup(cam_n > 0, have_key)) {
+    if (!have_key) open_camkey();
+    else open_camset();
+    return;
+  }
   nav = Nav::Cameras;
   hide(home_root);
   hide(cat_root);
@@ -266,6 +277,25 @@ void show_kb_mode(lv_obj_t* ta, lv_keyboard_mode_t mode) {
   lv_keyboard_set_mode(kb, mode);
 }
 
+void open_camkey() {
+  hide_settings();
+  hide(home_root);
+  hide(cat_root);
+  hide(wx_root);
+  if (cam_root != nullptr) hide(cam_root);
+  nav = Nav::CamKey;
+  char key[72], mask[32];
+  bool own = false;
+  bool have = settings_load_windy_key(key, sizeof(key), &own);
+  settings_mask_key(key, mask, sizeof(mask));
+  memset(key, 0, sizeof(key));
+  if (!have) lv_label_set_text(camkey_cur, "Kein Key hinterlegt");
+  else lv_label_set_text_fmt(camkey_cur, "%s: %s", own ? "Eigener Key" : "Standard-Key (Firmware)", mask);
+  lv_textarea_set_text(camkey_ta, "");
+  lv_label_set_text(camkey_status, "Gratis-Key: api.windy.com/keys (Webcams API)");
+  show(camkey_root);
+}
+
 void on_camset_btn(lv_event_t* e) {
   if (gesture_consumed) return;
   int which = static_cast<int>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e)));
@@ -288,17 +318,7 @@ void on_camset_btn(lv_event_t* e) {
     show(camsearch_root);
     show_keyboard(camsearch_ta);
   } else {
-    nav = Nav::CamKey;
-    char key[72], mask[32];
-    bool own = false;
-    bool have = settings_load_windy_key(key, sizeof(key), &own);
-    settings_mask_key(key, mask, sizeof(mask));
-    memset(key, 0, sizeof(key));
-    if (!have) lv_label_set_text(camkey_cur, "Kein Key hinterlegt");
-    else lv_label_set_text_fmt(camkey_cur, "%s: %s", own ? "Eigener Key" : "Standard-Key (Firmware)", mask);
-    lv_textarea_set_text(camkey_ta, "");
-    lv_label_set_text(camkey_status, "Gratis-Key: api.windy.com/keys (Webcams API)");
-    show(camkey_root);
+    open_camkey();
   }
 }
 

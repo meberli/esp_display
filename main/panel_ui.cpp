@@ -43,6 +43,7 @@
 #include "radar.h"
 #include "ui_text.h"
 #include "lox_glyph_36.h"
+#include "home_tap.h"
 #include "energy_task.h"
 #include "espnow_play.h"
 #include "rp_link.h"
@@ -720,17 +721,24 @@ void on_txt_hit(lv_event_t* e) {
 
 void txt_search_layout(bool show_search) {
   if (txt_search_btn == nullptr || txt_default_btn == nullptr) return;
+  const bool has_default = settings_text_default(static_cast<TextSetting>(txt_which))[0] != '\0';
   if (show_search) {
     show(txt_search_btn);
-    lv_obj_set_pos(txt_default_btn, kMargin + 226, 194);
-    lv_obj_set_size(txt_default_btn, 214, 48);
+    hide(txt_default_btn);  // whatwatt host has no compiled-in default address
+    lv_obj_set_pos(txt_search_btn, kMargin, 194);
+    lv_obj_set_size(txt_search_btn, kScreen - 2 * kMargin, 48);
     fill_txt_hit_list();
   } else {
     hide(txt_search_btn);
     hide(txt_hit_list);
     txt_hit_n = 0;
-    lv_obj_set_pos(txt_default_btn, kMargin, 194);
-    lv_obj_set_size(txt_default_btn, kScreen - 2 * kMargin, 48);
+    if (has_default) {
+      show(txt_default_btn);
+      lv_obj_set_pos(txt_default_btn, kMargin, 194);
+      lv_obj_set_size(txt_default_btn, kScreen - 2 * kMargin, 48);
+    } else {
+      hide(txt_default_btn);
+    }
   }
 }
 

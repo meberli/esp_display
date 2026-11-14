@@ -1111,6 +1111,8 @@ void open_text(uint8_t which, Nav back) {
   settings_load_text(static_cast<TextSetting>(which), v, sizeof(v), &own);
   if (which == kUrlIcal) url_summary(sum, sizeof(sum), which, v, own);
   else if (which == kTextWasteZone && v[0] == '\0') snprintf(sum, sizeof(sum), "keine (ganze Gemeinde)");
+  else if (v[0] == '\0' && settings_text_default(static_cast<TextSetting>(which))[0] == '\0')
+    snprintf(sum, sizeof(sum), "nicht gesetzt");  // no compiled-in default (e.g. whatwatt host)
   else snprintf(sum, sizeof(sum), "%s%s", v[0] != '\0' ? v : "nicht gesetzt", own ? "" : " (Standard)");
   memset(v, 0, sizeof(v));
   lv_label_set_text(txt_cur, sum);

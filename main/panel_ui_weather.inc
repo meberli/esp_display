@@ -641,6 +641,10 @@ void lox_menu_refresh() {
 
 void open_lox_menu() {
   if (message_open) return;
+  if (loxone_home_opens_setup(settings_loxone().host[0] != '\0')) {
+    open_loxset(false);
+    return;
+  }
   nav = Nav::LoxMenu;
   page = -1;
   hide(cat_root);
