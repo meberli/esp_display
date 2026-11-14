@@ -74,7 +74,7 @@ Gut zu wissen:
 
 Tasten:
 
-- **Suchen**: sucht im lokalen Netz etwa 5 Sekunden lang nach Miniservern (unauthentifiziertes HTTP GET, ohne Benutzer und Passwort). Gefundene Geräte erscheinen als Vorschläge; du tippst eines an, um die Adresse zu übernehmen. Es wird nichts automatisch ausgewählt oder gespeichert.
+- **Suchen**: sucht im lokalen Netz etwa 8 Sekunden lang nach Miniservern, zuerst per mDNS, danach mit einem unauthentifizierten HTTP GET (ohne Benutzer und Passwort). Gefundene Geräte erscheinen als Vorschläge; du tippst eines an, um die Adresse zu übernehmen. Es wird nichts automatisch ausgewählt oder gespeichert.
 - **WLAN**: zuerst WLAN verbinden, falls noch nicht geschehen.
 - **Testen**: prüft die Verbindung, ohne zu speichern.
 - **Speichern**: übernimmt die Werte.
@@ -204,7 +204,7 @@ Eine Erinnerung erscheint als Karte auf der Startseite und auch auf dem Bildschi
 
 - **Co4:** Anmeldung mit dem Handy, siehe unten.
 - **whatwatt Go & PV:**
-  - **whatwatt-Adresse**: IP oder Name des whatwatt Go im lokalen Netz, ohne `http://`. Ein Web-Passwort am whatwatt wird nicht unterstützt. **Suchen** sucht im lokalen Netz etwa 5 Sekunden lang (unauthentifiziertes HTTP GET) und schlägt gefundene Geräte vor; du wählst selbst, nichts wird automatisch übernommen.
+  - **whatwatt-Adresse**: IP oder Name des whatwatt Go im lokalen Netz, ohne `http://`. Es gibt keine vorkompilierte Standard-Adresse (Geräte heissen typischerweise `whatwatt-XXXXXX.local`); die Taste „Standard verwenden“ erscheint hier deshalb nicht. Ein Web-Passwort am whatwatt wird nicht unterstützt. **Suchen** sucht im lokalen Netz etwa 8 Sekunden lang (zuerst mDNS, danach unauthentifiziertes HTTP GET auf `/api/v1/system`) und schlägt gefundene Geräte vor; du wählst selbst, nichts wird automatisch übernommen.
   - **Abfrage-Intervall**: Standard 10 s.
   - **Tarifmodell**: Einheitstarif oder Hoch-/Niedertarif mit HT-Zeiten (Mo–Fr) und optional einem Datum, ab dem automatisch auf HT/NT umgestellt wird.
   - **Einspeisevergütung**, **Einspeisung anzeigen**.

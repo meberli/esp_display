@@ -252,8 +252,8 @@ struct SettingsRequest {
     SetText,        // text_which + text ("" = default) -> NVS
     LoxTest,        // lox: test the Miniserver login (nothing stored)
     SetLoxone,      // lox (+ lox_keep_pass) -> NVS, then restart
-    DiscoverLoxone,    // unauthenticated GET scan of the LAN (~5 s), no credentials
-    DiscoverWhatwatt,  // unauthenticated GET /api/v1/report scan, no credentials
+    DiscoverLoxone,    // mDNS + unauthenticated GET scan of the LAN (~8 s), no credentials
+    DiscoverWhatwatt,  // mDNS + GET /api/v1/system (then /report), no credentials
   } kind;
   uint32_t scan_gen;  // Scan: generation (UI cancel / stale-result check)
   WifiCreds creds;

@@ -2,6 +2,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <ctype.h>
 
 #include "energy.h"
 
@@ -52,6 +53,43 @@ bool extract_field(const char* body, size_t len, const char* key, char* out, siz
   return false;
 }
 
+
+bool contains_ci(const char* hay, const char* needle) {
+  if (hay == nullptr || needle == nullptr || needle[0] == '\0') return false;
+  for (const char* p = hay; *p != '\0'; ++p) {
+    const char* a = p;
+    const char* b = needle;
+    while (*a != '\0' && *b != '\0' &&
+           tolower(static_cast<unsigned char>(*a)) == tolower(static_cast<unsigned char>(*b))) {
+      ++a;
+      ++b;
+    }
+    if (*b == '\0') return true;
+  }
+  return false;
+}
+
+bool starts_ci(const char* s, const char* pre) {
+  if (s == nullptr || pre == nullptr) return false;
+  while (*s && *pre &&
+         tolower(static_cast<unsigned char>(*s)) == tolower(static_cast<unsigned char>(*pre))) {
+    ++s;
+    ++pre;
+  }
+  return *pre == '\0';
+}
+
+void name_from_id_suffix(char* name, size_t name_n, const char* id) {
+  if (name == nullptr || name_n == 0) return;
+  if (id == nullptr || id[0] == '\0') {
+    snprintf(name, name_n, "whatwatt Go");
+    return;
+  }
+  size_t n = strlen(id);
+  const char* tail = n > 6 ? id + (n - 6) : id;
+  snprintf(name, name_n, "whatwatt Go %s", tail);
+}
+
 }  // namespace
 
 bool discover_is_loxone_api(const char* body, size_t len, char* name, size_t name_n) {
@@ -94,6 +132,67 @@ bool discover_is_whatwatt_report(const char* body, size_t len, char* name, size_
     else
       snprintf(name, name_n, "whatwatt Go");
   }
+  return true;
+}
+
+bool discover_is_whatwatt_system(const char* body, size_t len, char* name, size_t name_n) {
+  if (name != nullptr && name_n > 0) name[0] = '\0';
+  if (body == nullptr || len == 0 || looks_like_html(body, len)) return false;
+  // Official /api/v1/system: {"system":{"id":"...","boot_id":"...","time_since_boot":...}, ...}
+  if (strstr(body, "boot_id") == nullptr && strstr(body, "time_since_boot") == nullptr &&
+      strstr(body, "\"system\"") == nullptr)
+    return false;
+  if (strstr(body, "boot_id") == nullptr && strstr(body, "time_since_boot") == nullptr &&
+      !contains_ci(body, "whatwatt"))
+    return false;  // a bare "system" key is too common
+  if (name != nullptr && name_n > 0) {
+    char id[24] = "";
+    extract_field(body, len, "id", id, sizeof(id));
+    name_from_id_suffix(name, name_n, id);
+  }
+  return true;
+}
+
+bool discover_is_whatwatt(const char* body, size_t len, char* name, size_t name_n) {
+  if (discover_is_whatwatt_system(body, len, name, name_n)) return true;
+  if (discover_is_whatwatt_report(body, len, name, name_n)) return true;
+  // Loose report: a "report" object plus a "meter" object, even if the exact
+  // energy schema does not parse (truncated body, license-limited payload).
+  if (name != nullptr && name_n > 0) name[0] = '\0';
+  if (body == nullptr || len == 0 || looks_like_html(body, len)) return false;
+  if (strstr(body, "\"report\"") == nullptr || strstr(body, "\"meter\"") == nullptr) return false;
+  if (name != nullptr && name_n > 0) snprintf(name, name_n, "whatwatt Go");
+  return true;
+}
+
+bool discover_mdns_is_whatwatt(const char* hostname, const char* instance, const char* txt_type,
+                               const char* txt_id, char* name, size_t name_n) {
+  if (name != nullptr && name_n > 0) name[0] = '\0';
+  const bool by_host = starts_ci(hostname, "whatwatt");
+  const bool by_inst = contains_ci(instance, "whatwatt");
+  const bool by_type = txt_type != nullptr && strcmp(txt_type, "100") == 0;
+  if (!by_host && !by_inst && !by_type) return false;
+  if (name != nullptr && name_n > 0) {
+    if (txt_id != nullptr && txt_id[0] != '\0') name_from_id_suffix(name, name_n, txt_id);
+    else if (hostname != nullptr && starts_ci(hostname, "whatwatt-") && strlen(hostname) > 9) {
+      char tail[24];
+      snprintf(tail, sizeof(tail), "%s", hostname + 9);
+      if (char* dot = strchr(tail, '.')) *dot = '\0';
+      if (tail[0] != '\0') snprintf(name, name_n, "whatwatt Go %s", tail);
+      else snprintf(name, name_n, "whatwatt Go");
+    }
+    else
+      snprintf(name, name_n, "whatwatt Go");
+  }
+  return true;
+}
+
+bool discover_mdns_is_loxone(const char* hostname, const char* instance, char* name, size_t name_n) {
+  if (name != nullptr && name_n > 0) name[0] = '\0';
+  if (!contains_ci(hostname, "miniserver") && !contains_ci(hostname, "loxone") &&
+      !contains_ci(instance, "miniserver") && !contains_ci(instance, "loxone"))
+    return false;
+  if (name != nullptr && name_n > 0) snprintf(name, name_n, "Miniserver");
   return true;
 }
 

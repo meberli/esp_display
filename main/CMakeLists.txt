@@ -23,7 +23,7 @@ idf_component_register(
          "ui_theme.cpp" "font_mont_14.c" "font_mont_16.c" "font_mont_sb16.c" "font_mont_20.c" "font_mont_40.c"
          "font_mont_72.c" "font_mont_150.c" "img_co4_logo.c"
     INCLUDE_DIRS "." "../rp2040/libraries/RpScope/src"
-    REQUIRES esp_wifi esp_netif lwip esp_event nvs_flash esp_http_client esp-tls esp_lcd esp_driver_gpio
+    REQUIRES esp_wifi esp_netif lwip esp_event nvs_flash esp_http_client esp-tls esp_lcd esp_driver_gpio mdns
              esp_driver_i2c esp_driver_ledc esp_driver_uart esp_timer esp_psram spi_flash esp_mm mbedtls esp_http_server app_update esp_https_ota esp_app_format ArduinoJson)
 # The fonts and LVGL use designated initialisers in C++ headers.
 target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-missing-field-initializers -Wno-unused-variable

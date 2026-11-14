@@ -41,7 +41,7 @@ Wichtige Module in `main/`:
 | `net.cpp` | WLAN (Scan, Verbinden, Pause, 802.11k/v) |
 | `info_net.cpp`, `transit_parse.cpp`, `radar*.cpp`, `weather_derive.cpp` | Wetter, MeteoSchweiz, ÖV, Regenradar |
 | `loxone_client.cpp`, `loxone_structure.cpp`, `loxone_cache.cpp`, `loxone_auth.h` | Miniserver (HTTP, Basic Auth), `LoxAPP3.json`, Struktur-Cache in NVS |
-| `device_discover.cpp`, `device_discover_scan.cpp` | LAN-Suche (Suchen): unauthentifiziertes HTTP GET, ~5 s, Vorschläge ohne Autoselect |
+| `device_discover.cpp`, `device_discover_scan.cpp` | LAN-Suche (Suchen): mDNS, dann unauthentifiziertes HTTP GET (`/api/v1/system` bzw. `/jdev/cfg/api`), ~8 s, Vorschläge ohne Autoselect |
 | `webcams.cpp`, `ical.cpp`, `waste_api.cpp`, `waste_window.cpp` | Windy-Webcams, iCal, Abfallkalender |
 | `energy*.cpp`, `pv*.cpp` | whatwatt Go (Strom/Wasser), PV über Modbus-TCP-Gateway (nur lesen) |
 | `co4_*.cpp` | Co4 Energie: OIDC Device Flow, BFF-Abfragen, eigener Task |
@@ -269,7 +269,7 @@ Die Board-ID ist der CMake-Projektname in `esp_app_desc_t.project_name`. `ota_bo
 
 ### 7.1 `ci.yml` (jeder Push, jeder PR)
 
-- **host-tests:** Mojibake-Prüfung aller Textdateien (ausser Schriften), danach alle Host-Tests mit `g++ -std=c++17` (iCal, OTA-Version/-Board, UI-Text, Retry, Loxone-Cache, MeteoSchweiz-PLZ, Settings-Schema, Abfall, Energie, CO4EN, Co4, PV, Wetter, Schalter-Ziel, ÖV, Radar, Karte, Scope inkl. `rp_scope.c`).
+- **host-tests:** Mojibake-Prüfung aller Textdateien (ausser Schriften), danach alle Host-Tests mit `g++ -std=c++17` (iCal, OTA-Version/-Board, UI-Text, Retry, Loxone-Cache, MeteoSchweiz-PLZ, Settings-Schema, Abfall, Energie, CO4EN, Co4, PV, Wetter, Schalter-Ziel, ÖV, Radar, Karte, Scope inkl. `rp_scope.c`, LAN-Suche, Home-Kacheln).
 - **build:** im Container `espressif/idf:v6.1` mit **Wegwerf-Schlüssel**: Guition, SenseCAP D1 und Panlee, danach `check_secrets.py --generic` für alle drei Images.
 
 ### 7.2 `test-image.yml` (signiertes Test-Image)

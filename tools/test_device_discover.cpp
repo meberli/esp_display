@@ -108,9 +108,61 @@ static void test_nothing_found() {
   CHECK(n == 0 && hits[0].host[0] == '\0', "empty suggestion list");
 }
 
+static const char kWhatwattSystem[] =
+    R"JSON({"system":{"id":"aabbccddeeff","boot_id":"7f3a","time_since_boot":12345},"wifi":{"ssid":"x"}})JSON";
+static const char kWhatwattLooseReport[] =
+    R"JSON({"report":{"power":1},"meter":{"id":"1"}})JSON";
+static const char kRandomSystem[] = R"JSON({"system":"ok","version":"1.0"})JSON";
+
+static void test_whatwatt_system_and_loose() {
+  char name[48];
+  CHECK(discover_is_whatwatt_system(kWhatwattSystem, strlen(kWhatwattSystem), name, sizeof(name)),
+        "system json");
+  CHECK(strstr(name, "ddeeff") != nullptr, "id suffix in label");
+  CHECK(discover_is_whatwatt(kWhatwattSystem, strlen(kWhatwattSystem), name, sizeof(name)),
+        "unified accepts system");
+  CHECK(!discover_is_whatwatt_system(kRandomSystem, strlen(kRandomSystem), name, sizeof(name)),
+        "bare system key rejected");
+  CHECK(!discover_is_whatwatt_system("<html>system boot_id</html>", 26, name, sizeof(name)),
+        "html rejected");
+  CHECK(discover_is_whatwatt(kWhatwattLooseReport, strlen(kWhatwattLooseReport), name, sizeof(name)),
+        "loose report+meter");
+  FILE* f = fopen("tools/testdata/whatwatt_report.json", "rb");
+  CHECK(f != nullptr, "sample file for unified");
+  if (f != nullptr) {
+    static char buf[8192];
+    size_t n = fread(buf, 1, sizeof(buf), f);
+    fclose(f);
+    CHECK(discover_is_whatwatt(buf, n, name, sizeof(name)), "unified accepts sample report");
+  }
+}
+
+static void test_mdns_fingerprint() {
+  char name[48];
+  CHECK(discover_mdns_is_whatwatt("whatwatt-ABCDEF", "Whatwatt Go ABCDEF", "100", "001122ABCDEF", name,
+                                  sizeof(name)),
+        "official hostname+type");
+  CHECK(strstr(name, "ABCDEF") != nullptr, "id in mDNS label");
+  CHECK(discover_mdns_is_whatwatt("whatwatt-ABCDEF.local", nullptr, nullptr, nullptr, name, sizeof(name)),
+        "hostname only, .local stripped");
+  CHECK(strcmp(name, "whatwatt Go ABCDEF") == 0, "no .local in label");
+  CHECK(discover_mdns_is_whatwatt("box", "Whatwatt Go 99", nullptr, nullptr, name, sizeof(name)),
+        "instance name");
+  CHECK(discover_mdns_is_whatwatt("box", "printer", "100", "ff", name, sizeof(name)), "TXT type=100");
+  CHECK(!discover_mdns_is_whatwatt("printer", "HP Laser", nullptr, nullptr, name, sizeof(name)),
+        "unrelated http service rejected");
+  CHECK(discover_mdns_is_loxone("miniserver", nullptr, name, sizeof(name)), "miniserver host");
+  CHECK(strcmp(name, "Miniserver") == 0, "loxone label");
+  CHECK(discover_mdns_is_loxone("host", "Loxone Miniserver", name, sizeof(name)), "instance");
+  CHECK(!discover_mdns_is_loxone("printer", "HP", name, sizeof(name)), "unrelated rejected");
+  CHECK(!discover_mdns_is_loxone("whatwatt-ABCDEF", "Whatwatt Go", name, sizeof(name)),
+        "whatwatt is not loxone");
+}
 int main() {
   test_loxone_parse();
   test_whatwatt_parse();
+  test_whatwatt_system_and_loose();
+  test_mdns_fingerprint();
   test_format_and_hosts();
   test_nothing_found();
   if (fails) {

@@ -6,7 +6,7 @@
 
 #include <stdint.h>
 
-// Probe the local subnet for `kind` for up to budget_ms (default 5 s).
+// Probe the LAN for `kind` for up to budget_ms (default 8 s): mDNS first, then a /24 scan.
 // Writes up to cap hits (no auto-select; the caller just presents them).
 // Returns the number found (>= 0). -1 if there is no station address.
 // `gen` is reserved so the UI can ignore a stale result; the scan itself
