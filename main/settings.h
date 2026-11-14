@@ -227,6 +227,16 @@ bool settings_loxone_has_pass();
 bool settings_load_lox_skip();
 bool settings_save_lox_skip(bool skip);
 
+// Beta-Kanal (default off): also consider GitHub prereleases and auto-install.
+bool settings_load_ota_beta();
+bool settings_save_ota_beta(bool on);
+// Versions that failed a first boot (comma-separated, no leading 'v').
+void settings_load_ota_skip(char* out, size_t n);
+bool settings_ota_skip_add(const char* ver);
+// Version written just before rebooting into a new image; cleared when marked valid.
+void settings_load_ota_try(char* out, size_t n);
+bool settings_save_ota_try(const char* ver);  // "" erases
+
 // --- Backup / restore of the whole "panel" NVS namespace as JSON ---
 // Secret keys (Wi-Fi password, Windy key, iCal URL) only with secrets = true.
 // Returns the JSON length written to out (truncated output returns 0).

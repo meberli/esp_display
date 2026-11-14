@@ -28,6 +28,10 @@ int main() {
   // URLs
   CHECK(str("ota_url", "https://example.com/fw.bin"));
   CHECK(!str("ota_url", "http://example.com/fw.bin"));
+  CHECK(schema_find("ota_beta") != nullptr && num("ota_beta", 0) && num("ota_beta", 1) && !num("ota_beta", 2));
+  CHECK(schema_find("ota_skip") != nullptr && (schema_find("ota_skip")->flags & kKeyInternal));
+  CHECK(schema_find("ota_try") != nullptr && (schema_find("ota_try")->flags & kKeyInternal));
+  CHECK(str("ota_skip", "") && str("ota_try", "0.9.14-beta.1"));
   CHECK(str("waste_url", "http://example.com/x"));
   CHECK(!str("waste_url", "ftp://example.com/x"));
   CHECK(!str("waste_url", "https://a b"));

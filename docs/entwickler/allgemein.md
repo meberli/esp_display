@@ -104,7 +104,7 @@ Der `ui`-Task schläft bis zum nächsten fälligen LVGL-Timer, höchstens 10 ms,
    - Mit gespeichertem WLAN verbindet es im Hintergrund weiter. Ohne WLAN läuft die Station nur für die Netzsuche.
    - Ohne Miniserver-Konfiguration öffnet sich beim allerersten Start einmal das Miniserver-Formular (mit „Überspringen“, gespeichert als `lox_skip`).
    - Liegt eine Loxone-Struktur im NVS-Cache, werden die Kacheln sofort angezeigt (offline markiert).
-4. Sobald WLAN steht: SNTP, Laden der Netzinhalte, `maint_mark_valid()` (OTA-Bestätigung), Loxone-Struktur laden.
+4. Sobald die UI einige Sekunden läuft: `maint_mark_valid()` (OTA-Bestätigung). Sobald WLAN steht: SNTP, Laden der Netzinhalte, Loxone-Struktur laden. Ist der Beta-Kanal an, prüft das Panel dann und alle 10 min auf ein neueres Image (Net-Task, Core 0) und installiert es ohne Nachfrage.
 5. Fehlgeschlagene Strukturladungen (Netz/unerreichbar) wiederholt `lox_backoff_ms()` nach 30 s, 2 min, 5 min und dann alle 15 min. Bei HTTP 401/403 (Login abgelehnt) nur noch zweimal nach 30 s und 2 min, danach Stopp bis zum Neustart oder neuen Zugangsdaten (`retry_logic.h`).
 
 Zeitkonstanten WLAN (`main.cpp`): `kWifiTimeoutMs = 30000`, `kWifiSwitchMs = 20000` (Netzwechsel in den Einstellungen: danach zurück zum bisherigen Netz), je 3 Auth- bzw. „AP nicht gefunden“-Fehler. „Ohne Netzwerk starten“ pausiert WLAN nur für die laufende Sitzung (nicht in NVS).
@@ -249,10 +249,10 @@ Zusätzlich prüfen Release- und Test-Image-Workflow, dass `sdkconfig.defaults.l
 ### 6.2 Update-Wege
 
 1. **Online** (Einstellungen › System › Wartung & Update › „Firmware prüfen“):
-   - Ist die Update-URL eine GitHub-URL der Form `https://github.com/<owner>/<repo>/releases/...`, fragt `ota_check.cpp` `api.github.com/repos/<owner>/<repo>/releases/latest` ab und sucht das Asset `<projektname>.bin` des laufenden Boards (`ota_board_asset`). Fehlt es, meldet das Panel „Kein Update für dieses Board“ statt etwas zu installieren.
-   - Bei einer eigenen URL liest es per Range-Request die ersten 256 Bytes, prüft Magic, Board-ID und Version.
-   - Angeboten wird nur eine höhere Version (`ota_ver::offer_cmp`). Ein Test-Build `X-test.<sha>` gilt als älter als Release `X`, ein späteres Release wird also wieder angeboten.
-   - Installation mit `esp_https_ota` (Zertifikats-Bundle). `ota_url` muss laut Schema mit `https://` beginnen.
+   - Ist die Update-URL eine GitHub-URL der Form `https://github.com/<owner>/<repo>/releases/...`, fragt `ota_check.cpp` `api.github.com/repos/<owner>/<repo>/releases` ab und wählt das neueste passende Asset `<projektname>.bin` (`ota_board_asset`) nach Semver. Ohne Beta-Kanal (`ota_beta`, Standard aus) nur stabile Releases (nicht prerelease). Mit Beta-Kanal auch Prereleases (`v0.9.14-beta.1` ist älter als `v0.9.14`). Fehlt das Asset, meldet das Panel „Kein Update für dieses Board“ statt etwas zu installieren.
+   - Bei einer eigenen URL liest es per Range-Request die ersten 256 Bytes, prüft Magic, Board-ID und Version. Der Beta-Kanal auto-installiert nur über die Standard-GitHub-URL, nicht über eine eigene URL.
+   - Angeboten wird nur eine höhere Version (`ota_ver::offer_cmp`). Ein Test-Build `X-test.<sha>` gilt als älter als Release `X`, ein späteres Release wird also wieder angeboten. Eine Version, die nach einem Rollback als fehlgeschlagen gemerkt wurde (`ota_skip`), wird übersprungen.
+   - Installation mit `esp_https_ota` (Zertifikats-Bundle, vorhandene Signaturprüfung). `ota_url` muss laut Schema mit `https://` beginnen. Bei eingeschaltetem Beta-Kanal erfolgt die Installation automatisch (beim Start und alle 10 min, auch tagsüber), ohne Bestätigung, weiterhin auf Core 0.
 2. **Upload** über die Web-Wartung (`POST /update`, siehe Abschnitt 8).
 
 ### 6.3 Board-Prüfung
@@ -261,7 +261,9 @@ Die Board-ID ist der CMake-Projektname in `esp_app_desc_t.project_name`. `ota_bo
 
 ### 6.4 Rollback
 
-`BOOTLOADER_APP_ROLLBACK_ENABLE=y`. Ein neues Image startet als `PENDING_VERIFY` und markiert sich gültig, sobald WLAN steht (`maint_mark_valid`). Ohne WLAN innerhalb von 10 min (Test-Harness: 90 s) oder bei einem Absturz davor rollt der Bootloader auf das vorherige Image zurück.
+`BOOTLOADER_APP_ROLLBACK_ENABLE=y` steht bereits in `sdkconfig.defaults` (seit der Einführung der OTA-Slots, 794e1c8). Das Flag ändert den Bootloader; es wurde hier nicht neu gesetzt, weil ein Bootloader-Flash den fest eingebauten Panlee nicht erreichen würde (nur App-OTA). Geräte, die erstmals mit einem Build ab diesem Stand geflasht wurden, haben den Rollback-Bootloader bereits.
+
+Ein neues Image startet als `PENDING_VERIFY` und markiert sich gültig, sobald die UI einige Sekunden läuft (`maint_mark_valid`). Bei einem Absturz davor oder ohne Bestätigung innerhalb von 10 min (Test-Harness: 90 s) rollt der Bootloader auf das vorherige Image zurück. Die zuvor als `ota_try` gespeicherte Version wird dann nach `ota_skip` übernommen und nicht erneut installiert.
 
 ---
 
@@ -269,7 +271,7 @@ Die Board-ID ist der CMake-Projektname in `esp_app_desc_t.project_name`. `ota_bo
 
 ### 7.1 `ci.yml` (jeder Push, jeder PR)
 
-- **host-tests:** Mojibake-Prüfung aller Textdateien (ausser Schriften), danach alle Host-Tests mit `g++ -std=c++17` (iCal, OTA-Version/-Board, UI-Text, Retry, Loxone-Cache, MeteoSchweiz-PLZ, Settings-Schema, Abfall, Energie, CO4EN, Co4, PV, Wetter, Schalter-Ziel, ÖV, Radar, Karte, Scope inkl. `rp_scope.c`, LAN-Suche, Home-Kacheln).
+- **host-tests:** Mojibake-Prüfung aller Textdateien (ausser Schriften), danach alle Host-Tests mit `g++ -std=c++17` (iCal, OTA-Version/-Kanal/-Board, UI-Text, Retry, Loxone-Cache, MeteoSchweiz-PLZ, Settings-Schema, Abfall, Energie, CO4EN, Co4, PV, Wetter, Schalter-Ziel, ÖV, Radar, Karte, Scope inkl. `rp_scope.c`, LAN-Suche, Home-Kacheln).
 - **build:** im Container `espressif/idf:v6.1` mit **Wegwerf-Schlüssel**: Guition, SenseCAP D1 und Panlee, danach `check_secrets.py --generic` für alle drei Images.
 
 ### 7.2 `test-image.yml` (signiertes Test-Image)
@@ -287,9 +289,15 @@ Die Board-ID ist der CMake-Projektname in `esp_app_desc_t.project_name`. `ota_bo
 2. Tag setzen, am sichersten mit `tools/tag_release.ps1 <version>`: prüft, dass `HEAD` auf `origin/<branch>` gepusht ist, dass `version.txt` im getaggten Commit passt und der Tag noch nicht existiert. Dann taggt und pusht es.
 3. Der Workflow prüft, dass Tag und `version.txt` übereinstimmen, dass keine lokalen Geheimnisdateien vorhanden sind und dass `APP_SIGNING_KEY` gesetzt ist.
 4. Build Guition, SenseCAP D1 und Panlee, Signaturprüfung, `check_secrets.py --generic`, Prüfung der leeren Geheimnis-Optionen, Schlüssel löschen.
-5. GitHub-Release mit `loxone_panel.bin`, `loxone_panel_sensecap_d1.bin`, `loxone_panel_panlee.bin` und je einer `.sha256`, Release-Notes automatisch. Die erste sinnvolle Zeile der Notes zeigt das Panel als „Neu: …“ an.
+5. GitHub-Release mit `loxone_panel.bin`, `loxone_panel_sensecap_d1.bin`, `loxone_panel_panlee.bin` und je einer `.sha256`, Release-Notes automatisch. Die erste sinnvolle Zeile der Notes zeigt das Panel als „Neu: …“ an. Enthält der Tag einen Bindestrich (etwa `v0.9.14-beta.1`), setzt der Workflow `prerelease: true`.
 
-Releases entstehen nur über einen `v*`-Tag. Das Panel sucht im neuesten Release das Asset `<project_name>.bin` (`ota_board_asset()`), also `loxone_panel.bin`, `loxone_panel_sensecap_d1.bin` bzw. `loxone_panel_panlee.bin`. Releases vor diesem Stand enthalten kein Panlee-Asset.
+Releases entstehen nur über einen `v*`-Tag. Das Panel sucht das neueste passende Asset `<project_name>.bin` (`ota_board_asset()`), also `loxone_panel.bin`, `loxone_panel_sensecap_d1.bin` bzw. `loxone_panel_panlee.bin`. Releases vor dem Panlee-Support enthalten kein Panlee-Asset.
+
+#### Prerelease aus einem `v*-beta.*`-Tag
+
+1. `version.txt` auf z. B. `0.9.14-beta.1` setzen und committen (das wird `PROJECT_VER` und die Laufzeit-Version).
+2. Taggen mit `tools/tag_release.ps1 0.9.14-beta.1` (gleicher Check: Tag `v0.9.14-beta.1` muss zu `version.txt` passen, HEAD gepusht, Tag noch nicht auf origin).
+3. `release.yml` baut und signiert wie bei einem stabilen Release, veröffentlicht die drei Board-Images aber als GitHub-Prerelease. Auf dem Panel erscheinen sie nur, wenn **Beta-Kanal** eingeschaltet ist; Semver ordnet `0.9.14-beta.1` unter `0.9.14`.
 
 ---
 

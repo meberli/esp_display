@@ -247,9 +247,10 @@ Meldungen:
   - „Aktuell (vX)“: kein Update nötig.
   - „Update auf vY installieren“: antippen zum Installieren. Der Fortschritt wird angezeigt, danach startet das Panel neu.
   - „Kein Update für dieses Board“: Für dein Gerät gibt es noch kein passendes Update.
+- **Beta-Kanal** (Standard aus): Wenn du den Schalter einschaltest, berücksichtigt das Panel auch Vorabversionen (z. B. v0.9.14-beta.1) und installiert eine neuere, geprüfte Version selbstständig – beim Start und etwa alle zehn Minuten, auch tagsüber, ohne Nachfrage. Eine Vorabversion gilt als älter als die fertige Version mit derselben Nummer. Den Schalter kannst du jederzeit wieder ausschalten; dann zählt nur noch die normale, stabile Version.
 - Einstellungen bleiben bei einem Update erhalten.
 - Das Panel installiert nur geprüfte Firmware, die für genau dieses Gerät bestimmt ist. Andere Dateien werden abgelehnt.
-- Kann sich das Panel nach einem Update innerhalb von 10 Minuten nicht mit dem WLAN verbinden oder stürzt es ab, kehrt es beim nächsten Neustart automatisch zur vorherigen Version zurück.
+- Startet das Panel nach einem Update nicht sauber (Anzeige kommt nicht hoch, oder es stürzt kurz danach ab), kehrt es automatisch zur vorherigen Version zurück und versucht diese fehlgeschlagene Version nicht noch einmal.
 - **Update-URL** nur ändern, wenn du dazu aufgefordert wirst.
 
 ---

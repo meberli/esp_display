@@ -149,6 +149,7 @@ lv_obj_t* maint_root = nullptr;
 lv_obj_t* maint_val[8] = {};
 lv_obj_t* maint_web_lbl = nullptr;
 lv_obj_t* maint_web_sw = nullptr;
+lv_obj_t* maint_beta_sw = nullptr;
 lv_obj_t* web_confirm = nullptr;  // "Export mit Geheimnissen erlauben?" (main screen)
 void build_web_confirm();
 lv_obj_t* maint_ota_lbl = nullptr;
@@ -1332,6 +1333,10 @@ void maint_refresh() {
   lv_label_set_text(maint_val[6], b);
   if (s.web) lv_obj_add_state(maint_web_sw, LV_STATE_CHECKED);
   else lv_obj_clear_state(maint_web_sw, LV_STATE_CHECKED);
+  if (maint_beta_sw != nullptr) {
+    if (settings_load_ota_beta()) lv_obj_add_state(maint_beta_sw, LV_STATE_CHECKED);
+    else lv_obj_clear_state(maint_beta_sw, LV_STATE_CHECKED);
+  }
   if (s.web) lv_label_set_text_fmt(maint_web_lbl, "http://%s/  PIN %s", s.ip, maint_web_pin());
   else lv_label_set_text(maint_web_lbl, "Backup, Restore und Upload im Browser");
   int pct = maint_ota_progress();
@@ -1415,6 +1420,10 @@ void on_maint_btn(lv_event_t* e) {
       ota_t0 = now_ms();
       ota_msg[0] = '\0';
     }
+  } else if (which == 3) {
+    bool on = !settings_load_ota_beta();
+    settings_save_ota_beta(on);
+    if (on) ui_ota_auto_arm();  // check as soon as the ticker runs
   }
   maint_refresh();
 }
@@ -1720,8 +1729,26 @@ void build_info_screens(lv_obj_t* screen) {
   lv_obj_set_style_bg_color(maint_web_sw, lv_color_hex(kAccent),
                             static_cast<lv_style_selector_t>(LV_PART_INDICATOR) | LV_STATE_CHECKED);
   lv_obj_set_width(maint_web_lbl, 290);
+  lv_obj_t* beta = make_row(maint_root, 72, ICON_TUNE, kAmber, on_maint_btn, 3);
+  lv_obj_set_pos(beta, kMargin, 334);
+  reg("maint:beta", beta);
+  lv_obj_t* bn = make_label(beta, &font_inter_sb16, lv_color_hex(kText));
+  lv_label_set_text(bn, "Beta-Kanal");
+  lv_obj_align(bn, LV_ALIGN_TOP_LEFT, 56, 13);
+  lv_obj_t* bd = make_label(beta, &font_inter_14, lv_color_hex(kTextDim));
+  lv_label_set_text(bd, "Vorabversionen automatisch installieren");
+  lv_obj_set_width(bd, 290);
+  label_dot1(bd);
+  lv_obj_align(bd, LV_ALIGN_BOTTOM_LEFT, 56, -13);
+  maint_beta_sw = lv_switch_create(beta);
+  lv_obj_set_size(maint_beta_sw, 60, 32);
+  lv_obj_align(maint_beta_sw, LV_ALIGN_RIGHT_MID, -14, 0);
+  lv_obj_clear_flag(maint_beta_sw, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_style_bg_color(maint_beta_sw, lv_color_hex(kBorder), static_cast<lv_style_selector_t>(LV_PART_MAIN));
+  lv_obj_set_style_bg_color(maint_beta_sw, lv_color_hex(kAccent),
+                            static_cast<lv_style_selector_t>(LV_PART_INDICATOR) | LV_STATE_CHECKED);
   lv_obj_t* upd = make_row(maint_root, 72, ICON_UPDATE, kGreen, on_maint_btn, 2);
-  lv_obj_set_pos(upd, kMargin, 334);
+  lv_obj_set_pos(upd, kMargin, 414);
   reg("maint:ota", upd);
   maint_ota_title = make_label(upd, &font_inter_sb16, lv_color_hex(kText));
   lv_obj_set_width(maint_ota_title, 350);
@@ -1734,7 +1761,7 @@ void build_info_screens(lv_obj_t* screen) {
   lv_obj_align(maint_ota_lbl, LV_ALIGN_BOTTOM_LEFT, 56, -13);
   // Advanced: own update URL (checked the same way, by the image version).
   lv_obj_t* url = make_row(maint_root, 50, ICON_PUBLIC, kAccent, on_maint_btn, 1);
-  lv_obj_set_pos(url, kMargin, 414);
+  lv_obj_set_pos(url, kMargin, 494);
   reg("maint:url", url);
   lv_obj_t* uln = make_label(url, &font_inter_14, lv_color_hex(kText));
   lv_label_set_text(uln, "Update-URL");
@@ -1743,6 +1770,7 @@ void build_info_screens(lv_obj_t* screen) {
   lv_obj_set_width(maint_url_val, 250);
   label_dot1(maint_url_val);
   lv_obj_align(maint_url_val, LV_ALIGN_RIGHT_MID, -16, 0);
+  make_page_scrollable(maint_root);
   build_web_confirm();
 }
 

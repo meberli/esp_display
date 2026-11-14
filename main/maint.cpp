@@ -313,6 +313,13 @@ esp_err_t on_update(httpd_req_t* req) {
                                                               : esp_err_to_name(err));
     return httpd_resp_sendstr(req, msg);
   }
+  if (hdr_n >= 80) {
+    char tv[33];
+    memcpy(tv, hdr + 48, 32);
+    tv[32] = '\0';
+    const char* v = (tv[0] == 'v' || tv[0] == 'V') ? tv + 1 : tv;
+    if (v[0] != '\0') settings_save_ota_try(v);
+  }
   console_printf("Web: firmware installed in %s, restarting\n", part->label);
   httpd_resp_sendstr(req, "Firmware installiert. Neustart ...");
   schedule_restart();
@@ -358,22 +365,23 @@ constexpr uint32_t kVerifyMs = 90 * 1000;
 #else
 constexpr uint32_t kVerifyMs = 10 * 60 * 1000;
 #endif
-bool pending_verify() {
+}  // namespace
+
+bool maint_pending_verify() {
   const esp_partition_t* run = esp_ota_get_running_partition();
   esp_ota_img_states_t st;
   return run != nullptr && esp_ota_get_state_partition(run, &st) == ESP_OK && st == ESP_OTA_IMG_PENDING_VERIFY;
 }
-}  // namespace
 
 void maint_verify_tick() {
   static bool checked = false, pending = false;
   if (!checked) {
     checked = true;
-    pending = pending_verify();
-    if (pending) console_printf("OTA: new image, must reach Wi-Fi within %lu s\n", (unsigned long)(kVerifyMs / 1000));
+    pending = maint_pending_verify();
+    if (pending) console_printf("OTA: new image, must stay healthy for %lu s\n", (unsigned long)(kVerifyMs / 1000));
   }
   if (!pending) return;
-  if (!pending_verify()) {  // marked valid meanwhile
+  if (!maint_pending_verify()) {  // marked valid meanwhile
     pending = false;
     return;
   }
@@ -402,6 +410,7 @@ void maint_mark_valid() {
   esp_ota_img_states_t st;
   if (run != nullptr && esp_ota_get_state_partition(run, &st) == ESP_OK && st == ESP_OTA_IMG_PENDING_VERIFY) {
     esp_ota_mark_app_valid_cancel_rollback();
+    settings_save_ota_try("");
     console_puts("OTA: new image marked valid");
   }
 }
@@ -463,6 +472,9 @@ bool maint_ota_from_url(const char* url, char* err, size_t n) {
                                                             : esp_err_to_name(e));
     return false;
   }
+  const char* tv = desc.version[0] == 'v' || desc.version[0] == 'V' ? desc.version + 1 : desc.version;
+  settings_save_ota_try(tv);
+  console_printf("OTA: will boot v%s (rollback if it is not marked valid)\n", tv);
   return true;
 }
 

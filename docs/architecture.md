@@ -52,15 +52,18 @@
 
 ## OTA
 
-1. Prüfen: `ota_check` liest die Release-Info (GitHub, nur https) bzw. den
-   Image-Header einer eigenen URL.
+1. Prüfen: `ota_check` liest die GitHub-Release-Liste (nur https) bzw. den
+   Image-Header einer eigenen URL. Ohne Beta-Kanal nur stabile Releases; mit
+   Beta-Kanal auch Prereleases, gewählt nach Semver.
 2. Installieren: `esp_https_ota` (online) oder Upload über die Wartungs-Webseite.
+   Bei eingeschaltetem Beta-Kanal automatisch (Boot und alle 10 min, Core 0).
 3. Signatur: signierte Apps ohne Secure Boot (RSA-3072, PSS). Das laufende Image
    prüft neue Images mit dem öffentlichen Schlüssel aus seinem Signaturblock;
    unsignierte oder fremd signierte Images werden abgelehnt. Keine eFuses.
 4. Bestätigung: das neue Image startet als PENDING_VERIFY und markiert sich
-   gültig, sobald das WLAN steht (`maint_mark_valid`). Ohne WLAN nach 10 min
-   (oder bei Absturz vorher) Rollback auf das vorherige Image.
+   gültig, sobald die UI einige Sekunden läuft (`maint_mark_valid`). Bei Absturz
+   davor oder ohne Bestätigung nach 10 min Rollback auf das vorherige Image;
+   die fehlgeschlagene Version wird gemerkt und übersprungen.
 
 ## Build, Tests, CI
 

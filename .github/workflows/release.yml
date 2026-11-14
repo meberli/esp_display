@@ -1,4 +1,6 @@
 # Release build for OTA: on a tag "v*", build the app in a clean checkout
+# A tag such as v0.9.14-beta.1 (version.txt must be 0.9.14-beta.1) is published
+# as a GitHub prerelease; a tag without a hyphen (v0.9.14) is a stable release.
 # (no sdkconfig.defaults.local, no panel_config.h: no Wi-Fi, Loxone, Windy or
 # iCal secrets in the image) and attach loxone_panel.bin (Guition),
 # loxone_panel_sensecap_d1.bin (SenseCAP Indicator D1) and
@@ -98,3 +100,5 @@ jobs:
             loxone_panel_panlee.bin
             loxone_panel_panlee.bin.sha256
           generate_release_notes: true
+          # v0.9.14-beta.1 and other v*-* tags are GitHub prereleases; v0.9.14 stays a stable release.
+          prerelease: ${{ contains(github.ref_name, '-') }}

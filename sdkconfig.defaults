@@ -88,8 +88,8 @@ CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
 CONFIG_HTTPD_MAX_URI_LEN=512
 
 # --- OTA (two app slots, see partitions.csv) ---
-# A new image must reach Wi-Fi once (maint_mark_valid), else the bootloader
-# rolls back to the previous slot on the next reset.
+# A new image is marked valid after a healthy boot (UI up for a few seconds).
+# Otherwise the bootloader rolls back to the previous slot on the next reset.
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 # "Update-URL" may point to a PC on the LAN (http://...); GitHub uses HTTPS.
 

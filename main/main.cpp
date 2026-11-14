@@ -31,6 +31,8 @@
 #include "meteo_plz.h"
 #include "maint.h"
 #include "ota_check.h"
+#include "ota_ver.h"
+#include "esp_app_desc.h"
 #include "board_pins.h"
 #include "test_harness.h"
 #include <esp_log.h>
@@ -700,7 +702,9 @@ void net_task(void*) {
       case NetOp::Ota:
         if (req.ota_check) {
           res.index = 1;  // marks a check result
-          res.ok = ota_check(req.url, req.ota_own, &g_ota);
+          char skip[192] = "";
+          settings_load_ota_skip(skip, sizeof(skip));
+          res.ok = ota_check(req.url, req.ota_own, settings_load_ota_beta(), skip, &g_ota);
           break;
         }
         console_printf("OTA from %s\n", req.url);
@@ -886,6 +890,12 @@ void handle_result(const NetResult& res) {
 
 void poll() {
   maint_verify_tick();
+  // Mark a new image valid only after the UI has been up for a few seconds.
+  // A crash before that (or the 10 min / 90 s backstop) rolls back.
+  static uint32_t ui_up_ms = 0;
+  if (ui_up_ms == 0) ui_up_ms = now_ms();
+  if (now_ms() - ui_up_ms >= 8000) maint_mark_valid();
+  if (wifi_connected()) ui_ota_auto_tick(true);
   NetResult res;
   while (xQueueReceive(res_q, &res, 0) == pdTRUE) {
     handle_result(res);
@@ -939,7 +949,6 @@ void poll() {
       }
       if (wifi_connected()) {
         clock_sntp_kick();
-        maint_mark_valid();  // UI runs and Wi-Fi works: keep this image after an OTA update
         ui_set_wifi_name(wifi_ssid());
         if (!lox_on) {
           console_puts("Wi-Fi connected, no Miniserver configured: running without Loxone");
@@ -1027,7 +1036,6 @@ void poll() {
         wifi_up = true;
         console_puts("Wi-Fi up: SNTP, content loads");
         clock_sntp_kick();
-        maint_mark_valid();  // UI runs and Wi-Fi works: keep this image after an OTA update
         ui_set_wifi_name(wifi_ssid());
         ui_set_status(lox_on ? str::kStatusConnected : "");
         offline_session = false;
@@ -1226,6 +1234,16 @@ bool app_test_net_busy(uint32_t ms) {
 void app_start() {
   settings_migrate();
   settings_seed_from_build();
+  // If the previous image is running again, the version we tried to boot failed.
+  if (!maint_pending_verify()) {
+    char tryver[32] = "";
+    settings_load_ota_try(tryver, sizeof(tryver));
+    if (tryver[0] != '\0' && ota_ver::cmp(tryver, esp_app_get_description()->version) != 0) {
+      settings_ota_skip_add(tryver);
+      console_printf("OTA: v%s failed its first boot, skipping it from now on\n", tryver);
+    }
+    if (tryver[0] != '\0') settings_save_ota_try("");
+  }
   g_loc = settings_load_location();
   g_found = static_cast<CamInfo*>(heap_caps_calloc(kMaxFound, sizeof(CamInfo), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
   net_q = xQueueCreate(2, sizeof(NetRequest));

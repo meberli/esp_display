@@ -1,5 +1,6 @@
 #include "esp_attr.h"
 #include "settings.h"
+#include "ota_channel.h"
 #include "waste_window.h"
 
 #include <stdio.h>
@@ -1085,6 +1086,60 @@ bool settings_load_lox_skip() {
 bool settings_save_lox_skip(bool skip) {
   Tx tx;
   tx.u8("lox_skip", skip ? 1 : 0);
+  return tx.commit();
+}
+
+bool settings_load_ota_beta() {
+  uint8_t v = 0;
+  nvs_handle_t h;
+  if (nvs_open(kNs, NVS_READONLY, &h) == ESP_OK) {
+    nvs_get_u8(h, "ota_beta", &v);
+    nvs_close(h);
+  }
+  return v != 0;
+}
+
+bool settings_save_ota_beta(bool on) {
+  Tx tx;
+  tx.u8("ota_beta", on ? 1 : 0);
+  return tx.commit();
+}
+
+void settings_load_ota_skip(char* out, size_t n) {
+  if (n == 0) return;
+  out[0] = '\0';
+  nvs_handle_t h;
+  if (nvs_open(kNs, NVS_READONLY, &h) == ESP_OK) {
+    size_t len = n;
+    if (nvs_get_str(h, "ota_skip", out, &len) != ESP_OK) out[0] = '\0';
+    nvs_close(h);
+  }
+}
+
+bool settings_ota_skip_add(const char* ver) {
+  char list[192] = "";
+  settings_load_ota_skip(list, sizeof(list));
+  ota_channel::skip_add(list, sizeof(list), ver);
+  Tx tx;
+  tx.str("ota_skip", list);
+  return tx.commit();
+}
+
+void settings_load_ota_try(char* out, size_t n) {
+  if (n == 0) return;
+  out[0] = '\0';
+  nvs_handle_t h;
+  if (nvs_open(kNs, NVS_READONLY, &h) == ESP_OK) {
+    size_t len = n;
+    if (nvs_get_str(h, "ota_try", out, &len) != ESP_OK) out[0] = '\0';
+    nvs_close(h);
+  }
+}
+
+bool settings_save_ota_try(const char* ver) {
+  Tx tx;
+  if (ver == nullptr || ver[0] == '\0') tx.erase("ota_try");
+  else tx.str("ota_try", ver);
   return tx.commit();
 }
 

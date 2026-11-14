@@ -400,6 +400,29 @@ void ui_meteo_done(bool ok, const MeteoNow& m) {
   }
 }
 
+bool ota_auto = false;
+uint32_t ota_auto_next_ms = 0;
+
+void ui_ota_auto_arm() { ota_auto_next_ms = 0; }
+
+void ui_ota_auto_tick(bool wifi_up) {
+  if (!wifi_up || !settings_load_ota_beta()) return;
+  if (maint_pending_verify() || maint_restart_pending()) return;
+  if (ota_running || ota_check_req || ota_install_req || ota_state == OtaUi::Installing) return;
+  char url[256];
+  bool own = false;
+  if (!settings_load_text(kUrlOta, url, sizeof(url), &own) || url[0] == '\0' || own) return;
+  uint32_t now = now_ms();
+  if (ota_auto_next_ms != 0 && static_cast<int32_t>(now - ota_auto_next_ms) < 0) return;
+  ota_auto_next_ms = now + 10 * 60 * 1000UL;
+  ota_auto = true;
+  ota_check_req = true;
+  ota_state = OtaUi::Checking;
+  ota_t0 = now;
+  ota_msg[0] = '\0';
+  if (nav == Nav::Maint) maint_refresh();
+}
+
 bool ui_take_ota(char* url, size_t n, bool* check, bool* own) {
   if (ota_check_req) {
     ota_check_req = false;
@@ -437,6 +460,10 @@ void ui_ota_checked(const OtaCheck& c) {
     snprintf(ota_new_url, sizeof(ota_new_url), "%s", c.url);
     snprintf(ota_notes, sizeof(ota_notes), "%s", c.notes);
     ota_msg[0] = '\0';
+    if (ota_auto) {
+      ota_install_req = true;
+      ota_state = OtaUi::Installing;
+    }
   } else {
     ota_state = OtaUi::Current;
     ota_new_ver[0] = '\0';
@@ -445,6 +472,7 @@ void ui_ota_checked(const OtaCheck& c) {
     else if (c.cmp < 0) snprintf(ota_msg, sizeof(ota_msg), "Neueste Version online: v%s", c.version);
     else ota_msg[0] = '\0';
   }
+  ota_auto = false;
   if (nav == Nav::Maint) maint_refresh();
 }
 

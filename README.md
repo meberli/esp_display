@@ -253,7 +253,7 @@ Zusätzlicher Geheimnis-Check gegen das fertige Binary (gibt nur Namen und Läng
 python tools/check_secrets.py loxone_panel.bin   # erwartet: 0 secret value(s) found
 ```
 
-Mit der Standard-Update-URL (`https://github.com/meberli/esp_display/releases/latest/download/loxone_panel.bin`) fragt das Panel die GitHub-API nach dem neuesten Release und nimmt das Asset seines eigenen Boards (`<project_name>.bin`: `loxone_panel.bin`, `loxone_panel_sensecap_d1.bin` oder `loxone_panel_panlee.bin`). Eine eigene Update-URL (Wartung → Update-URL) wird direkt geladen. Alternativ nimmt das Panel ein Upload über die Web-Wartung an. Ein Image für ein anderes Board wird immer abgelehnt.
+Mit der Standard-Update-URL (`https://github.com/meberli/esp_display/releases/latest/download/loxone_panel.bin`) fragt das Panel die GitHub-API nach den Releases und nimmt das Asset seines eigenen Boards (`<project_name>.bin`: `loxone_panel.bin`, `loxone_panel_sensecap_d1.bin` oder `loxone_panel_panlee.bin`). Ohne Beta-Kanal (Einstellungen › Wartung, Standard aus) zählen nur stabile Releases; eingeschaltet werden auch Prereleases nach Semver berücksichtigt und automatisch installiert. Eine eigene Update-URL (Wartung → Update-URL) wird direkt geladen. Alternativ nimmt das Panel ein Upload über die Web-Wartung an. Ein Image für ein anderes Board wird immer abgelehnt.
 
 ### Test-Image (manuell)
 

@@ -2,6 +2,7 @@
 #include "ota_check.h"
 #include "ota_ver.h"
 #include "ota_board.h"
+#include "ota_channel.h"
 
 #include <ArduinoJson.h>
 #include <ctype.h>
@@ -49,7 +50,7 @@ void ascii_line(const char* body, char* out, size_t n) {
   }
 }
 
-// "https://github.com/<owner>/<repo>/releases/..." -> API URL of the latest release.
+// "https://github.com/<owner>/<repo>/releases/..." -> API URL of the release list.
 bool github_api(const char* url, char* api, size_t n) {
   const char* k = "https://github.com/";
   if (strncmp(url, k, strlen(k)) != 0) return false;
@@ -58,12 +59,12 @@ bool github_api(const char* url, char* api, size_t n) {
   if (s1 == nullptr) return false;
   const char* s2 = strchr(s1 + 1, '/');
   if (s2 == nullptr || strncmp(s2, "/releases/", 10) != 0) return false;
-  snprintf(api, n, "https://api.github.com/repos/%.*s/releases/latest", static_cast<int>(s2 - o), o);
+  snprintf(api, n, "https://api.github.com/repos/%.*s/releases?per_page=20", static_cast<int>(s2 - o), o);
   return true;
 }
 
-bool check_github(const char* api, OtaCheck* out) {
-  constexpr size_t kCap = 48 * 1024;
+bool check_github(const char* api, bool prereleases, const char* skip, OtaCheck* out) {
+  constexpr size_t kCap = 96 * 1024;
   uint8_t* body = static_cast<uint8_t*>(heap_caps_malloc(kCap, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
   if (body == nullptr) {
     snprintf(out->err, sizeof(out->err), "Kein Speicher");
@@ -91,37 +92,67 @@ bool check_github(const char* api, OtaCheck* out) {
     return false;
   }
   StaticJsonDocument<256> filter;
-  filter["tag_name"] = true;
-  filter["body"] = true;
-  filter["assets"][0]["name"] = true;
-  filter["assets"][0]["browser_download_url"] = true;
-  DynamicJsonDocument doc(16384);
+  filter[0]["tag_name"] = true;
+  filter[0]["prerelease"] = true;
+  filter[0]["draft"] = true;
+  filter[0]["assets"][0]["name"] = true;
+  filter[0]["assets"][0]["browser_download_url"] = true;
+  DynamicJsonDocument doc(24576);
   DeserializationError e = deserializeJson(doc, reinterpret_cast<const char*>(body), r.length,
                                            DeserializationOption::Filter(filter));
   heap_caps_free(body);
-  if (e) {
-    snprintf(out->err, sizeof(out->err), "Antwort unlesbar (%s)", e.c_str());
+  if (e || !doc.is<JsonArray>()) {
+    snprintf(out->err, sizeof(out->err), "Antwort unlesbar (%s)", e ? e.c_str() : "kein Array");
     return false;
   }
-  const char* tag = doc["tag_name"] | "";
-  if (tag[0] == '\0') {
-    snprintf(out->err, sizeof(out->err), "Release ohne Version");
-    return false;
-  }
-  snprintf(out->version, sizeof(out->version), "%s", (tag[0] == 'v' || tag[0] == 'V') ? tag + 1 : tag);
-  // Asset of this board: "<project_name>.bin" (loxone_panel.bin on the Guition).
   char asset[48];
   ota_board_asset(esp_app_get_description()->project_name, asset, sizeof(asset));
-  for (JsonObject a : doc["assets"].as<JsonArray>()) {
-    const char* name = a["name"] | "";
-    if (strcmp(name, asset) == 0) snprintf(out->url, sizeof(out->url), "%s", a["browser_download_url"] | "");
+  constexpr int kMax = 20;
+  ota_channel::Release rels[kMax];
+  char vers[kMax][32];
+  char urls[kMax][256];
+  int n = 0;
+  for (JsonObject a : doc.as<JsonArray>()) {
+    if (n >= kMax) break;
+    const char* tag = a["tag_name"] | "";
+    if (tag[0] == '\0') continue;
+    snprintf(vers[n], sizeof(vers[n]), "%s", (tag[0] == 'v' || tag[0] == 'V') ? tag + 1 : tag);
+    urls[n][0] = '\0';
+    for (JsonObject as : a["assets"].as<JsonArray>()) {
+      const char* name = as["name"] | "";
+      if (strcmp(name, asset) == 0) snprintf(urls[n], sizeof(urls[n]), "%s", as["browser_download_url"] | "");
+    }
+    rels[n] = {vers[n], a["prerelease"] | false, a["draft"] | false, urls[n]};
+    ++n;
   }
-  if (out->url[0] == '\0') {
-    // Newest release has no image for this board: a valid answer, not an
-    // installable update (UI: "Kein Update für dieses Board").
-    console_printf("OTA check: release v%s has no %s\n", out->version, asset);
+  int i = ota_channel::pick(rels, n, prereleases, ota_running_version(), skip);
+  if (i >= 0) {
+    snprintf(out->version, sizeof(out->version), "%s", rels[i].version);
+    snprintf(out->url, sizeof(out->url), "%s", rels[i].url);
+    return true;
   }
-  ascii_line(doc["body"] | "", out->notes, sizeof(out->notes));
+  // Nothing newer to install: still report the newest channel-matching release
+  // so the UI can say "up to date" or "no image for this board".
+  int shown = -1;
+  for (int k = 0; k < n; ++k) {
+    if (rels[k].draft) continue;
+    if (!prereleases && rels[k].prerelease) continue;
+    if (shown < 0 || ota_ver::cmp(rels[k].version, rels[shown].version) > 0) shown = k;
+  }
+  if (shown < 0) {
+    snprintf(out->err, sizeof(out->err), "Kein Release gefunden");
+    return false;
+  }
+  snprintf(out->version, sizeof(out->version), "%s", rels[shown].version);
+  if (ota_ver::offer_cmp(rels[shown].version, ota_running_version()) > 0) {
+    if (rels[shown].url[0] == '\0') {
+      console_printf("OTA check: release v%s has no %s\n", out->version, asset);
+    } else if (ota_channel::skip_has(skip, rels[shown].version)) {
+      // Failed this version already: do not offer it again.
+      console_printf("OTA check: skipping failed v%s\n", out->version);
+      snprintf(out->version, sizeof(out->version), "%s", ota_running_version());
+    }
+  }
   return true;
 }
 
@@ -204,15 +235,16 @@ void ota_set_version_override(const char* v) {
   snprintf(g_override, sizeof(g_override), "%s", v != nullptr ? v : "");
 }
 
-bool ota_check(const char* cfg_url, bool own, OtaCheck* out) {
+bool ota_check(const char* cfg_url, bool own, bool prereleases, const char* skip, OtaCheck* out) {
   memset(out, 0, sizeof(*out));
   TlsGuard tls("ota-check");
   if (!tls.ok) {
     snprintf(out->err, sizeof(out->err), "Netz belegt");
     return false;
   }
-  char api[160];
-  bool ok = (!own && github_api(cfg_url, api, sizeof(api))) ? check_github(api, out) : check_image(cfg_url, out);
+  char api[192];
+  bool ok = (!own && github_api(cfg_url, api, sizeof(api))) ? check_github(api, prereleases, skip, out)
+                                                           : check_image(cfg_url, out);
   out->ok = ok;
   if (ok) out->cmp = ota_ver::offer_cmp(out->version, ota_running_version());
   console_printf("OTA check: running %s, offered %s -> %s\n", ota_running_version(), ok ? out->version : "-",

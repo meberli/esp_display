@@ -159,6 +159,10 @@ void ui_meteo_done(bool ok, const MeteoNow& m);
 bool ui_take_ota(char* url, size_t n, bool* check, bool* own);  // check or install request
 void ui_ota_checked(const OtaCheck& c);
 void ui_ota_done(bool ok, const char* err);
+// Beta-Kanal: when on and Wi-Fi is up, check at boot and every 10 min (UI task
+// only sets flags; the download runs on the net task, core 0).
+void ui_ota_auto_tick(bool wifi_up);
+void ui_ota_auto_arm();  // run the next beta check immediately (toggle on)
 
 // Termin-Erinnerungen (test harness): synthetic event in `minutes` (kind 1 = all-day waste),
 // clear queue and acknowledged list, pending count.

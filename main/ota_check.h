@@ -14,12 +14,13 @@ struct OtaCheck {
 };
 
 // cfg_url: configured update URL; own: user-set (not the build default).
-// Default GitHub URL: GitHub API "releases/latest" (tag_name, notes, asset).
+// prereleases: when true (Beta-Kanal), GitHub prereleases are considered too.
+// skip: comma-separated versions to ignore (failed boots), may be empty/nullptr.
+// Default GitHub URL: GitHub API /releases list, picked by semver and channel.
 // Other URLs: the version is read from the image header (HTTP Range request).
-bool ota_check(const char* cfg_url, bool own, OtaCheck* out);
+bool ota_check(const char* cfg_url, bool own, bool prereleases, const char* skip, OtaCheck* out);
 
-// Semantic version compare of "X.Y.Z" (leading "v" and "-suffix" ignored for
-// the numbers; a suffix ranks below the plain release). <0, 0, >0.
+// Semantic version compare (semver: pre-release < final of the same version). <0, 0, >0.
 int ota_ver_cmp(const char* a, const char* b);
 
 // Running version (esp_app_desc), or a diagnostic override for tests.
