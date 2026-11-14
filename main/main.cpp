@@ -348,6 +348,8 @@ size_t controls_n = 0;
 // there are none) and the structure load keeps failing. Commands are refused.
 bool lox_online = false;
 int lox_fails = 0;
+int lox_auth_fails = 0;     // consecutive HTTP 401/403 from the Miniserver
+bool lox_auth_blocked = false;  // stopped after kLoxAuthFailCap rejected logins
 uint32_t lox_next_ms = 0;  // next background structure load while offline
 
 void net_post(const NetRequest& r) {
@@ -358,6 +360,31 @@ void net_post(const NetRequest& r) {
 void lox_post(const NetRequest& r) {
   lox_busy = true;
   xQueueSend(lox_q, &r, portMAX_DELAY);
+}
+
+void lox_clear_auth_failure() {
+  lox_auth_fails = 0;
+  lox_auth_blocked = false;
+}
+
+// Count a rejected login. After kLoxAuthFailCap, stop automatic retries so a
+// Miniserver IP lockout can expire. The user can re-enter credentials or reboot.
+void lox_note_auth_failure(const char* where) {
+  ++lox_auth_fails;
+  lox_online = false;
+  if (lox_auth_give_up(lox_auth_fails)) {
+    lox_auth_blocked = true;
+    ui_set_status(str::kStatusLoxAuthFailed);
+    console_printf(
+        "Loxone login rejected (%d) during %s: stopping automatic retries until "
+        "credentials are changed or the panel reboots\n",
+        lox_auth_fails, where != nullptr ? where : "request");
+  } else {
+    uint32_t wait = lox_auth_backoff_ms(lox_auth_fails);
+    lox_next_ms = now_ms() + wait;
+    console_printf("Loxone login rejected (%d) during %s; retry in %u s\n", lox_auth_fails,
+                   where != nullptr ? where : "request", static_cast<unsigned>(wait / 1000));
+  }
 }
 
 void net_load(NetResult* res) {
@@ -371,7 +398,9 @@ void net_load(NetResult* res) {
   LoxoneHttpResult http = loxone_get(*auth, "/data/LoxAPP3.json", buf, kStructureCap - 1, &length);
   if (!http.ok) {
     heap_caps_free(buf);
-    snprintf(res->title, sizeof(res->title), "%s", str::kUnreachableTitle);
+    res->status = http.status;
+    snprintf(res->title, sizeof(res->title), "%s",
+             lox_is_auth_status(http.status) ? str::kStatusLoxAuthFailed : str::kUnreachableTitle);
     snprintf(res->detail, sizeof(res->detail), "%s", http.detail);
     return;
   }
@@ -547,6 +576,7 @@ void lox_task(void*) {
       case NetOp::Command: {
         LoxoneHttpResult r = loxone_send_command(*auth, req.command.action, req.command.command);
         res.ok = r.ok;
+        res.status = r.status;
         res.index = req.command.index;
         snprintf(res.command, sizeof(res.command), "%s", req.command.command);
         snprintf(res.detail, sizeof(res.detail), "%s", r.detail);
@@ -557,6 +587,7 @@ void lox_task(void*) {
         LoxoneHttpResult r = loxone_read_state(*auth, req.state.action, req.state.state, req.state.kind,
                                                res.value, sizeof(res.value));
         res.ok = r.ok;
+        res.status = r.status;
         res.index = req.state.index;
         console_printf("State %d -> %s (%s)\n", req.state.index, r.ok ? res.value : "-", r.ok ? "ok" : r.detail);
         break;
@@ -700,9 +731,13 @@ void handle_result(const NetResult& res) {
       lox_busy = false;
       if (!res.ok) {
         ++lox_fails;
-        lox_next_ms = now_ms() + lox_backoff_ms(lox_fails);
-        console_printf("Loxone structure load failed (%d): %s; retry in %u s\n", lox_fails, res.title,
-                       static_cast<unsigned>(lox_backoff_ms(lox_fails) / 1000));
+        if (lox_is_auth_status(res.status)) {
+          lox_note_auth_failure("structure load");
+        } else {
+          lox_next_ms = now_ms() + lox_backoff_ms(lox_fails);
+          console_printf("Loxone structure load failed (%d): %s; retry in %u s\n", lox_fails, res.title,
+                         static_cast<unsigned>(lox_backoff_ms(lox_fails) / 1000));
+        }
         if (phase != Phase::Ready) {
           // No cache: show the panel anyway (weather, settings ...) without controls.
           phase = Phase::Ready;
@@ -710,8 +745,12 @@ void handle_result(const NetResult& res) {
           ui_show_controls(controls, 0, 0, "Loxone");
         }
         if (controls_n == 0) ui_set_lox_state(2);  // no-op when already "unreachable"
-        if (!lox_fail_shown) ui_set_status(controls_n > 0 ? str::kStatusLoxCached : str::kStatusLoxOffline);
-        lox_fail_shown = true;  // retries stay silent (no flicker)
+        if (lox_auth_blocked) {
+          ui_set_status(str::kStatusLoxAuthFailed);
+        } else if (!lox_fail_shown) {
+          ui_set_status(controls_n > 0 ? str::kStatusLoxCached : str::kStatusLoxOffline);
+        }
+        lox_fail_shown = true;  // network retries stay silent (no flicker)
         break;
       }
       {
@@ -722,6 +761,7 @@ void handle_result(const NetResult& res) {
         controls_n = res.shown;
         lox_online = true;
         lox_fails = 0;
+        lox_clear_auth_failure();
         lox_fail_shown = false;
         lox_loaded = true;
         ui_set_lox_state(0);
@@ -737,10 +777,12 @@ void handle_result(const NetResult& res) {
       break;
     case NetOp::Command:
       lox_busy = false;
+      if (!res.ok && lox_is_auth_status(res.status)) lox_note_auth_failure("command");
       ui_command_finished(res.index, res.ok, res.command, res.detail);
       break;
     case NetOp::State:
       lox_busy = false;
+      if (!res.ok && lox_is_auth_status(res.status)) lox_note_auth_failure("state");
       ui_state_finished(res.index, res.ok, res.ok ? res.value : nullptr);
       break;
     case NetOp::Settings:
@@ -830,14 +872,17 @@ void poll() {
     handle_result(res);
   }
   // Loxone path first and independent of the net task.
-  if (phase == Phase::Ready && lox_on && !lox_online) {
-    // Offline (cached or no controls): refuse commands at once, no state reads;
-    // retry the structure in the background with backoff.
+  if (phase == Phase::Ready && lox_on && (lox_auth_blocked || !lox_online)) {
+    // Offline or login rejected: refuse commands at once, no state reads.
+    // Network failures retry the structure with backoff; a rejected login
+    // stops after kLoxAuthFailCap so a Miniserver lockout can expire.
     NetRequest r = {};
     if (ui_take_command(&r.command)) {
-      ui_command_finished(r.command.index, false, r.command.command, str::kLoxOfflineCmd);
+      ui_command_finished(r.command.index, false, r.command.command,
+                          lox_auth_blocked ? str::kStatusLoxAuthFailed : str::kLoxOfflineCmd);
     }
-    if (!lox_busy && wifi_connected() && static_cast<int32_t>(now_ms() - lox_next_ms) >= 0) {
+    if (!lox_auth_blocked && !lox_busy && wifi_connected() &&
+        static_cast<int32_t>(now_ms() - lox_next_ms) >= 0) {
       r.op = NetOp::Load;
       lox_post(r);
     }
@@ -908,10 +953,19 @@ void poll() {
       if (!load_painted) {
         load_painted = true;
         lox_online = false;
-        lox_fails = 0;
-        lox_next_ms = now_ms();
+        if (!lox_auth_blocked) {
+          lox_fails = 0;
+          lox_next_ms = now_ms();
+        }
         char server[48] = "";
         size_t n = lox_cache_load(controls, kLoxoneControlCap, server, sizeof(server));
+        if (lox_auth_blocked) {
+          controls_n = n;
+          phase = Phase::Ready;
+          ui_show_controls(controls, n, n, n > 0 && server[0] != '\0' ? server : "Loxone");
+          ui_set_status(str::kStatusLoxAuthFailed);
+          break;
+        }
         if (n > 0) {
           // Show the last good controls at once (marked offline) and load the
           // current structure in the background.
@@ -924,6 +978,10 @@ void poll() {
         }
         controls_n = 0;
         ui_show_message(str::kLoadingTitle, str::kLoadingBody, false);
+        break;
+      }
+      if (lox_auth_blocked) {
+        phase = Phase::Ready;
         break;
       }
       if (lox_busy) break;  // the structure load and Loxone requests share the client
@@ -954,7 +1012,11 @@ void poll() {
         ui_set_wifi_name(wifi_ssid());
         ui_set_status(lox_on ? str::kStatusConnected : "");
         offline_session = false;
-        lox_next_ms = now_ms();  // Loxone structure load now (poll() Loxone path)
+        // Do not pull a pending backoff (or an auth stop) forward just because
+        // Wi-Fi flapped: that used to hammer the Miniserver with logins.
+        if (lox_on && !lox_auth_blocked && lox_fails == 0 && !lox_online) {
+          lox_next_ms = now_ms();
+        }
       }
       if (ui_take_settings(&r.settings)) {
         r.op = NetOp::Settings;

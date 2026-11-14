@@ -104,7 +104,7 @@ Der `ui`-Task schläft bis zum nächsten fälligen LVGL-Timer, höchstens 10 ms,
    - Ohne Miniserver-Konfiguration öffnet sich beim allerersten Start einmal das Miniserver-Formular (mit „Überspringen“, gespeichert als `lox_skip`).
    - Liegt eine Loxone-Struktur im NVS-Cache, werden die Kacheln sofort angezeigt (offline markiert).
 4. Sobald WLAN steht: SNTP, Laden der Netzinhalte, `maint_mark_valid()` (OTA-Bestätigung), Loxone-Struktur laden.
-5. Fehlgeschlagene Strukturladungen wiederholt `lox_backoff_ms()` nach 10 s, 30 s, 2 min und dann alle 5 min (`retry_logic.h`).
+5. Fehlgeschlagene Strukturladungen (Netz/unerreichbar) wiederholt `lox_backoff_ms()` nach 30 s, 2 min, 5 min und dann alle 15 min. Bei HTTP 401/403 (Login abgelehnt) nur noch zweimal nach 30 s und 2 min, danach Stopp bis zum Neustart oder neuen Zugangsdaten (`retry_logic.h`).
 
 Zeitkonstanten WLAN (`main.cpp`): `kWifiTimeoutMs = 30000`, `kWifiSwitchMs = 20000` (Netzwechsel in den Einstellungen: danach zurück zum bisherigen Netz), je 3 Auth- bzw. „AP nicht gefunden“-Fehler. „Ohne Netzwerk starten“ pausiert WLAN nur für die laufende Sitzung (nicht in NVS).
 

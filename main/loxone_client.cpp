@@ -101,7 +101,7 @@ LoxoneHttpResult loxone_get(LoxoneAuthorizer& auth, const char* path, uint8_t* b
     snprintf(result.detail, sizeof(result.detail), "No HTTP response (%s)", r.error);
     return result;
   }
-  if (code == 401) {
+  if (code == 401 || code == 403) {
     set_detail(&result, str::kLoxLoginRejected);
     return result;
   }
@@ -329,6 +329,9 @@ LoxoneHttpResult loxone_read_state(LoxoneAuthorizer& auth, const char* action, c
       LoxoneHttpResult all = {};
       if (!fetch_ll_value(auth, action, query, doc, &raw, &all)) {
         result = all;
+        // A rejected login must not be retried as /All or /state: each call
+        // is another failed attempt and extends a Miniserver lockout.
+        if (result.status == 401 || result.status == 403) return result;
         continue;
       }
       if (kind == kLoxoneShutter && copy_all_value(raw, kind, true, value, value_n)) {
@@ -356,6 +359,7 @@ LoxoneHttpResult loxone_read_state(LoxoneAuthorizer& auth, const char* action, c
       return direct;
     }
     result = direct;
+    if (result.status == 401 || result.status == 403) return result;
   }
 
   if (fallback[0] != '\0') {

@@ -32,6 +32,8 @@ constexpr const char* kStatusRelayOff = "Relais aus";
 constexpr const char* kStatusLoxCached = "Loxone offline – gespeicherte Steuerung";
 constexpr const char* kStatusLoxOffline = "Loxone nicht erreichbar – neuer Versuch läuft";
 constexpr const char* kStatusLoxOnline = "Loxone verbunden";
+constexpr const char* kStatusLoxAuthFailed =
+    "Loxone-Anmeldung fehlgeschlagen";
 constexpr const char* kLoxOfflineCmd = "Loxone offline";
 constexpr const char* kWifiCancel = "Abbrechen";
 constexpr const char* kWifiRetry = "Nochmals versuchen";

@@ -8,11 +8,21 @@ static int fails = 0;
 
 int main() {
   CHECK(lox_backoff_ms(0) == 0);
-  CHECK(lox_backoff_ms(1) == 10000);
-  CHECK(lox_backoff_ms(2) == 30000);
-  CHECK(lox_backoff_ms(3) == 120000);
-  CHECK(lox_backoff_ms(4) == 300000);
-  CHECK(lox_backoff_ms(1000) == 300000);
+  CHECK(lox_backoff_ms(1) == 30000);
+  CHECK(lox_backoff_ms(2) == 120000);
+  CHECK(lox_backoff_ms(3) == 300000);
+  CHECK(lox_backoff_ms(4) == 900000);
+  CHECK(lox_backoff_ms(1000) == 900000);
+
+  CHECK(!lox_is_auth_status(0));
+  CHECK(!lox_is_auth_status(200));
+  CHECK(lox_is_auth_status(401));
+  CHECK(lox_is_auth_status(403));
+  CHECK(!lox_auth_give_up(0) && !lox_auth_give_up(2) && lox_auth_give_up(3));
+  CHECK(lox_auth_backoff_ms(0) == 0);
+  CHECK(lox_auth_backoff_ms(1) == 30000);
+  CHECK(lox_auth_backoff_ms(2) == 120000);
+  CHECK(lox_auth_backoff_ms(3) == 0);
 
   ScanGen g;
   uint32_t a = g.start();
