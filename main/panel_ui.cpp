@@ -99,6 +99,10 @@ constexpr int kLocalRelay = -2;
 #define kAccent (g_theme->accent)
 #define kAmber (g_theme->amber)
 #define kGreen (g_theme->green)
+// Official Loxone lime, measured from Michael's mark tile (14 Nov 2026).
+// Used only for the Loxone home-button glyph; not a theme accent (kGreen is
+// #7EE0A1 in Dark Glass and #69BA93 in Co4).
+constexpr uint32_t kLoxMark = 0x8CFF70;
 #define kBlue (g_theme->blue)
 #define kYellow (g_theme->yellow)
 #define kOrange (g_theme->orange)
@@ -443,26 +447,46 @@ lv_obj_t* lox_count[3] = {};
 lv_obj_t* sw_btn = nullptr;
 lv_obj_t* sw_icon = nullptr;
 
-// Stylised Loxone mark, drawn from plain rectangles (no external asset): a
-// square frame open at the top right with a small block inside. 36 x 36 px,
-// one colour like the font icons.
-void make_lox_glyph(lv_obj_t* parent, uint32_t color) {
+// Official Loxone bracket mark: four thick L-corners with rounded outer bends
+// and gaps at the mid-sides. Drawn as four 90° arcs (no bitmap). 36 x 36 px,
+// monochrome like the font icons, always Loxone lime (the home tile stays the
+// glass card). Geometry is the official mark scaled from the 225 px tile
+// (centres 96.5, Rout 65, stroke 17.5) and snapped to the 36 px grid.
+void make_lox_glyph(lv_obj_t* parent) {
   lv_obj_t* g = lv_obj_create(parent);
   lv_obj_remove_style_all(g);
   lv_obj_set_size(g, 36, 36);
   lv_obj_clear_flag(g, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_clear_flag(g, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_center(g);
-  static const int16_t kR[5][4] = {{0, 0, 5, 36}, {0, 31, 36, 5}, {0, 0, 22, 5}, {31, 14, 5, 22}, {13, 13, 10, 10}};
-  for (const auto& r : kR) {
-    lv_obj_t* b = lv_obj_create(g);
-    lv_obj_remove_style_all(b);
-    lv_obj_set_pos(b, r[0], r[1]);
-    lv_obj_set_size(b, r[2], r[3]);
-    lv_obj_set_style_bg_color(b, lv_color_hex(color), 0);
-    lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(b, 1, 0);
-    lv_obj_clear_flag(b, LV_OBJ_FLAG_CLICKABLE);
+  static const int16_t kCx[4] = {15, 20, 15, 20};
+  static const int16_t kCy[4] = {15, 15, 20, 20};
+  // LVGL: 0° = 3 o'clock, clockwise. TL W→N, TR N→E, BR E→S, BL S→W.
+  static const uint16_t kStart[4] = {180, 270, 0, 90};
+  static const uint16_t kEnd[4] = {270, 360, 90, 180};
+  constexpr int kRout = 10;
+  constexpr int kStroke = 3;
+  const lv_color_t col = lv_color_hex(kLoxMark);
+  for (int i = 0; i < 4; ++i) {
+    lv_obj_t* a = lv_arc_create(g);
+    lv_obj_remove_style_all(a);
+    lv_obj_set_size(a, 2 * kRout, 2 * kRout);
+    lv_obj_set_pos(a, kCx[i] - kRout, kCy[i] - kRout);
+    lv_obj_clear_flag(a, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(a, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_pad_all(a, 0, 0);
+    lv_obj_set_style_bg_opa(a, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(a, 0, 0);
+    lv_obj_set_style_arc_width(a, kStroke, LV_PART_MAIN);
+    lv_obj_set_style_arc_color(a, col, LV_PART_MAIN);
+    lv_obj_set_style_arc_opa(a, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_arc_rounded(a, false, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(a, 0, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_opa(a, LV_OPA_TRANSP, LV_PART_INDICATOR);
+    lv_obj_set_style_opa(a, LV_OPA_TRANSP, LV_PART_KNOB);
+    lv_arc_set_rotation(a, 0);
+    lv_arc_set_bg_angles(a, kStart[i], kEnd[i]);
+    lv_arc_set_angles(a, 0, 0);
   }
 }
 lv_obj_t* empty_hint = nullptr;
@@ -897,7 +921,7 @@ static void ui_init_impl() {
   };
   const bool scope_btn = rp_link_supported();
   const HomeButton kButtons[5] = {
-      {nullptr, "cat:loxone", kSectionAccent[0], 6},
+      {nullptr, "cat:loxone", kLoxMark, 6},  // press tint; glyph itself is always kLoxMark
       {ICON_TOGGLE, "cat:schalter", kSectionAccent[3], 7},
       {ICON_VIDEOCAM, "cat:kameras", kTeal, 5},
       scope_btn ? HomeButton{ICON_SCOPE, "cat:scope", kAccent, 8} : HomeButton{ICON_SETTINGS, "cat:settings", kPurple, 4},
@@ -915,11 +939,11 @@ static void ui_init_impl() {
     watch(btn);
     reg(b.name, btn);
     card_btn[i] = btn;
-    uint32_t ic = b.color;
-    if (g_theme->icon_mono) ic = i == 0 ? g_theme->icon_active : g_theme->icon;
     if (b.icon == nullptr) {
-      make_lox_glyph(btn, ic);
+      make_lox_glyph(btn);  // always Loxone lime, including in icon_mono themes
     } else {
+      uint32_t ic = b.color;
+      if (g_theme->icon_mono) ic = g_theme->icon;
       lv_obj_t* icon = make_label(btn, &font_icons_38, lv_color_hex(ic));
       lv_label_set_text(icon, b.icon);
       lv_obj_center(icon);
