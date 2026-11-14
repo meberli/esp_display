@@ -3,6 +3,7 @@
 #include "ota_ver.h"
 #include "ota_board.h"
 #include "ota_channel.h"
+#include "ota_github.h"
 
 #include <ArduinoJson.h>
 #include <ctype.h>
@@ -50,43 +51,42 @@ void ascii_line(const char* body, char* out, size_t n) {
   }
 }
 
-// "https://github.com/<owner>/<repo>/releases/..." -> API URL of the release list.
-bool github_api(const char* url, char* api, size_t n) {
-  const char* k = "https://github.com/";
-  if (strncmp(url, k, strlen(k)) != 0) return false;
-  const char* o = url + strlen(k);
-  const char* s1 = strchr(o, '/');
-  if (s1 == nullptr) return false;
-  const char* s2 = strchr(s1 + 1, '/');
-  if (s2 == nullptr || strncmp(s2, "/releases/", 10) != 0) return false;
-  snprintf(api, n, "https://api.github.com/repos/%.*s/releases?per_page=20", static_cast<int>(s2 - o), o);
-  return true;
-}
-
-bool check_github(const char* api, bool prereleases, const char* skip, OtaCheck* out) {
-  constexpr size_t kCap = 96 * 1024;
+bool check_github(const char* page_url, bool prereleases, const char* skip, OtaCheck* out) {
+  // 20 releases with current notes are ~173 KB; the old 96 KiB cap made
+  // http_get return HTTP 200 / ok=false and the UI showed "GitHub-Fehler HTTP 200".
+  constexpr size_t kCap = 256 * 1024;
   uint8_t* body = static_cast<uint8_t*>(heap_caps_malloc(kCap, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
   if (body == nullptr) {
     snprintf(out->err, sizeof(out->err), "Kein Speicher");
     return false;
   }
-  HttpGetResult r = http_get(api, nullptr, nullptr, body, kCap, 10000, "Accept", "application/vnd.github+json");
-  if (r.status == 0 && strstr(r.error, "CONNECT") != nullptr) {  // e.g. ESP_ERR_HTTP_CONNECT: one retry
-    console_printf("OTA check: %s, retry in 3 s\n", r.error);
-    vTaskDelay(pdMS_TO_TICKS(3000));
+  char api[192];
+  int pages = ota_github::kListPerPage;
+  HttpGetResult r = {};
+  for (int attempt = 0; attempt < 2; ++attempt) {
+    if (!ota_github::list_api(page_url, api, sizeof(api), pages)) {
+      snprintf(out->err, sizeof(out->err), "Update-URL unbrauchbar");
+      heap_caps_free(body);
+      return false;
+    }
     r = http_get(api, nullptr, nullptr, body, kCap, 10000, "Accept", "application/vnd.github+json");
+    if (r.status == 0 && strstr(r.error, "CONNECT") != nullptr) {  // e.g. ESP_ERR_HTTP_CONNECT: one retry
+      console_printf("OTA check: %s, retry in 3 s\n", r.error);
+      vTaskDelay(pdMS_TO_TICKS(3000));
+      r = http_get(api, nullptr, nullptr, body, kCap, 10000, "Accept", "application/vnd.github+json");
+    }
+    if (r.ok && r.status == 200) break;
+    if (attempt == 0 && ota_github::body_too_big(r.error) && pages > 3) {
+      console_printf("OTA check: list is %s, retry with per_page=3\n", r.error);
+      pages = 3;
+      continue;
+    }
+    break;
   }
-  if (r.status == 403 || r.status == 429) {
-    snprintf(out->err, sizeof(out->err), "GitHub-Limit erreicht, sp\xC3\xA4ter erneut pr\xC3\xBC" "fen");
-  } else if (r.status == 404) {
-    snprintf(out->err, sizeof(out->err), "Kein Release gefunden");
-  } else if (r.status == 0) {
-    snprintf(out->err, sizeof(out->err), "Keine Verbindung zu GitHub (%s)", r.error);
-  } else if (!r.ok || r.status != 200) {
-    snprintf(out->err, sizeof(out->err), "GitHub-Fehler HTTP %d", r.status);
-  }
+  ota_github::list_http_err(r.status, r.ok, r.error, out->err, sizeof(out->err));
   diag_svc(kSvcOta, r.ok && r.status == 200, r.status);
-  console_printf("OTA check %s: HTTP %d, %u bytes\n", api, r.status, static_cast<unsigned>(r.length));
+  console_printf("OTA check %s: HTTP %d, %u bytes%s%s\n", api, r.status, static_cast<unsigned>(r.length),
+                 r.error[0] != '\0' ? " " : "", r.error);
   if (out->err[0] != '\0') {
     heap_caps_free(body);
     return false;
@@ -243,8 +243,9 @@ bool ota_check(const char* cfg_url, bool own, bool prereleases, const char* skip
     return false;
   }
   char api[192];
-  bool ok = (!own && github_api(cfg_url, api, sizeof(api))) ? check_github(api, prereleases, skip, out)
-                                                           : check_image(cfg_url, out);
+  bool ok = (!own && ota_github::list_api(cfg_url, api, sizeof(api)))
+                ? check_github(cfg_url, prereleases, skip, out)
+                : check_image(cfg_url, out);
   out->ok = ok;
   if (ok) out->cmp = ota_ver::offer_cmp(out->version, ota_running_version());
   console_printf("OTA check: running %s, offered %s -> %s\n", ota_running_version(), ok ? out->version : "-",
