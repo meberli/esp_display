@@ -135,7 +135,12 @@ bool txt_busy = false;
 Nav txt_back = Nav::Settings;
 lv_obj_t* txt_default_btn = nullptr;
 lv_obj_t* txt_search_btn = nullptr;
+lv_obj_t* txt_save_btn = nullptr;
 lv_obj_t* txt_hit_list = nullptr;
+char txt_saved[256] = "";
+bool txt_edited = false;
+bool txt_loading = false;
+bool txt_stay_after_save = false;
 EXT_RAM_BSS_ATTR DiscoverHit txt_hits[kDiscoverMaxHits];
 int txt_hit_n = 0;
 uint32_t txt_disc_gen = 0;
@@ -1114,27 +1119,32 @@ void open_text(uint8_t which, Nav back) {
   else if (v[0] == '\0' && settings_text_default(static_cast<TextSetting>(which))[0] == '\0')
     snprintf(sum, sizeof(sum), "nicht gesetzt");  // no compiled-in default (e.g. whatwatt host)
   else snprintf(sum, sizeof(sum), "%s%s", v[0] != '\0' ? v : "nicht gesetzt", own ? "" : " (Standard)");
+  snprintf(txt_saved, sizeof(txt_saved), "%s", v);
   memset(v, 0, sizeof(v));
   lv_label_set_text(txt_cur, sum);
+  txt_loading = true;
   lv_textarea_set_text(txt_ta, "");
+  txt_loading = false;
+  txt_edited = false;
+  txt_stay_after_save = false;
   lv_textarea_set_password_mode(txt_ta, which == kUrlIcal);
   bool plz = which == kTextPlz;  // 4 digits, number keyboard (txt_numeric)
   lv_textarea_set_accepted_chars(txt_ta, plz ? "0123456789" : nullptr);
   lv_textarea_set_max_length(txt_ta, plz ? 4 : 255);
   lv_textarea_set_placeholder_text(txt_ta, plz ? "PLZ, z.B. 9470" : "Neue Adresse");
-  lv_label_set_text(txt_status, which == kUrlIcal ? "Neue geheime iCal-Adresse eingeben, dann OK"
-                                : which == kUrlWaste ? "Basis-Adresse der API (https://...), dann OK"
-                                : which == kTextWasteBfs ? "BFS-Nummer der Gemeinde (Buchs SG = 3271), dann OK"
-                                : which == kTextPlz ? "Postleitzahl, 4 Ziffern (Buchs SG = 9470), dann OK"
-                                : which == kTextWasteZone ? "Zone/Tour genau wie in der API, dann OK"
-                                : which == kTextEnHost ? "IP oder Name, ohne http:// (leer = keine), dann OK"
+  lv_label_set_text(txt_status, which == kUrlIcal ? "Neue geheime iCal-Adresse eingeben, dann OK oder Speichern"
+                                : which == kUrlWaste ? "Basis-Adresse der API (https://...), dann OK oder Speichern"
+                                : which == kTextWasteBfs ? "BFS-Nummer der Gemeinde (Buchs SG = 3271), dann OK oder Speichern"
+                                : which == kTextPlz ? "Postleitzahl, 4 Ziffern (Buchs SG = 9470), dann OK oder Speichern"
+                                : which == kTextWasteZone ? "Zone/Tour genau wie in der API, dann OK oder Speichern"
+                                : which == kTextEnHost ? "IP oder Name, ohne http://. Ger\xC3\xA4t antippen oder Speichern"
                                 : which == kTextEnHtWin ? "z.B. 06:00-10:00,17:00-21:00 (leer = Standard)"
-                                : which == kTextEnSwitch ? "Datum JJJJ-MM-TT (leer = 2027-01-01), dann OK"
-                                : which == kTextPvGw ? "IPv4 des Modbus-TCP-Gateways (nur lesen), dann OK"
+                                : which == kTextEnSwitch ? "Datum JJJJ-MM-TT (leer = 2027-01-01), dann OK oder Speichern"
+                                : which == kTextPvGw ? "IPv4 des Modbus-TCP-Gateways (nur lesen), dann OK oder Speichern"
                                 : which == kTextPvGwPort ? "Modbus-TCP-Port, Standard 502 (leer = Standard)"
                                 : which == kTextPvUnit ? "Unit-ID des Wechselrichters, Standard 1 (leer = Standard)"
-                                : which >= kTextEnFlat ? "Preis z.B. 27.27 (leer = Standard), dann OK"
-                                                     : "Neue Adresse eingeben, dann OK");
+                                : which >= kTextEnFlat ? "Preis z.B. 27.27 (leer = Standard), dann OK oder Speichern"
+                                                     : "Neue Adresse eingeben, dann OK oder Speichern");
   txt_hit_n = 0;
   txt_search_layout(which == kTextEnHost);
   show(txt_root);
@@ -1179,24 +1189,40 @@ void on_txt_default(lv_event_t*) {
   queue_text("");
 }
 
-bool txt_kb_ready(lv_obj_t* ta) {
-  if (ta != txt_ta) return false;
-  const char* v = lv_textarea_get_text(txt_ta);
-  if (settings_pending || txt_busy) return true;
+void txt_apply_cur() {
+  char v[256], sum[96];
+  bool own = false;
+  settings_load_text(static_cast<TextSetting>(txt_which), v, sizeof(v), &own);
+  snprintf(txt_saved, sizeof(txt_saved), "%s", v);
+  if (txt_which == kUrlIcal) url_summary(sum, sizeof(sum), txt_which, v, own);
+  else if (txt_which == kTextWasteZone && v[0] == '\0') snprintf(sum, sizeof(sum), "keine (ganze Gemeinde)");
+  else if (v[0] == '\0' && settings_text_default(static_cast<TextSetting>(txt_which))[0] == '\0')
+    snprintf(sum, sizeof(sum), "nicht gesetzt");
+  else snprintf(sum, sizeof(sum), "%s%s", v[0] != '\0' ? v : "nicht gesetzt", own ? "" : " (Standard)");
+  lv_label_set_text(txt_cur, sum);
+  memset(v, 0, sizeof(v));
+}
+
+// Validate and queue a SetText. stay: keep this screen and refresh "Aktuell"
+// after the save (used by Speichern and a discovery tap). Keyboard OK still
+// leaves the screen, as before.
+bool txt_submit(const char* v, bool stay) {
+  if (v == nullptr) v = "";
+  if (settings_pending || txt_busy) return false;
   if ((txt_which == kUrlOta || txt_which == kUrlWaste) && strncmp(v, "https://", 8) != 0) {
     lv_label_set_text(txt_status, "Adresse muss mit https:// beginnen");
-    return true;
+    return false;
   }
   if (txt_which == kTextPlz && !meteo_plz_valid(v)) {
     lv_label_set_text(txt_status, "PLZ: 4 Ziffern (1000-9999), z.B. 9470");
-    return true;
+    return false;
   }
   if (txt_which == kTextWasteBfs) {
     bool ok = strlen(v) == 4;
     for (const char* c = v; *c != '\0'; ++c) ok = ok && *c >= '0' && *c <= '9';
     if (!ok) {
       lv_label_set_text(txt_status, "BFS-Nummer: 4 Ziffern, z.B. 3271");
-      return true;
+      return false;
     }
   }
   if (txt_which >= kTextEnHost && v[0] != '\0') {
@@ -1232,17 +1258,42 @@ bool txt_kb_ready(lv_obj_t* ta) {
     }
     if (!ok) {
       lv_label_set_text(txt_status, msg);
-      return true;
+      return false;
     }
   }
   if (txt_which == kUrlIcal && strncmp(v, "http://", 7) != 0 && strncmp(v, "https://", 8) != 0) {
     lv_label_set_text(txt_status, "Adresse muss mit http:// oder https:// beginnen");
-    return true;
+    return false;
   }
+  txt_stay_after_save = stay;
   queue_text(v);
-  lv_textarea_set_text(txt_ta, "");  // do not keep a private URL in the widget
+  if (txt_which == kUrlIcal) {
+    txt_loading = true;
+    lv_textarea_set_text(txt_ta, "");  // do not keep a private URL in the widget
+    txt_loading = false;
+  }
   lv_keyboard_set_textarea(kb, nullptr);
   hide(kb);
+  txt_refresh_actions();
+  return true;
+}
+
+void on_txt_save(lv_event_t*) {
+  if (gesture_consumed || settings_pending || txt_busy) return;
+  const char* v = lv_textarea_get_text(txt_ta);
+  txt_submit(v, true);
+}
+
+void on_txt_ta_changed(lv_event_t*) {
+  if (txt_loading) return;
+  txt_edited = true;
+  txt_refresh_actions();
+}
+
+bool txt_kb_ready(lv_obj_t* ta) {
+  if (ta != txt_ta) return false;
+  const char* v = lv_textarea_get_text(txt_ta);
+  txt_submit(v, false);
   return true;
 }
 
@@ -1627,6 +1678,7 @@ void build_info_screens(lv_obj_t* screen) {
   lv_textarea_set_password_bullet(txt_ta, "*");
   lv_textarea_set_max_length(txt_ta, 255);
   reg("text:ta", txt_ta);
+  lv_obj_add_event_cb(txt_ta, on_txt_ta_changed, LV_EVENT_VALUE_CHANGED, nullptr);
   // Hint/error line right under the field and the button above y 250: the
   // keyboard (220 px, 10 px above the bottom) covered the line at y 240.
   txt_status = make_label(txt_root, &font_inter_14, lv_color_hex(kTextDim));
@@ -1636,6 +1688,8 @@ void build_info_screens(lv_obj_t* screen) {
   txt_default_btn = make_choice(txt_root, kMargin, 194, kScreen - 2 * kMargin, 48, "Standard verwenden", on_txt_default, 0, "text:default");
   txt_search_btn = make_choice(txt_root, kMargin, 194, 214, 48, "Suchen", on_txt_search, 0, "text:search");
   hide(txt_search_btn);
+  txt_save_btn = make_choice(txt_root, kMargin + 226, 194, 214, 48, "Speichern", on_txt_save, 0, "text:save");
+  hide(txt_save_btn);
   txt_hit_list = make_list(txt_root, 250, 200);
   hide(txt_hit_list);
 

@@ -339,8 +339,22 @@ void ui_text_saved(bool ok, uint8_t which) {
   if (ok && which >= kTextEnHost) energy_kick();
   if (ok && (which == kTextPvGw || which == kTextPvGwPort || which == kTextPvUnit)) pv_kick();
   if (nav == Nav::TextEdit) {
-    if (ok) txt_go_back();
-    else lv_label_set_text(txt_status, "Speichern fehlgeschlagen");
+    if (ok) {
+      const bool stay = txt_stay_after_save;
+      txt_stay_after_save = false;
+      txt_apply_cur();
+      txt_edited = false;
+      if (stay) {
+        lv_label_set_text(txt_status, "Gespeichert");
+        txt_refresh_actions();
+      } else {
+        txt_go_back();
+      }
+    } else {
+      txt_stay_after_save = false;
+      lv_label_set_text(txt_status, "Speichern fehlgeschlagen");
+      txt_refresh_actions();
+    }
   }
 }
 

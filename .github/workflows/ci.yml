@@ -61,6 +61,7 @@ jobs:
           g++ -std=c++17 -Wall -Wextra -I main -I rp2040/libraries/RpScope/src tools/test_scope.cpp main/scope_view.cpp /tmp/rp_scope.o -o /tmp/tsc && /tmp/tsc
           g++ -std=c++17 -Wall -I main -I components/ArduinoJson/src tools/test_device_discover.cpp main/device_discover.cpp main/energy.cpp -o /tmp/tdd && /tmp/tdd
           g++ -std=c++17 -Wall -I main tools/test_home_tap.cpp -o /tmp/tht && /tmp/tht
+          python3 tools/check_ui_font_chars.py
 
   build:
     runs-on: ubuntu-latest

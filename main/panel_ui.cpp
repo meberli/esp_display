@@ -276,7 +276,10 @@ void on_lox_hit(lv_event_t* e);
 void fill_txt_hit_list();
 void on_txt_hit(lv_event_t* e);
 void txt_search_layout(bool show);
+void txt_refresh_actions();
+bool txt_submit(const char* v, bool stay);
 void on_txt_search(lv_event_t* e);
+void on_txt_save(lv_event_t* e);
 lv_obj_t* loc_root = nullptr;
 lv_obj_t* loc_ta = nullptr;
 lv_obj_t* loc_list = nullptr;
@@ -684,7 +687,7 @@ void on_lox_hit(lv_event_t* e) {
   int i = static_cast<int>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e)));
   if (i < 0 || i >= lox_hit_n) return;
   lv_textarea_set_text(lox_host_ta, lox_hits[i].host);
-  lv_label_set_text(lox_status, "Adresse \xC3\xBC" "bernommen — Benutzer/Passwort pr\xC3\xBC" "fen, dann testen oder speichern");
+  lv_label_set_text(lox_status, "Adresse \xC3\xBC" "bernommen – Benutzer/Passwort pr\xC3\xBC" "fen, dann testen oder speichern");
   console_printf("Miniserver suggestion chosen: %s\n", lox_hits[i].host);
 }
 
@@ -715,30 +718,59 @@ void on_txt_hit(lv_event_t* e) {
   int i = static_cast<int>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e)));
   if (i < 0 || i >= txt_hit_n) return;
   lv_textarea_set_text(txt_ta, txt_hits[i].host);
-  lv_label_set_text(txt_status, "Adresse \xC3\xBC" "bernommen — mit OK speichern");
+  txt_edited = true;
   console_printf("whatwatt suggestion chosen: %s\n", txt_hits[i].host);
+  // The user picked this device; save immediately. There is no OK button on
+  // this screen (OK lives on the keyboard, which is hidden until the field
+  // is tapped and would cover the result list).
+  if (!txt_submit(txt_hits[i].host, true)) txt_refresh_actions();
 }
 
 void txt_search_layout(bool show_search) {
-  if (txt_search_btn == nullptr || txt_default_btn == nullptr) return;
+  (void)show_search;
+  txt_refresh_actions();
+}
+
+// Suchen / Standard and a Speichern button (shown once the field differs
+// from the stored value). One button is full width; two sit side by side.
+void txt_refresh_actions() {
+  if (txt_search_btn == nullptr || txt_default_btn == nullptr || txt_save_btn == nullptr) return;
+  const bool search = (txt_which == kTextEnHost);
   const bool has_default = settings_text_default(static_cast<TextSetting>(txt_which))[0] != '\0';
-  if (show_search) {
+  const char* cur = (txt_ta != nullptr) ? lv_textarea_get_text(txt_ta) : "";
+  if (cur == nullptr) cur = "";
+  const bool dirty = txt_edited && !txt_busy && strcmp(cur, txt_saved) != 0;
+
+  if (search) {
     show(txt_search_btn);
-    hide(txt_default_btn);  // whatwatt host has no compiled-in default address
-    lv_obj_set_pos(txt_search_btn, kMargin, 194);
-    lv_obj_set_size(txt_search_btn, kScreen - 2 * kMargin, 48);
+    hide(txt_default_btn);
     fill_txt_hit_list();
   } else {
     hide(txt_search_btn);
     hide(txt_hit_list);
     txt_hit_n = 0;
-    if (has_default) {
-      show(txt_default_btn);
-      lv_obj_set_pos(txt_default_btn, kMargin, 194);
-      lv_obj_set_size(txt_default_btn, kScreen - 2 * kMargin, 48);
-    } else {
-      hide(txt_default_btn);
-    }
+    if (has_default) show(txt_default_btn);
+    else hide(txt_default_btn);
+  }
+  if (dirty) show(txt_save_btn);
+  else hide(txt_save_btn);
+
+  lv_obj_t* left = search ? txt_search_btn : (has_default ? txt_default_btn : nullptr);
+  lv_obj_t* right = dirty ? txt_save_btn : nullptr;
+  constexpr int y = 194;
+  constexpr int w_full = kScreen - 2 * kMargin;
+  constexpr int w_half = 214;
+  if (left != nullptr && right != nullptr) {
+    lv_obj_set_pos(left, kMargin, y);
+    lv_obj_set_size(left, w_half, 48);
+    lv_obj_set_pos(right, kMargin + 226, y);
+    lv_obj_set_size(right, w_half, 48);
+  } else if (left != nullptr) {
+    lv_obj_set_pos(left, kMargin, y);
+    lv_obj_set_size(left, w_full, 48);
+  } else if (right != nullptr) {
+    lv_obj_set_pos(right, kMargin, y);
+    lv_obj_set_size(right, w_full, 48);
   }
 }
 
@@ -754,7 +786,7 @@ void start_lan_discover(DiscoverKind kind) {
   lv_keyboard_set_textarea(kb, nullptr);
   hide(kb);
   if (!wifi_connected()) {
-    const char* msg = "Kein WLAN — zuerst verbinden, dann Suchen";
+    const char* msg = "Kein WLAN – zuerst verbinden, dann Suchen";
     if (lox && lox_status != nullptr) lv_label_set_text(lox_status, msg);
     if (!lox && txt_status != nullptr) lv_label_set_text(txt_status, msg);
     return;
