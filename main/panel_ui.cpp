@@ -258,7 +258,19 @@ lv_obj_t* lox_pass_ta = nullptr;
 lv_obj_t* lox_status = nullptr;
 lv_obj_t* set_lox_val = nullptr;
 bool lox_first_run = false;   // opened at boot because no Miniserver is configured
-bool lox_working = false;     // test or save queued/running
+bool lox_working = false;     // test, save or Suchen queued/running
+lv_obj_t* lox_search_btn = nullptr;
+lv_obj_t* lox_hit_list = nullptr;
+EXT_RAM_BSS_ATTR DiscoverHit lox_hits[kDiscoverMaxHits];
+int lox_hit_n = 0;
+uint32_t lox_disc_gen = 0;
+void start_lan_discover(DiscoverKind kind);
+void fill_lox_hit_list();
+void on_lox_hit(lv_event_t* e);
+void fill_txt_hit_list();
+void on_txt_hit(lv_event_t* e);
+void txt_search_layout(bool show);
+void on_txt_search(lv_event_t* e);
 lv_obj_t* loc_root = nullptr;
 lv_obj_t* loc_ta = nullptr;
 lv_obj_t* loc_list = nullptr;

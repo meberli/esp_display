@@ -17,6 +17,7 @@
 #include "esp_timer.h"
 #include "esp_http_client.h"
 #include "esp_netif.h"
+#include "lwip/inet.h"
 #include "esp_wifi.h"
 #include "esp_heap_caps.h"
 #include "freertos/semphr.h"
@@ -283,6 +284,18 @@ void wifi_start(const char* ssid, const char* password, const char* hostname) {
 }
 
 bool wifi_connected() { return g_connected; }
+
+bool wifi_sta_ipv4(uint32_t* ip, uint32_t* mask) {
+  if (ip != nullptr) *ip = 0;
+  if (mask != nullptr) *mask = 0;
+  if (g_netif == nullptr || !g_connected) return false;
+  esp_netif_ip_info_t info = {};
+  if (esp_netif_get_ip_info(g_netif, &info) != ESP_OK) return false;
+  if (info.ip.addr == 0) return false;
+  if (ip != nullptr) *ip = ntohl(info.ip.addr);
+  if (mask != nullptr) *mask = ntohl(info.netmask.addr);
+  return true;
+}
 void wifi_hold(bool on) {
   if (on == g_hold) return;
   g_hold = on;

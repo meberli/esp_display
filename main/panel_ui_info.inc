@@ -133,6 +133,12 @@ lv_obj_t* txt_status = nullptr;
 uint8_t txt_which = 0;
 bool txt_busy = false;
 Nav txt_back = Nav::Settings;
+lv_obj_t* txt_default_btn = nullptr;
+lv_obj_t* txt_search_btn = nullptr;
+lv_obj_t* txt_hit_list = nullptr;
+EXT_RAM_BSS_ATTR DiscoverHit txt_hits[kDiscoverMaxHits];
+int txt_hit_n = 0;
+uint32_t txt_disc_gen = 0;
 
 lv_obj_t* maint_root = nullptr;
 lv_obj_t* maint_val[8] = {};
@@ -1127,6 +1133,8 @@ void open_text(uint8_t which, Nav back) {
                                 : which == kTextPvUnit ? "Unit-ID des Wechselrichters, Standard 1 (leer = Standard)"
                                 : which >= kTextEnFlat ? "Preis z.B. 27.27 (leer = Standard), dann OK"
                                                      : "Neue Adresse eingeben, dann OK");
+  txt_hit_n = 0;
+  txt_search_layout(which == kTextEnHost);
   show(txt_root);
 }
 
@@ -1623,7 +1631,11 @@ void build_info_screens(lv_obj_t* screen) {
   lv_obj_set_pos(txt_status, 24, 170);
   lv_obj_set_width(txt_status, 432);
   label_dot1(txt_status);
-  make_choice(txt_root, kMargin, 194, kScreen - 2 * kMargin, 48, "Standard verwenden", on_txt_default, 0, "text:default");
+  txt_default_btn = make_choice(txt_root, kMargin, 194, kScreen - 2 * kMargin, 48, "Standard verwenden", on_txt_default, 0, "text:default");
+  txt_search_btn = make_choice(txt_root, kMargin, 194, 214, 48, "Suchen", on_txt_search, 0, "text:search");
+  hide(txt_search_btn);
+  txt_hit_list = make_list(txt_root, 250, 200);
+  hide(txt_hit_list);
 
   // Einstellungen > Wartung
   maint_root = make_screen_root(screen, "Wartung");

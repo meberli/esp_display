@@ -41,6 +41,7 @@ Wichtige Module in `main/`:
 | `net.cpp` | WLAN (Scan, Verbinden, Pause, 802.11k/v) |
 | `info_net.cpp`, `transit_parse.cpp`, `radar*.cpp`, `weather_derive.cpp` | Wetter, MeteoSchweiz, ÖV, Regenradar |
 | `loxone_client.cpp`, `loxone_structure.cpp`, `loxone_cache.cpp`, `loxone_auth.h` | Miniserver (HTTP, Basic Auth), `LoxAPP3.json`, Struktur-Cache in NVS |
+| `device_discover.cpp`, `device_discover_scan.cpp` | LAN-Suche (Suchen): unauthentifiziertes HTTP GET, ~5 s, Vorschläge ohne Autoselect |
 | `webcams.cpp`, `ical.cpp`, `waste_api.cpp`, `waste_window.cpp` | Windy-Webcams, iCal, Abfallkalender |
 | `energy*.cpp`, `pv*.cpp` | whatwatt Go (Strom/Wasser), PV über Modbus-TCP-Gateway (nur lesen) |
 | `co4_*.cpp` | Co4 Energie: OIDC Device Flow, BFF-Abfragen, eigener Task |

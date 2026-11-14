@@ -847,6 +847,8 @@ void open_loxset(bool first_run) {
   lv_textarea_set_placeholder_text(lox_pass_ta, c.pass[0] != '\0' ? "Passwort (unver\xC3\xA4ndert)" : "Passwort");
   lv_label_set_text(lox_status, first_run ? "Miniserver eintragen (optional) oder \"\xC3\x9C" "berspringen\"."
                                           : "Adresse, Benutzer und Passwort des Miniservers");
+  lox_hit_n = 0;
+  fill_lox_hit_list();
   show(loxset_root);
   if (c.host[0] == '\0') show_keyboard(lox_host_ta);
 }
@@ -921,6 +923,8 @@ void on_lox_btn(lv_event_t* e) {
   if (which == 0) {
     open_settings();
     open_wifi_list();
+  } else if (which == 4) {
+    start_lan_discover(kDiscoverLoxone);
   } else if (which == 3) {  // Überspringen: Loxone stays off, form does not reappear
     bool ok = settings_save_lox_skip(true);
     console_printf("Miniserver setup skipped (saved %d)\n", ok ? 1 : 0);
@@ -1305,7 +1309,9 @@ void build_settings_screens(lv_obj_t* screen) {
 
   loxset_root = make_screen_root(screen, "Miniserver");
   lox_host_ta = make_ta(loxset_root, 56, "Adresse, z.B. 192.168.1.10 oder host:8080");
+  lv_obj_set_size(lox_host_ta, kScreen - 2 * kMargin - 116, 52);
   reg("lox:host", lox_host_ta);
+  lox_search_btn = make_choice(loxset_root, kScreen - kMargin - 108, 56, 108, 52, "Suchen", on_lox_btn, 4, "lox:search");
   lox_user_ta = make_ta(loxset_root, 116, "Benutzer");
   reg("lox:user", lox_user_ta);
   lox_pass_ta = make_ta(loxset_root, 176, "Passwort");
@@ -1326,6 +1332,8 @@ void build_settings_screens(lv_obj_t* screen) {
     lv_obj_set_style_pad_left(b, 4, 0);
     lv_obj_set_style_pad_right(b, 4, 0);
   }
+  lox_hit_list = make_list(loxset_root, 364, 110);
+  hide(lox_hit_list);
 
   kb = lv_keyboard_create(screen);
   lv_obj_set_size(kb, kScreen, 220);

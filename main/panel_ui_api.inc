@@ -579,3 +579,152 @@ void ui_lox_done(bool saved, bool ok, int status, const char* detail) {
   console_printf("UI: Miniserver %s %s\n", saved ? "save" : "test", ok ? "ok" : "failed");
   if (nav == Nav::LoxSet) lv_label_set_text(lox_status, t);
 }
+
+// --- LAN discovery (Suchen): suggestions only, never auto-selected ------------
+
+void fill_lox_hit_list() {
+  if (lox_hit_list == nullptr) return;
+  unreg_prefix("loxh:");
+  lv_obj_clean(lox_hit_list);
+  for (int i = 0; i < lox_hit_n; ++i) {
+    lv_obj_t* row = make_row(lox_hit_list, 52, ICON_ROUTER, kAccent, on_lox_hit, i);
+    lv_obj_t* n = make_label(row, &font_inter_sb16, lv_color_hex(kText));
+    lv_obj_set_width(n, 240);
+    lv_label_set_long_mode(n, LV_LABEL_LONG_DOT);
+    lv_label_set_text(n, lox_hits[i].name);
+    lv_obj_align(n, LV_ALIGN_LEFT_MID, 54, 0);
+    lv_obj_t* h = make_label(row, &font_inter_14, lv_color_hex(kTextDim));
+    lv_label_set_text(h, lox_hits[i].host);
+    lv_obj_align(h, LV_ALIGN_RIGHT_MID, -14, 0);
+    char key[12];
+    snprintf(key, sizeof(key), "loxh:%d", i);
+    reg(key, row);
+  }
+  if (lox_hit_n > 0) show(lox_hit_list);
+  else hide(lox_hit_list);
+}
+
+void on_lox_hit(lv_event_t* e) {
+  if (gesture_consumed || lox_working) return;
+  int i = static_cast<int>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e)));
+  if (i < 0 || i >= lox_hit_n) return;
+  lv_textarea_set_text(lox_host_ta, lox_hits[i].host);
+  lv_label_set_text(lox_status, "Adresse \xC3\xBCbernommen — Benutzer/Passwort pr\xC3\xBC" "fen, dann testen oder speichern");
+  console_printf("Miniserver suggestion chosen: %s\n", lox_hits[i].host);
+}
+
+void fill_txt_hit_list() {
+  if (txt_hit_list == nullptr) return;
+  unreg_prefix("txth:");
+  lv_obj_clean(txt_hit_list);
+  for (int i = 0; i < txt_hit_n; ++i) {
+    lv_obj_t* row = make_row(txt_hit_list, 52, ICON_ROUTER, kAccent, on_txt_hit, i);
+    lv_obj_t* n = make_label(row, &font_inter_sb16, lv_color_hex(kText));
+    lv_obj_set_width(n, 240);
+    lv_label_set_long_mode(n, LV_LABEL_LONG_DOT);
+    lv_label_set_text(n, txt_hits[i].name);
+    lv_obj_align(n, LV_ALIGN_LEFT_MID, 54, 0);
+    lv_obj_t* h = make_label(row, &font_inter_14, lv_color_hex(kTextDim));
+    lv_label_set_text(h, txt_hits[i].host);
+    lv_obj_align(h, LV_ALIGN_RIGHT_MID, -14, 0);
+    char key[12];
+    snprintf(key, sizeof(key), "txth:%d", i);
+    reg(key, row);
+  }
+  if (txt_hit_n > 0 && txt_which == kTextEnHost) show(txt_hit_list);
+  else hide(txt_hit_list);
+}
+
+void on_txt_hit(lv_event_t* e) {
+  if (gesture_consumed || txt_busy) return;
+  int i = static_cast<int>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e)));
+  if (i < 0 || i >= txt_hit_n) return;
+  lv_textarea_set_text(txt_ta, txt_hits[i].host);
+  lv_label_set_text(txt_status, "Adresse \xC3\xBCbernommen — mit OK speichern");
+  console_printf("whatwatt suggestion chosen: %s\n", txt_hits[i].host);
+}
+
+void txt_search_layout(bool show_search) {
+  if (txt_search_btn == nullptr || txt_default_btn == nullptr) return;
+  if (show_search) {
+    show(txt_search_btn);
+    lv_obj_set_pos(txt_default_btn, kMargin + 226, 194);
+    lv_obj_set_size(txt_default_btn, 214, 48);
+    fill_txt_hit_list();
+  } else {
+    hide(txt_search_btn);
+    hide(txt_hit_list);
+    txt_hit_n = 0;
+    lv_obj_set_pos(txt_default_btn, kMargin, 194);
+    lv_obj_set_size(txt_default_btn, kScreen - 2 * kMargin, 48);
+  }
+}
+
+void on_txt_search(lv_event_t* e) {
+  (void)e;
+  if (gesture_consumed) return;
+  start_lan_discover(kDiscoverWhatwatt);
+}
+
+void start_lan_discover(DiscoverKind kind) {
+  const bool lox = kind == kDiscoverLoxone;
+  if (settings_pending || (lox ? lox_working : txt_busy)) return;
+  lv_keyboard_set_textarea(kb, nullptr);
+  hide(kb);
+  if (!wifi_connected()) {
+    const char* msg = "Kein WLAN — zuerst verbinden, dann Suchen";
+    if (lox && lox_status != nullptr) lv_label_set_text(lox_status, msg);
+    if (!lox && txt_status != nullptr) lv_label_set_text(txt_status, msg);
+    return;
+  }
+  SettingsRequest r = {};
+  r.kind = lox ? SettingsRequest::DiscoverLoxone : SettingsRequest::DiscoverWhatwatt;
+  if (lox) {
+    lox_disc_gen++;
+    r.scan_gen = lox_disc_gen;
+    lox_working = true;
+    lox_hit_n = 0;
+    fill_lox_hit_list();
+    if (lox_status != nullptr) lv_label_set_text(lox_status, "Suche im Netzwerk \xE2\x80\xA6");
+  } else {
+    txt_disc_gen++;
+    r.scan_gen = txt_disc_gen;
+    txt_busy = true;
+    txt_hit_n = 0;
+    fill_txt_hit_list();
+    if (txt_status != nullptr) lv_label_set_text(txt_status, "Suche im Netzwerk \xE2\x80\xA6");
+  }
+  queue_settings(r);
+  console_printf("Discovery started (%s)\n", lox ? "Loxone" : "whatwatt");
+}
+
+void ui_discover_done(DiscoverKind kind, bool ok, const DiscoverHit* hits, int n, uint32_t gen) {
+  const bool lox = kind == kDiscoverLoxone;
+  if (lox) {
+    lox_working = false;
+    if (gen != lox_disc_gen || nav != Nav::LoxSet) return;
+    lox_hit_n = n < 0 ? 0 : (n > kDiscoverMaxHits ? kDiscoverMaxHits : n);
+    if (hits != nullptr && lox_hit_n > 0) memcpy(lox_hits, hits, sizeof(DiscoverHit) * lox_hit_n);
+    if (lox_status != nullptr) {
+      lv_label_set_text(lox_status,
+                        !ok ? "Suche fehlgeschlagen"
+                        : lox_hit_n == 0 ? "Kein Ger\xC3\xA4t gefunden"
+                                         : "Ger\xC3\xA4t antippen (wird nicht automatisch \xC3\xBCbernommen)");
+    }
+    fill_lox_hit_list();
+  } else {
+    txt_busy = false;
+    if (gen != txt_disc_gen || nav != Nav::TextEdit || txt_which != kTextEnHost) return;
+    txt_hit_n = n < 0 ? 0 : (n > kDiscoverMaxHits ? kDiscoverMaxHits : n);
+    if (hits != nullptr && txt_hit_n > 0) memcpy(txt_hits, hits, sizeof(DiscoverHit) * txt_hit_n);
+    if (txt_status != nullptr) {
+      lv_label_set_text(txt_status,
+                        !ok ? "Suche fehlgeschlagen"
+                        : txt_hit_n == 0 ? "Kein Ger\xC3\xA4t gefunden"
+                                         : "Ger\xC3\xA4t antippen (wird nicht automatisch \xC3\xBCbernommen)");
+    }
+    fill_txt_hit_list();
+  }
+  console_printf("Discovery done (%s): %s, %d hit%s\n", lox ? "Loxone" : "whatwatt", ok ? "ok" : "fail",
+                 lox ? lox_hit_n : txt_hit_n, (lox ? lox_hit_n : txt_hit_n) == 1 ? "" : "s");
+}

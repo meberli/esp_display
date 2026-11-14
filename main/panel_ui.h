@@ -10,6 +10,7 @@
 #include "info.h"
 #include "maint.h"
 #include "ota_check.h"
+#include "device_discover.h"
 
 struct LoxoneCommandRequest {
   char action[40];
@@ -149,6 +150,8 @@ void ui_lox_setup_open(bool first_run);
 // Loxone availability for the home tiles: 0 ready, 1 not configured, 2 unreachable.
 void ui_set_lox_state(int state);
 void ui_lox_done(bool saved, bool ok, int status, const char* detail);
+// LAN search (Suchen): suggestions only, never auto-selects or saves.
+void ui_discover_done(DiscoverKind kind, bool ok, const DiscoverHit* hits, int n, uint32_t gen);
 bool ui_take_calendar();
 void ui_calendar_done(bool ok, const Calendar& cal);
 bool ui_take_meteo();

@@ -74,6 +74,7 @@ Gut zu wissen:
 
 Tasten:
 
+- **Suchen**: sucht im lokalen Netz etwa 5 Sekunden lang nach Miniservern (unauthentifiziertes HTTP GET, ohne Benutzer und Passwort). Gefundene Geräte erscheinen als Vorschläge; du tippst eines an, um die Adresse zu übernehmen. Es wird nichts automatisch ausgewählt oder gespeichert.
 - **WLAN**: zuerst WLAN verbinden, falls noch nicht geschehen.
 - **Testen**: prüft die Verbindung, ohne zu speichern.
 - **Speichern**: übernimmt die Werte.
@@ -84,7 +85,7 @@ Danach liest das Panel die Steuerungen vom Miniserver und zeigt sie unter **Loxo
 
 - **Favoriten**, **Licht**, **Storen** (Auf, Ab, Position), **Schalter**.
 - Der Zustand wird beim Öffnen einer Seite frisch gelesen.
-- Ist der Miniserver nicht erreichbar, zeigt das Panel die zuletzt bekannten Kacheln (als offline markiert) und versucht es im Hintergrund erneut (nach 10 s, 30 s, 2 min, dann alle 5 min). Befehle werden erst wieder angenommen, wenn er antwortet.
+- Ist der Miniserver nicht erreichbar, zeigt das Panel die zuletzt bekannten Kacheln (als offline markiert) und versucht es im Hintergrund erneut (nach 30 s, 2 min, 5 min, dann alle 15 min). Nach drei abgelehnten Anmeldungen (401/403) stoppt das Panel, bis du neu startest oder die Zugangsdaten änderst. Befehle werden erst wieder angenommen, wenn er antwortet.
 
 ### Schalter-Taste
 
@@ -203,7 +204,7 @@ Eine Erinnerung erscheint als Karte auf der Startseite und auch auf dem Bildschi
 
 - **Co4:** Anmeldung mit dem Handy, siehe unten.
 - **whatwatt Go & PV:**
-  - **whatwatt-Adresse**: IP oder Name des whatwatt Go im lokalen Netz, ohne `http://`. Ein Web-Passwort am whatwatt wird nicht unterstützt.
+  - **whatwatt-Adresse**: IP oder Name des whatwatt Go im lokalen Netz, ohne `http://`. Ein Web-Passwort am whatwatt wird nicht unterstützt. **Suchen** sucht im lokalen Netz etwa 5 Sekunden lang (unauthentifiziertes HTTP GET) und schlägt gefundene Geräte vor; du wählst selbst, nichts wird automatisch übernommen.
   - **Abfrage-Intervall**: Standard 10 s.
   - **Tarifmodell**: Einheitstarif oder Hoch-/Niedertarif mit HT-Zeiten (Mo–Fr) und optional einem Datum, ab dem automatisch auf HT/NT umgestellt wird.
   - **Einspeisevergütung**, **Einspeisung anzeigen**.

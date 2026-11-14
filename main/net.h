@@ -8,6 +8,8 @@
 
 void wifi_start(const char* ssid, const char* password, const char* hostname);
 bool wifi_connected();
+// Station IPv4 and netmask in host order. False if the interface has no address.
+bool wifi_sta_ipv4(uint32_t* ip, uint32_t* mask);
 // Playground CII mode: hold = disconnect and stop reconnecting (credentials kept);
 // release = reconnect normally.
 void wifi_hold(bool on);

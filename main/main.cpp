@@ -38,6 +38,7 @@
 #include "strings_de.h"
 #include "loxone_cache.h"
 #include "retry_logic.h"
+#include "device_discover_scan.h"
 
 static const char* const TAG = "app";
 static TaskHandle_t ui_handle = nullptr;
@@ -330,6 +331,8 @@ EXT_RAM_BSS_ATTR OtaCheck g_ota;
 EXT_RAM_BSS_ATTR Calendar g_cal;
 EXT_RAM_BSS_ATTR MeteoNow g_meteo;
 EXT_RAM_BSS_ATTR Station g_hits[kMaxStationHits];
+EXT_RAM_BSS_ATTR DiscoverHit g_discovered[kDiscoverMaxHits];
+
 
 QueueHandle_t net_q = nullptr;
 QueueHandle_t res_q = nullptr;
@@ -552,6 +555,16 @@ void net_settings(const SettingsRequest& s, NetResult* res) {
     case SettingsRequest::SetLoxone:
       res->ok = settings_save_loxone(s.lox, s.lox_keep_pass);
       break;
+    case SettingsRequest::DiscoverLoxone:
+    case SettingsRequest::DiscoverWhatwatt: {
+      DiscoverKind kind =
+          s.kind == SettingsRequest::DiscoverWhatwatt ? kDiscoverWhatwatt : kDiscoverLoxone;
+      res->count = device_discover_scan(kind, g_discovered, kDiscoverMaxHits, kDiscoverBudgetMs, s.scan_gen);
+      res->ok = res->count >= 0;
+      if (res->count < 0) res->count = 0;
+      res->gen = s.scan_gen;
+      break;
+    }
     case SettingsRequest::ResetLocation:
       settings_reset_location();
       g_loc = settings_default_location();
@@ -827,6 +840,12 @@ void handle_result(const NetResult& res) {
         case SettingsRequest::LoxTest:
         case SettingsRequest::SetLoxone:
           ui_lox_done(res.settings_kind == SettingsRequest::SetLoxone, res.ok, res.status, res.detail);
+          break;
+        case SettingsRequest::DiscoverLoxone:
+          ui_discover_done(kDiscoverLoxone, res.ok, g_discovered, res.count, res.gen);
+          break;
+        case SettingsRequest::DiscoverWhatwatt:
+          ui_discover_done(kDiscoverWhatwatt, res.ok, g_discovered, res.count, res.gen);
           break;
         default:
           ui_location_done(res.ok, res.location.name);

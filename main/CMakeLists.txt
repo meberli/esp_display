@@ -16,7 +16,7 @@ if(NOT CMAKE_BUILD_EARLY_EXPANSION AND NOT CMAKE_PROJECT_NAME STREQUAL PANEL_EXP
 endif()
 idf_component_register(
     SRCS "app_main.cpp" "sys.cpp" "net.cpp" "main.cpp" "${PANEL_HW_SRC}" "panel_ui.cpp"
-         "loxone_client.cpp" "loxone_structure.cpp" "loxone_cache.cpp" "test_harness.cpp" "weather_derive.cpp"
+         "loxone_client.cpp" "loxone_structure.cpp" "loxone_cache.cpp" "device_discover.cpp" "device_discover_scan.cpp" "test_harness.cpp" "weather_derive.cpp"
          "settings.cpp" "settings_schema.cpp" "clock_sync.cpp" "webcams.cpp" "ical.cpp" "waste_api.cpp" "waste_window.cpp" "energy.cpp" "energy_mix.cpp" "energy_task.cpp" "pv.cpp" "pv_task.cpp" "info_net.cpp" "meteo_plz.cpp" "transit_parse.cpp" "radar.cpp" "radar_parse.cpp" "map_ne.cpp" "maint.cpp" "ota_check.cpp" "ota_board.cpp" "diag.cpp" "co4en.cpp" "co4_data.cpp" "co4_bff.cpp" "co4_oidc.cpp" "co4_task.cpp" "espnow_play.cpp" "rp_link.cpp" "scope_view.cpp" "../rp2040/libraries/RpScope/src/rp_scope.c" "font_inter_14.c" "font_inter_16.c" "font_inter_sb16.c"
          "font_inter_20.c" "font_inter_light_40.c" "font_inter_xl_72.c" "font_clock_150.c" "font_icons_80.c"
          "font_icons_38.c" "font_icons_32.c" "font_icons_24.c" "font_icon_bolt_24.c" "font_icons_16.c"
