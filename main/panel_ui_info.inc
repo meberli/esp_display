@@ -129,6 +129,7 @@ lv_obj_t* txt_root = nullptr;
 lv_obj_t* txt_title = nullptr;
 lv_obj_t* txt_cur = nullptr;
 lv_obj_t* txt_ta = nullptr;
+lv_obj_t* txt_pass_eye = nullptr;
 lv_obj_t* txt_status = nullptr;
 uint8_t txt_which = 0;
 bool txt_busy = false;
@@ -1128,7 +1129,10 @@ void open_text(uint8_t which, Nav back) {
   txt_loading = false;
   txt_edited = false;
   txt_stay_after_save = false;
-  lv_textarea_set_password_mode(txt_ta, which == kUrlIcal);
+  const bool secret = which == kUrlIcal;
+  lv_textarea_set_password_mode(txt_ta, secret);
+  password_toggle_layout(txt_ta, txt_pass_eye, secret);
+  if (secret && txt_pass_eye != nullptr) lv_obj_invalidate(txt_pass_eye);
   bool plz = which == kTextPlz;  // 4 digits, number keyboard (txt_numeric)
   lv_textarea_set_accepted_chars(txt_ta, plz ? "0123456789" : nullptr);
   lv_textarea_set_max_length(txt_ta, plz ? 4 : 255);
@@ -1686,6 +1690,8 @@ void build_info_screens(lv_obj_t* screen) {
   txt_ta = make_ta(txt_root, 112, "Neue Adresse");
   lv_textarea_set_password_bullet(txt_ta, "*");
   lv_textarea_set_max_length(txt_ta, 255);
+  txt_pass_eye = attach_password_toggle(txt_ta);
+  password_toggle_layout(txt_ta, txt_pass_eye, false);
   reg("text:ta", txt_ta);
   lv_obj_add_event_cb(txt_ta, on_txt_ta_changed, LV_EVENT_VALUE_CHANGED, nullptr);
   // Hint/error line right under the field and the button above y 250: the

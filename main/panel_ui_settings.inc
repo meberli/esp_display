@@ -752,6 +752,8 @@ void on_wifi_row(lv_event_t* e) {
   snprintf(t, sizeof(t), "WLAN: %s", wp_ssid);
   lv_label_set_text(wp_title, t);
   lv_textarea_set_text(wp_ta, "");
+  lv_textarea_set_password_mode(wp_ta, true);
+  if (wp_pass_eye != nullptr) lv_obj_invalidate(wp_pass_eye);
   lv_label_set_text(wp_status, ui_aps[i].secure ? "Passwort eingeben, dann OK" : "Offenes Netz: OK zum Verbinden");
   show(wp_root);
   show_keyboard(wp_ta);
@@ -844,6 +846,8 @@ void open_loxset(bool first_run) {
   lv_textarea_set_text(lox_host_ta, hp);
   lv_textarea_set_text(lox_user_ta, c.user);
   lv_textarea_set_text(lox_pass_ta, "");
+  lv_textarea_set_password_mode(lox_pass_ta, true);
+  if (lox_pass_eye != nullptr) lv_obj_invalidate(lox_pass_eye);
   lv_textarea_set_placeholder_text(lox_pass_ta, c.pass[0] != '\0' ? "Passwort (unver\xC3\xA4ndert)" : "Passwort");
   lv_label_set_text(lox_status, first_run ? "Miniserver eintragen (optional) oder \"\xC3\x9C" "berspringen\"."
                                           : "Adresse, Benutzer und Passwort des Miniservers");
@@ -856,42 +860,18 @@ void open_loxset(bool first_run) {
 // Reads the form; false (status set) if host or user is missing or the port is bad.
 bool lox_form(LoxoneConfig* c, bool* keep_pass) {
   memset(c, 0, sizeof(*c));
-  const char* h = lv_textarea_get_text(lox_host_ta);
-  while (*h == ' ') ++h;
-  if (strncmp(h, "http://", 7) == 0) h += 7;
-  if (strncmp(h, "https://", 8) == 0) {
-    lv_label_set_text(lox_status, "HTTPS wird nicht unterst\xC3\xBCtzt - http-Adresse eingeben");
+  char herr[96];
+  if (!loxone_host::parse(lv_textarea_get_text(lox_host_ta), c->host, sizeof(c->host), &c->port, herr, sizeof(herr))) {
+    lv_label_set_text(lox_status, herr[0] != '\0' ? herr : "Adresse fehlt");
     return false;
   }
-  char buf[80];
-  snprintf(buf, sizeof(buf), "%s", h);
-  char* slash = strchr(buf, '/');
-  if (slash != nullptr) *slash = '\0';
-  size_t n = strlen(buf);
-  while (n > 0 && buf[n - 1] == ' ') buf[--n] = '\0';
-  c->port = 80;
-  char* colon = strrchr(buf, ':');
-  if (colon != nullptr) {
-    char* end = nullptr;
-    long p = strtol(colon + 1, &end, 10);
-    if (end == colon + 1 || *end != '\0' || p < 1 || p > 65535) {
-      lv_label_set_text(lox_status, "Port ung\xC3\xBCltig (1-65535)");
-      return false;
-    }
-    c->port = static_cast<uint16_t>(p);
-    *colon = '\0';
-  }
-  if (buf[0] == '\0' || strlen(buf) >= sizeof(c->host)) {
-    lv_label_set_text(lox_status, "Adresse fehlt");
-    return false;
-  }
-  snprintf(c->host, sizeof(c->host), "%s", buf);
-  const char* u = lv_textarea_get_text(lox_user_ta);
-  if (u[0] == '\0') {
+  char user[sizeof(c->user)];
+  loxone_host::trim_copy(lv_textarea_get_text(lox_user_ta), user, sizeof(user));
+  if (user[0] == '\0') {
     lv_label_set_text(lox_status, "Benutzer fehlt");
     return false;
   }
-  snprintf(c->user, sizeof(c->user), "%s", u);
+  snprintf(c->user, sizeof(c->user), "%s", user);
   const char* pw = lv_textarea_get_text(lox_pass_ta);
   *keep_pass = pw[0] == '\0' && settings_loxone().pass[0] != '\0';
   snprintf(c->pass, sizeof(c->pass), "%s", *keep_pass ? settings_loxone().pass : pw);
@@ -1016,6 +996,83 @@ lv_obj_t* make_ta(lv_obj_t* parent, int y, const char* placeholder) {
   lv_obj_set_style_border_color(ta, lv_color_hex(kAccent), LV_STATE_FOCUSED);
   lv_obj_add_event_cb(ta, on_ta_click, LV_EVENT_CLICKED, nullptr);
   return ta;
+}
+
+// Show/hide for a password textarea. Inter and the material icon subset have
+// no eye glyph, so the icon is drawn. Default is hidden (password mode on).
+constexpr lv_coord_t kPassEyeW = 52;
+constexpr lv_coord_t kPassEyeGap = 8;
+
+void on_pass_eye_draw(lv_event_t* e) {
+  lv_obj_t* obj = lv_event_get_target(e);
+  lv_draw_ctx_t* ctx = lv_event_get_draw_ctx(e);
+  if (obj == nullptr || ctx == nullptr) return;
+  lv_area_t c;
+  lv_obj_get_coords(obj, &c);
+  const lv_coord_t cx = static_cast<lv_coord_t>((c.x1 + c.x2) / 2);
+  const lv_coord_t cy = static_cast<lv_coord_t>((c.y1 + c.y2) / 2);
+  lv_obj_t* ta = static_cast<lv_obj_t*>(lv_obj_get_user_data(obj));
+  const bool hidden = ta != nullptr && lv_textarea_get_password_mode(ta);
+  lv_color_t col = lv_color_hex(kText);
+  // Flattened oval (no eye glyph in Inter or the material subset).
+  lv_draw_rect_dsc_t rd;
+  lv_draw_rect_dsc_init(&rd);
+  rd.radius = LV_RADIUS_CIRCLE;
+  rd.bg_opa = LV_OPA_TRANSP;
+  rd.border_color = col;
+  rd.border_width = 2;
+  rd.border_opa = LV_OPA_COVER;
+  lv_area_t a = {static_cast<lv_coord_t>(cx - 12), static_cast<lv_coord_t>(cy - 7),
+                 static_cast<lv_coord_t>(cx + 12), static_cast<lv_coord_t>(cy + 7)};
+  lv_draw_rect(ctx, &rd, &a);
+  draw_disc(ctx, static_cast<float>(cx), static_cast<float>(cy), 3.f, col);
+  if (hidden) {
+    lv_draw_line_dsc_t ld;
+    lv_draw_line_dsc_init(&ld);
+    ld.color = col;
+    ld.width = 2;
+    ld.opa = LV_OPA_COVER;
+    lv_point_t p1 = {static_cast<lv_coord_t>(cx - 11), static_cast<lv_coord_t>(cy + 8)};
+    lv_point_t p2 = {static_cast<lv_coord_t>(cx + 11), static_cast<lv_coord_t>(cy - 8)};
+    lv_draw_line(ctx, &ld, &p1, &p2);
+  }
+}
+
+void on_pass_eye_click(lv_event_t* e) {
+  if (gesture_consumed) return;
+  lv_obj_t* btn = lv_event_get_target(e);
+  lv_obj_t* ta = static_cast<lv_obj_t*>(lv_obj_get_user_data(btn));
+  if (ta == nullptr) return;
+  lv_textarea_set_password_mode(ta, !lv_textarea_get_password_mode(ta));
+  lv_obj_invalidate(btn);
+}
+
+void password_toggle_layout(lv_obj_t* ta, lv_obj_t* btn, bool show) {
+  if (ta == nullptr || btn == nullptr) return;
+  const lv_coord_t full = kScreen - 2 * kMargin;
+  if (show) {
+    lv_obj_set_width(ta, full - kPassEyeW - kPassEyeGap);
+    lv_obj_clear_flag(btn, LV_OBJ_FLAG_HIDDEN);
+  } else {
+    lv_obj_set_width(ta, full);
+    lv_obj_add_flag(btn, LV_OBJ_FLAG_HIDDEN);
+  }
+}
+
+lv_obj_t* attach_password_toggle(lv_obj_t* ta) {
+  if (ta == nullptr) return nullptr;
+  lv_obj_t* parent = lv_obj_get_parent(ta);
+  const lv_coord_t y = lv_obj_get_y(ta);
+  lv_obj_set_width(ta, kScreen - 2 * kMargin - kPassEyeW - kPassEyeGap);
+  lv_obj_t* btn = lv_btn_create(parent);
+  lv_obj_set_size(btn, kPassEyeW, 52);
+  lv_obj_set_pos(btn, kScreen - kMargin - kPassEyeW, y);
+  style_glass(btn, 14);
+  lv_obj_set_user_data(btn, ta);
+  lv_obj_add_event_cb(btn, on_pass_eye_click, LV_EVENT_CLICKED, nullptr);
+  lv_obj_add_event_cb(btn, on_pass_eye_draw, LV_EVENT_DRAW_MAIN, nullptr);
+  watch(btn);
+  return btn;
 }
 
 lv_obj_t* make_choice(lv_obj_t* parent, int x, int y, int w, int h, const char* text, lv_event_cb_t cb, int user,
@@ -1296,6 +1353,8 @@ void build_settings_screens(lv_obj_t* screen) {
   wp_ta = make_ta(wp_root, 56, "Passwort");
   lv_textarea_set_password_mode(wp_ta, true);
   lv_textarea_set_password_bullet(wp_ta, "*");
+  lv_textarea_set_max_length(wp_ta, 64);
+  wp_pass_eye = attach_password_toggle(wp_ta);
   wp_status = make_label(wp_root, &font_inter_14, lv_color_hex(kTextDim));
   lv_obj_set_pos(wp_status, 24, 118);
   lv_obj_set_width(wp_status, 432);
@@ -1310,13 +1369,17 @@ void build_settings_screens(lv_obj_t* screen) {
   loxset_root = make_screen_root(screen, "Miniserver");
   lox_host_ta = make_ta(loxset_root, 56, "Adresse, z.B. 192.168.1.10 oder host:8080");
   lv_obj_set_size(lox_host_ta, kScreen - 2 * kMargin - 116, 52);
+  lv_textarea_set_max_length(lox_host_ta, 79);
   reg("lox:host", lox_host_ta);
   lox_search_btn = make_choice(loxset_root, kScreen - kMargin - 108, 56, 108, 52, "Suchen", on_lox_btn, 4, "lox:search");
   lox_user_ta = make_ta(loxset_root, 116, "Benutzer");
+  lv_textarea_set_max_length(lox_user_ta, 32);
   reg("lox:user", lox_user_ta);
   lox_pass_ta = make_ta(loxset_root, 176, "Passwort");
   lv_textarea_set_password_mode(lox_pass_ta, true);
   lv_textarea_set_password_bullet(lox_pass_ta, "*");
+  lv_textarea_set_max_length(lox_pass_ta, 64);
+  lox_pass_eye = attach_password_toggle(lox_pass_ta);
   reg("lox:pass", lox_pass_ta);
   lox_status = make_label(loxset_root, &font_inter_14, lv_color_hex(kTextDim));
   lv_obj_set_pos(lox_status, 24, 234);

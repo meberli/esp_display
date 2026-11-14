@@ -613,12 +613,13 @@ void ui_lox_done(bool saved, bool ok, int status, const char* detail) {
     if (ok) lv_timer_set_repeat_count(lv_timer_create(lox_restart_cb, 1500, nullptr), 1);
   } else if (ok) {
     snprintf(t, sizeof(t), "Verbindung OK - jetzt speichern");
-  } else if (status == 401 || status == 403) {
-    snprintf(t, sizeof(t), "Login abgelehnt - Benutzer/Passwort pr\xC3\xBC" "fen");
   } else {
-    snprintf(t, sizeof(t), "Test fehlgeschlagen: %s", detail != nullptr ? detail : "");
+    // loxone_test already set a concrete German cause (401, unreachable, timeout).
+    // Never copy a credential into this label; detail never contains the password.
+    const char* d = (detail != nullptr && detail[0] != '\0') ? detail : "Test fehlgeschlagen";
+    snprintf(t, sizeof(t), "%s", d);
   }
-  console_printf("UI: Miniserver %s %s\n", saved ? "save" : "test", ok ? "ok" : "failed");
+  console_printf("UI: Miniserver %s %s (HTTP %d)\n", saved ? "save" : "test", ok ? "ok" : "failed", status);
   if (nav == Nav::LoxSet) lv_label_set_text(lox_status, t);
 }
 

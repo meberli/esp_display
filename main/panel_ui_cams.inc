@@ -38,6 +38,7 @@ lv_obj_t* camsearch_status = nullptr;
 lv_obj_t* camsearch_list = nullptr;
 lv_obj_t* camkey_cur = nullptr;
 lv_obj_t* camkey_ta = nullptr;
+lv_obj_t* camkey_eye = nullptr;
 lv_obj_t* camkey_status = nullptr;
 CamInfo* cam_found = nullptr;  // PSRAM, 20 entries
 int cam_found_n = 0;
@@ -292,6 +293,8 @@ void open_camkey() {
   if (!have) lv_label_set_text(camkey_cur, "Kein Key hinterlegt");
   else lv_label_set_text_fmt(camkey_cur, "%s: %s", own ? "Eigener Key" : "Standard-Key (Firmware)", mask);
   lv_textarea_set_text(camkey_ta, "");
+  lv_textarea_set_password_mode(camkey_ta, true);
+  if (camkey_eye != nullptr) lv_obj_invalidate(camkey_eye);
   lv_label_set_text(camkey_status, "Gratis-Key: api.windy.com/keys (Webcams API)");
   show(camkey_root);
 }
@@ -607,6 +610,7 @@ void build_camera_screens(lv_obj_t* screen) {
   lv_textarea_set_password_mode(camkey_ta, true);
   lv_textarea_set_password_bullet(camkey_ta, "*");
   lv_textarea_set_max_length(camkey_ta, 71);
+  camkey_eye = attach_password_toggle(camkey_ta);
   reg("camkey:ta", camkey_ta);
   lv_obj_t* def = make_choice(camkey_root, kMargin, 178, kScreen - 2 * kMargin, 48, "Eigenen Key l\xC3\xB6schen (Standard verwenden)",
                               on_key_default, 0, "camkey:default");

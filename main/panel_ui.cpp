@@ -36,6 +36,7 @@
 #include <time.h>
 #include "material_icons.h"
 #include "settings.h"
+#include "loxone_host.h"
 #include "meteo_plz.h"
 #include "co4_task.h"
 #include "co4_chart_plot.h"
@@ -256,11 +257,13 @@ char wifi_setup_note[96] = "";  // set while the firmware opened the WLAN select
 lv_obj_t* wp_root = nullptr;
 lv_obj_t* wp_title = nullptr;
 lv_obj_t* wp_ta = nullptr;
+lv_obj_t* wp_pass_eye = nullptr;
 lv_obj_t* wp_status = nullptr;
 lv_obj_t* loxset_root = nullptr;  // Einstellungen > Miniserver (also the first-run setup)
 lv_obj_t* lox_host_ta = nullptr;
 lv_obj_t* lox_user_ta = nullptr;
 lv_obj_t* lox_pass_ta = nullptr;
+lv_obj_t* lox_pass_eye = nullptr;
 lv_obj_t* lox_status = nullptr;
 lv_obj_t* set_lox_val = nullptr;
 bool lox_first_run = false;   // opened at boot because no Miniserver is configured

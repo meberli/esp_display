@@ -9,6 +9,8 @@
 #include <strings.h>
 
 #include "config_load.h"
+#include "loxone_err.h"
+#include "loxone_host.h"
 #include "loxone_types.h"
 #include "net.h"
 #include "settings.h"
@@ -20,33 +22,15 @@ void set_detail(LoxoneHttpResult* result, const char* text) {
   snprintf(result->detail, sizeof(result->detail), "%s", text != nullptr ? text : "");
 }
 
-// Host only. Rejects HTTPS. Strips a leading http:// and any path.
-bool normalize_host_of(const char* host, char* out, size_t out_n, char* error, size_t error_n) {
-  if (strncmp(host, "https://", 8) == 0) {
-    snprintf(error, error_n, "HTTPS is not implemented");
-    return false;
-  }
-  if (strncmp(host, "http://", 7) == 0) {
-    host += 7;
-  }
-  snprintf(out, out_n, "%s", host);
-  size_t n = strlen(out);
-  while (n > 0 && out[n - 1] == '/') {
-    out[--n] = '\0';
-  }
-  char* slash = strchr(out, '/');
-  if (slash != nullptr) {
-    *slash = '\0';
-  }
-  if (out[0] == '\0') {
-    snprintf(error, error_n, "Miniserver host is empty");
-    return false;
-  }
-  return true;
+// Host only (no scheme, path or :port). Rejects HTTPS. A leftover "ip:8080"
+// in the stored host is split so the URL is never http://ip:8080:port/...
+bool normalize_host_of(const char* host, uint16_t default_port, char* out, size_t out_n, uint16_t* port,
+                       char* error, size_t error_n) {
+  return loxone_host::parse(host, out, out_n, port, error, error_n, default_port);
 }
 
-bool normalize_host(char* out, size_t out_n, char* error, size_t error_n) {
-  return normalize_host_of(settings_loxone().host, out, out_n, error, error_n);
+bool normalize_host(char* out, size_t out_n, uint16_t* port, char* error, size_t error_n) {
+  return normalize_host_of(settings_loxone().host, settings_loxone().port, out, out_n, port, error, error_n);
 }
 
 bool code_is_200(JsonVariant code) {
@@ -79,7 +63,8 @@ LoxoneHttpResult loxone_get(LoxoneAuthorizer& auth, const char* path, uint8_t* b
   }
 
   char host[80];
-  if (!normalize_host(host, sizeof(host), result.detail, sizeof(result.detail))) {
+  uint16_t port = settings_loxone().port;
+  if (!normalize_host(host, sizeof(host), &port, result.detail, sizeof(result.detail))) {
     return result;
   }
   const char* user = nullptr;
@@ -89,7 +74,7 @@ LoxoneHttpResult loxone_get(LoxoneAuthorizer& auth, const char* path, uint8_t* b
     return result;
   }
   char url[192];
-  snprintf(url, sizeof(url), "http://%s:%d%s", host, static_cast<int>(settings_loxone().port), path);
+  snprintf(url, sizeof(url), "http://%s:%d%s", host, static_cast<int>(port), path);
 
   // 5 s per connect/read (was 20 s): an absent Miniserver must not block the
   // panel; http_get_raw additionally bounds the whole body to 6x this.
@@ -382,21 +367,20 @@ LoxoneHttpResult loxone_test(const LoxoneConfig& c) {
     return result;
   }
   char host[80];
-  if (!normalize_host_of(c.host, host, sizeof(host), result.detail, sizeof(result.detail))) return result;
+  uint16_t port = c.port != 0 ? c.port : static_cast<uint16_t>(80);
+  if (!normalize_host_of(c.host, port, host, sizeof(host), &port, result.detail, sizeof(result.detail))) {
+    return result;
+  }
   char url[192];
-  snprintf(url, sizeof(url), "http://%s:%d/jdev/sps/LoxAPPversion3", host, static_cast<int>(c.port));
+  snprintf(url, sizeof(url), "http://%s:%d/jdev/sps/LoxAPPversion3", host, static_cast<int>(port));
   uint8_t body[256];
   HttpGetResult r = http_get(url, c.user, c.pass, body, sizeof(body), 10000);
   result.status = r.status;
-  if (r.status <= 0) {
-    snprintf(result.detail, sizeof(result.detail), "Keine Antwort (%s)", r.error);
-  } else if (r.status == 401 || r.status == 403) {
-    set_detail(&result, str::kLoxLoginRejected);
-  } else if (r.status != 200) {
-    snprintf(result.detail, sizeof(result.detail), "HTTP %d", r.status);
-  } else {
+  if (r.status == 200) {
     result.ok = true;
     set_detail(&result, "OK");
+  } else {
+    loxone_err::test_msg(r.status, r.error, result.detail, sizeof(result.detail));
   }
   return result;
 }
