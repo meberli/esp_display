@@ -5,6 +5,7 @@
 #include "esp_netif.h"
 #include "esp_timer.h"
 #include "mdns.h"
+#include "net.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -130,7 +131,7 @@ bool ipv4_from_mdns(const mdns_ip_addr_t* addr, char* ip, size_t n) {
   if (ip == nullptr || n < 8) return false;
   ip[0] = '\0';
   for (const mdns_ip_addr_t* a = addr; a != nullptr; a = a->next) {
-    if (a->addr.type != ESP_IP_ADDR_TYPE_V4) continue;
+    if (a->addr.type != ESP_IPADDR_TYPE_V4) continue;
     snprintf(ip, n, IPSTR, IP2STR(&a->addr.u_addr.ip4));
     return ip[0] != '\0' && strcmp(ip, "0.0.0.0") != 0;
   }
@@ -240,23 +241,11 @@ int device_discover_scan(DiscoverKind kind, DiscoverHit* hits, int cap, uint32_t
   n = mdns_collect(kind, mdns_ms, hits, n);
   ESP_LOGI(kTag, "mDNS hits=%d after %d ms", n, static_cast<int>((now_us() - start) / 1000));
 
-  esp_netif_t* net = nullptr;
-  while ((net = esp_netif_next(net)) != nullptr) {
-    const char* ifk = esp_netif_get_ifkey(net);
-    if (ifk == nullptr || strncmp(ifk, "WIFI_STA", 8) != 0) continue;
-    break;
-  }
-  if (net == nullptr) {
-    ESP_LOGW(kTag, "no STA netif, mDNS-only (%d)", n);
-    return n > 0 ? n : -1;
-  }
-  esp_netif_ip_info_t info = {};
-  if (esp_netif_get_ip_info(net, &info) != ESP_OK || info.ip.addr == 0) {
+  uint32_t self = 0, mask = 0;
+  if (!wifi_sta_ipv4(&self, &mask)) {
     ESP_LOGW(kTag, "no STA IP, mDNS-only (%d)", n);
     return n > 0 ? n : -1;
   }
-  const uint32_t self = ntohl(info.ip.addr);
-  const uint32_t mask = ntohl(info.netmask.addr);
 
   uint32_t hosts[kMaxHosts];
   const int host_n = discover_hosts(self & mask, mask, self, hosts, kMaxHosts);
