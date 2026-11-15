@@ -298,10 +298,21 @@ bool loxone_parse_structure(const uint8_t* json, size_t length, LoxoneControl* o
 
   size_t count = 0;
   size_t total = 0;
-  char cat_id[kLoxoneControlCap][40];
-  char cat_name[kLoxoneControlCap][40];
-  memset(cat_id, 0, sizeof(cat_id));
-  memset(cat_name, 0, sizeof(cat_name));
+  // These tables used to live on the stack. With cap 64 they are 5 KiB, and
+  // loxone_parse_structure already opens a 5344-byte frame (Panlee objdump:
+  // `entry a1, 0x14e0`) while lox_task is only 8 KiB and inlines net_load
+  // (2400-byte frame). Together that left ~248 bytes before ArduinoJson
+  // recursion — enough to overflow on the first LoxAPP3 parse, before
+  // maint_mark_valid at 8 s, so a new OTA image rolled back.
+  using CatTable = char[kLoxoneControlCap][40];
+  void* cat_mem = PsramAllocator{}.allocate(2 * sizeof(CatTable));
+  if (cat_mem == nullptr) {
+    snprintf(error, error_n, "Not enough memory for category tables");
+    return false;
+  }
+  auto* cat_id = static_cast<CatTable*>(cat_mem);
+  auto* cat_name = reinterpret_cast<CatTable*>(static_cast<uint8_t*>(cat_mem) + sizeof(CatTable));
+  memset(cat_mem, 0, 2 * sizeof(CatTable));
   for (JsonPair kv : controls) {
     JsonObject ctrl = kv.value().as<JsonObject>();
     const char* type = ctrl["type"] | "";
@@ -349,15 +360,16 @@ bool loxone_parse_structure(const uint8_t* json, size_t length, LoxoneControl* o
     copy_trunc(out[count].name, sizeof(out[count].name), name);
     copy_trunc(out[count].room, sizeof(out[count].room), room);
     copy_trunc(out[count].action, sizeof(out[count].action), action);
-    copy_trunc(cat_id[count], sizeof(cat_id[count]), cid);
-    copy_trunc(cat_name[count], sizeof(cat_name[count]), cname);
+    copy_trunc((*cat_id)[count], sizeof((*cat_id)[count]), cid);
+    copy_trunc((*cat_name)[count], sizeof((*cat_name)[count]), cname);
     out[count].kind = kind;
     out[count].favorite = read_favorite(ctrl);
     assign_state(&out[count], ctrl, type);
     count++;
   }
 
-  link_timer_pulses(out, cat_id, cat_name, count);
+  link_timer_pulses(out, *cat_id, *cat_name, count);
+  PsramAllocator{}.deallocate(cat_mem);
 
   if (count > 1) {
     qsort(out, count, sizeof(LoxoneControl), compare_controls);

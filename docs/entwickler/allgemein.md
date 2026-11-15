@@ -131,7 +131,7 @@ Ein analoger Daytimer erscheint unter seinem Namen aus der Struktur (keine fest 
 - `stopOverride`
 - `Pulse` an einen `Pushbutton` derselben Kategorie. Hat der Timer keine Kategorie, wird ein Taster gewählt, dessen Kategoriename dem Timernamen entspricht.
 
-Die Pfade entstehen in `loxone_cmd.h` aus geprüfter Action-UUID und ganzen Zahlen, nicht durch Lockern von `loxone_id_ok`. Das Wochenprogramm (`entriesAndDefaultValue`) braucht den Websocket-Statusstrom und ist nicht Teil dieser Stufe. Token-Auth bleibt ein Stub; lokales HTTP mit Basic Auth reicht für diesen Weg.
+Die Pfade entstehen in `loxone_cmd.h` aus geprüfter Action-UUID und ganzen Zahlen, nicht durch Lockern von `loxone_id_ok`. Die Zuordnungstabelle Kategorie↔Taster liegt im PSRAM, nicht auf dem 8-KB-Stack von `lox_task` (sonst überläuft der Frame, sobald `kLoxoneControlCap` 64 ist). Das Wochenprogramm (`entriesAndDefaultValue`) braucht den Websocket-Statusstrom und ist nicht Teil dieser Stufe. Token-Auth bleibt ein Stub; lokales HTTP mit Basic Auth reicht für diesen Weg.
 
 
 ## 3. Build-System und Targets
