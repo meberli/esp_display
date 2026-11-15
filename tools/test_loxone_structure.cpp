@@ -2,6 +2,7 @@
 //   tools/test_loxone_structure.cpp main/loxone_structure.cpp -o /tmp/tlxs && /tmp/tlxs
 #include <stdio.h>
 #include <string.h>
+#include <string>
 
 #include "loxone_structure.h"
 
@@ -91,6 +92,59 @@ static const char* kJsonFallback = R"JSON({
   }
 })JSON";
 
+
+// Runtime-built LoxAPP3 that fills the cap and allocates the category tables
+// on the heap (PSRAM on device). Synthetic ids only.
+static std::string large_structure_json() {
+  std::string j =
+      "{\"msInfo\":{\"msName\":\"BigHall\"},"
+      "\"rooms\":{\"r1\":{\"name\":\"Hall\"}},"
+      "\"cats\":{\"c-air\":{\"name\":\"AirChange\"},\"c-light\":{\"name\":\"Lights\"}},"
+      "\"controls\":{";
+  auto add = [&](const char* rec, bool comma) {
+    if (comma) j += ',';
+    j += rec;
+  };
+  add("\"aaaaaaaa-bbbb-cccc-ddddeeeeee000001\":{"
+      "\"name\":\"Schedule\",\"type\":\"Daytimer\","
+      "\"uuidAction\":\"aaaaaaaa-bbbb-cccc-ddddeeeeee000001\","
+      "\"room\":\"r1\",\"cat\":\"c-air\",\"isFavorite\":true,"
+      "\"details\":{\"analog\":true},"
+      "\"states\":{\"value\":\"aaaaaaaa-bbbb-cccc-ddddeeeeee000002\","
+      "\"override\":\"aaaaaaaa-bbbb-cccc-ddddeeeeee000003\"}}",
+      false);
+  add("\"aaaaaaaa-bbbb-cccc-ddddeeeeee000010\":{"
+      "\"name\":\"Boost\",\"type\":\"Pushbutton\","
+      "\"uuidAction\":\"aaaaaaaa-bbbb-cccc-ddddeeeeee000010\","
+      "\"cat\":\"c-air\",\"isFavorite\":true}",
+      true);
+  // 62 switches stored with the timer and button = 64. Ten more exist but
+  // do not fit; two digital daytimers are skipped entirely.
+  char rec[512], id[40], st[40];
+  for (int i = 0; i < 72; ++i) {
+    snprintf(id, sizeof(id), "aaaaaaaa-bbbb-cccc-ddddeeeeee%06d", 100000 + i);
+    snprintf(st, sizeof(st), "aaaaaaaa-bbbb-cccc-ddddeeeeee%06d", 200000 + i);
+    snprintf(rec, sizeof(rec),
+             "\"%s\":{\"name\":\"Lamp%02d\",\"type\":\"Switch\","
+             "\"uuidAction\":\"%s\",\"cat\":\"c-light\","
+             "\"states\":{\"active\":\"%s\"}}",
+             id, i, id, st);
+    add(rec, true);
+  }
+  for (int i = 0; i < 2; ++i) {
+    snprintf(id, sizeof(id), "aaaaaaaa-bbbb-cccc-ddddeeeeee%06d", 300000 + i);
+    snprintf(st, sizeof(st), "aaaaaaaa-bbbb-cccc-ddddeeeeee%06d", 400000 + i);
+    snprintf(rec, sizeof(rec),
+             "\"%s\":{\"name\":\"Clock%02d\",\"type\":\"Daytimer\","
+             "\"uuidAction\":\"%s\",\"details\":{\"analog\":false},"
+             "\"states\":{\"value\":\"%s\"}}",
+             id, i, id, st);
+    add(rec, true);
+  }
+  j += "}}";
+  return j;
+}
+
 static const LoxoneControl* find_action(const LoxoneControl* c, size_t n, const char* action) {
   for (size_t i = 0; i < n; ++i) {
     if (strcmp(c[i].action, action) == 0) return &c[i];
@@ -152,6 +206,25 @@ int main() {
   CHECK(shown == 1);
 
   CHECK(!loxone_parse_structure(nullptr, 0, out, 8, &shown, &supported, server, sizeof(server), err, sizeof(err)));
+
+  // Large synthetic structure: cap is full, extras are counted, pulse is linked.
+  {
+    std::string big = large_structure_json();
+    memset(out, 0, sizeof(out));
+    shown = supported = 0;
+    CHECK(loxone_parse_structure(reinterpret_cast<const uint8_t*>(big.data()), big.size(), out, kLoxoneControlCap,
+                                 &shown, &supported, server, sizeof(server), err, sizeof(err)));
+    CHECK(strcmp(server, "BigHall") == 0);
+    // 1 analog timer + 1 pushbutton + 72 switches; 2 digital daytimers skipped.
+    CHECK(supported == 74);
+    CHECK(shown == kLoxoneControlCap);
+    const LoxoneControl* sched = find_action(out, shown, "aaaaaaaa-bbbb-cccc-ddddeeeeee000001");
+    CHECK(sched != nullptr && sched->kind == kLoxoneTimer);
+    CHECK(strcmp(sched->pulse_action, "aaaaaaaa-bbbb-cccc-ddddeeeeee000010") == 0);
+    CHECK(strcmp(sched->pulse_name, "Boost") == 0);
+    CHECK(find_action(out, shown, "aaaaaaaa-bbbb-cccc-ddddeeeeee100000") != nullptr);
+  }
+
 
   if (fails == 0) printf("loxone_structure ok\n");
   return fails == 0 ? 0 : 1;
