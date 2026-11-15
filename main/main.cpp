@@ -589,7 +589,8 @@ void lox_task(void*) {
         net_load(&res);
         break;
       case NetOp::Command: {
-        LoxoneHttpResult r = loxone_send_command(*auth, req.command.action, req.command.command);
+        LoxoneHttpResult r = loxone_send_io(*auth, req.command.action, req.command.command,
+                                            req.command.level, req.command.seconds);
         res.ok = r.ok;
         res.status = r.status;
         res.index = req.command.index;

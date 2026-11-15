@@ -64,6 +64,8 @@ jobs:
           g++ -std=c++17 -Wall -I main -I components/ArduinoJson/src tools/test_device_discover.cpp main/device_discover.cpp main/energy.cpp -o /tmp/tdd && /tmp/tdd
           g++ -std=c++17 -Wall -I main tools/test_loxone_login.cpp -o /tmp/tll && /tmp/tll
           g++ -std=c++17 -Wall -I main tools/test_home_tap.cpp -o /tmp/tht && /tmp/tht
+          g++ -std=c++17 -Wall -I main tools/test_loxone_cmd.cpp -o /tmp/tlxcmd && /tmp/tlxcmd
+          g++ -std=c++17 -Wall -I main -I components/ArduinoJson/src -DLOX_STRUCTURE_HOST tools/test_loxone_structure.cpp main/loxone_structure.cpp -o /tmp/tlxs && /tmp/tlxs
           python3 tools/check_ui_font_chars.py
 
   build:

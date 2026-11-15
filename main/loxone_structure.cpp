@@ -1,9 +1,13 @@
 #include "loxone_structure.h"
 
 #include <ArduinoJson.h>
+#if defined(LOX_STRUCTURE_HOST)
+#include <stdlib.h>
+#else
 #include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#endif
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,11 +17,17 @@
 namespace {
 
 struct PsramAllocator {
+#if defined(LOX_STRUCTURE_HOST)
+  void* allocate(size_t size) { return malloc(size); }
+  void deallocate(void* pointer) { free(pointer); }
+  void* reallocate(void* pointer, size_t new_size) { return realloc(pointer, new_size); }
+#else
   void* allocate(size_t size) { return heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT); }
   void deallocate(void* pointer) { heap_caps_free(pointer); }
   void* reallocate(void* pointer, size_t new_size) {
     return heap_caps_realloc(pointer, new_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   }
+#endif
 };
 
 using PsramJsonDocument = BasicJsonDocument<PsramAllocator>;
@@ -30,7 +40,11 @@ struct YieldingReader {
   size_t pos;
   int read() {
     if (pos >= length) return -1;
-    if ((pos & 0x3FFF) == 0) vTaskDelay(1);
+    if ((pos & 0x3FFF) == 0) {
+#if !defined(LOX_STRUCTURE_HOST)
+      vTaskDelay(1);
+#endif
+    }
     return data[pos++];
   }
   size_t readBytes(char* out, size_t n) {
@@ -102,7 +116,88 @@ bool read_favorite(JsonObject ctrl) {
   return false;
 }
 
+void copy_id_field(char* dst, size_t n, JsonObject ctrl, const char* key) {
+  dst[0] = '\0';
+  const char* id = state_text(ctrl["states"].as<JsonObject>(), key);
+  if (!loxone_id_ok(id, n)) {
+    return;
+  }
+  copy_trunc(dst, n, id);
+}
+
+bool analog_flag(JsonVariant v) {
+  if (v.is<bool>()) {
+    return v.as<bool>();
+  }
+  if (v.is<int>()) {
+    return v.as<int>() != 0;
+  }
+  if (v.is<const char*>()) {
+    const char* text = v.as<const char*>();
+    return strcmp(text, "true") == 0 || strcmp(text, "1") == 0;
+  }
+  return false;
+}
+
+bool is_analog_daytimer(JsonObject ctrl) {
+  const char* type = ctrl["type"] | "";
+  if (strcmp(type, "Daytimer") != 0) {
+    return false;
+  }
+  return analog_flag(ctrl["details"]["analog"]);
+}
+
+int compare_ci(const char* a, const char* b) { return strcasecmp(a != nullptr ? a : "", b != nullptr ? b : ""); }
+
+void link_timer_pulses(LoxoneControl* out, const char (*cat_id)[40], const char (*cat_name)[40], size_t count) {
+  for (size_t i = 0; i < count; ++i) {
+    if (out[i].kind != kLoxoneTimer) {
+      continue;
+    }
+    int best = -1;
+    for (size_t j = 0; j < count; ++j) {
+      if (out[j].kind != kLoxonePulse) {
+        continue;
+      }
+      bool same = false;
+      if (cat_id[i][0] != '\0' && cat_id[j][0] != '\0' && compare_ci(cat_id[i], cat_id[j]) == 0) {
+        same = true;
+      } else if (cat_id[i][0] == '\0' && cat_name[j][0] != '\0' && compare_ci(out[i].name, cat_name[j]) == 0) {
+        // Uncategorized timer: link a Pushbutton whose category *name* equals the timer name.
+        same = true;
+      }
+      if (!same) {
+        continue;
+      }
+      if (best < 0) {
+        best = static_cast<int>(j);
+        continue;
+      }
+      const LoxoneControl& cur = out[j];
+      const LoxoneControl& prev = out[best];
+      if (cur.favorite != prev.favorite) {
+        if (cur.favorite) {
+          best = static_cast<int>(j);
+        }
+        continue;
+      }
+      if (compare_ci(cur.name, prev.name) < 0) {
+        best = static_cast<int>(j);
+      }
+    }
+    if (best >= 0) {
+      copy_trunc(out[i].pulse_action, sizeof(out[i].pulse_action), out[best].action);
+      copy_trunc(out[i].pulse_name, sizeof(out[i].pulse_name), out[best].name);
+    }
+  }
+}
+
 void assign_state(LoxoneControl* dst, JsonObject ctrl, const char* type) {
+  if (dst->kind == kLoxoneTimer) {
+    copy_state(dst, ctrl, "value", kLoxoneStateValue);
+    copy_id_field(dst->override_state, sizeof(dst->override_state), ctrl, "override");
+    return;
+  }
   if (dst->kind == kLoxoneShutter) {
     copy_state(dst, ctrl, "position", kLoxoneStatePosition);
     return;
@@ -150,6 +245,9 @@ bool loxone_parse_structure(const uint8_t* json, size_t length, LoxoneControl* o
   if (json == nullptr || length == 0 || out == nullptr || cap == 0) {
     snprintf(error, error_n, "Empty structure");
     return false;
+  }
+  if (cap > kLoxoneControlCap) {
+    cap = kLoxoneControlCap;
   }
 
   size_t capacity = length * 2 + 4096;
@@ -200,6 +298,10 @@ bool loxone_parse_structure(const uint8_t* json, size_t length, LoxoneControl* o
 
   size_t count = 0;
   size_t total = 0;
+  char cat_id[kLoxoneControlCap][40];
+  char cat_name[kLoxoneControlCap][40];
+  memset(cat_id, 0, sizeof(cat_id));
+  memset(cat_name, 0, sizeof(cat_name));
   for (JsonPair kv : controls) {
     JsonObject ctrl = kv.value().as<JsonObject>();
     const char* type = ctrl["type"] | "";
@@ -210,6 +312,8 @@ bool loxone_parse_structure(const uint8_t* json, size_t length, LoxoneControl* o
       kind = kLoxoneShutter;
     } else if (strcmp(type, "Pushbutton") == 0) {
       kind = kLoxonePulse;
+    } else if (is_analog_daytimer(ctrl)) {
+      kind = kLoxoneTimer;
     } else {
       continue;
     }
@@ -235,15 +339,25 @@ bool loxone_parse_structure(const uint8_t* json, size_t length, LoxoneControl* o
     if (room_id[0] != '\0') {
       room = doc["rooms"][room_id]["name"] | "";
     }
+    const char* cid = ctrl["cat"] | "";
+    const char* cname = "";
+    if (cid[0] != '\0') {
+      cname = doc["cats"][cid]["name"] | "";
+    }
 
+    memset(&out[count], 0, sizeof(out[count]));
     copy_trunc(out[count].name, sizeof(out[count].name), name);
     copy_trunc(out[count].room, sizeof(out[count].room), room);
     copy_trunc(out[count].action, sizeof(out[count].action), action);
+    copy_trunc(cat_id[count], sizeof(cat_id[count]), cid);
+    copy_trunc(cat_name[count], sizeof(cat_name[count]), cname);
     out[count].kind = kind;
     out[count].favorite = read_favorite(ctrl);
     assign_state(&out[count], ctrl, type);
     count++;
   }
+
+  link_timer_pulses(out, cat_id, cat_name, count);
 
   if (count > 1) {
     qsort(out, count, sizeof(LoxoneControl), compare_controls);

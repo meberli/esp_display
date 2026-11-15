@@ -25,7 +25,7 @@ int main() {
   memset(in[5].action, 0, sizeof(in[5].action));
   snprintf(in[5].action, sizeof(in[5].action), "Custom_ID.1");  // non-UUID id stays text
   size_t len = lox_cache_pack(in, kLoxoneControlCap, "Miniserver Gen 2", blob, sizeof(blob));
-  printf("48 controls -> %u bytes\n", static_cast<unsigned>(len));
+  printf("%u controls -> %u bytes\n", static_cast<unsigned>(kLoxoneControlCap), static_cast<unsigned>(len));
   CHECK(len > 0 && len <= kLoxCacheMax);
   char srv[48];
   size_t n = lox_cache_unpack(blob, len, out, kLoxoneControlCap, srv, sizeof(srv));
@@ -43,6 +43,26 @@ int main() {
   snprintf(bad.action, sizeof(bad.action), "a/b");
   len = lox_cache_pack(&bad, 1, "", blob, sizeof(blob));
   CHECK(len > 0 && lox_cache_unpack(blob, len, out, 1, srv, sizeof(srv)) == 0);
+  // Analog Daytimer extras (override + linked pulse) round-trip in LXC2.
+  LoxoneControl tim[1], tim_out[1];
+  memset(tim, 0, sizeof(tim));
+  snprintf(tim[0].name, sizeof(tim[0].name), "Schedule");
+  snprintf(tim[0].room, sizeof(tim[0].room), "Cellar");
+  snprintf(tim[0].action, sizeof(tim[0].action), "aaaaaaaa-bbbb-cccc-ddddeeeeeeeeee01");
+  snprintf(tim[0].state, sizeof(tim[0].state), "aaaaaaaa-bbbb-cccc-ddddeeeeeeeeee02");
+  snprintf(tim[0].override_state, sizeof(tim[0].override_state), "aaaaaaaa-bbbb-cccc-ddddeeeeeeeeee03");
+  snprintf(tim[0].pulse_action, sizeof(tim[0].pulse_action), "aaaaaaaa-bbbb-cccc-ddddeeeeeeeeee10");
+  snprintf(tim[0].pulse_name, sizeof(tim[0].pulse_name), "Boost");
+  tim[0].kind = kLoxoneTimer;
+  tim[0].state_kind = kLoxoneStateValue;
+  tim[0].favorite = true;
+  len = lox_cache_pack(tim, 1, "Testserver", blob, sizeof(blob));
+  CHECK(len > 0);
+  n = lox_cache_unpack(blob, len, tim_out, 1, srv, sizeof(srv));
+  CHECK(n == 1);
+  CHECK(memcmp(tim, tim_out, sizeof(tim)) == 0);
+  CHECK(strcmp(srv, "Testserver") == 0);
+
   if (fails == 0) printf("lox_cache ok\n");
   return fails == 0 ? 0 : 1;
 }

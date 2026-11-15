@@ -6,6 +6,7 @@
 //   font_icons_38: home buttons + weather glyphs
 //   font_icons_32: control tiles (lightbulb, blinds_2, toggle_on/off, star,
 //                  arrow_upward/downward)
+//   Analog Daytimer tiles use font_icons_24 for the air glyph (not in the 32 px subset).
 //   font_icons_24: weather glyphs, water_drop, air, wb_twilight, wifi bars,
 //                  lock, location_on, search, check, chevron_right, bedtime,
 //                  schedule, lightbulb, blinds_2, toggle_on, star,

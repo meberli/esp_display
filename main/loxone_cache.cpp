@@ -4,7 +4,7 @@
 #include <string.h>
 
 namespace {
-constexpr uint8_t kMagic[4] = {'L', 'X', 'C', '1'};
+constexpr uint8_t kMagic[4] = {'L', 'X', 'C', '2'};
 
 bool put_str(uint8_t* out, size_t cap, size_t* o, const char* s, size_t max) {
   size_t l = strnlen(s, max - 1);
@@ -100,6 +100,12 @@ size_t lox_cache_pack(const LoxoneControl* c, size_t n, const char* server, uint
         !put_id(out, cap, &o, c[k].action, sizeof(c[k].action)) ||
         !put_id(out, cap, &o, c[k].state, sizeof(c[k].state)))
       return 0;
+    if (c[k].kind == kLoxoneTimer) {
+      if (!put_id(out, cap, &o, c[k].override_state, sizeof(c[k].override_state)) ||
+          !put_id(out, cap, &o, c[k].pulse_action, sizeof(c[k].pulse_action)) ||
+          !put_str(out, cap, &o, c[k].pulse_name, sizeof(c[k].pulse_name)))
+        return 0;
+    }
   }
   return o;
 }
@@ -116,7 +122,7 @@ size_t lox_cache_unpack(const uint8_t* in, size_t len, LoxoneControl* out, size_
     memset(&c, 0, sizeof(c));
     if (i + 3 > len) return 0;
     uint8_t kind = in[i++], sk = in[i++];
-    if (kind > kLoxoneShutter || sk > kLoxoneStateScene) return 0;
+    if (kind > kLoxoneTimer || sk > kLoxoneStateValue) return 0;
     c.kind = static_cast<LoxoneKind>(kind);
     c.state_kind = static_cast<LoxoneStateKind>(sk);
     c.favorite = in[i++] != 0;
@@ -126,6 +132,14 @@ size_t lox_cache_unpack(const uint8_t* in, size_t len, LoxoneControl* out, size_
     // Ids end up in URL paths: same check as the parser.
     if (!loxone_id_ok(c.action, sizeof(c.action) - 1)) return 0;
     if (c.state[0] != '\0' && !loxone_id_ok(c.state, sizeof(c.state) - 1)) return 0;
+    if (c.kind == kLoxoneTimer) {
+      if (!get_id(in, len, &i, c.override_state, sizeof(c.override_state)) ||
+          !get_id(in, len, &i, c.pulse_action, sizeof(c.pulse_action)) ||
+          !get_str(in, len, &i, c.pulse_name, sizeof(c.pulse_name)))
+        return 0;
+      if (c.override_state[0] != '\0' && !loxone_id_ok(c.override_state, sizeof(c.override_state) - 1)) return 0;
+      if (c.pulse_action[0] != '\0' && !loxone_id_ok(c.pulse_action, sizeof(c.pulse_action) - 1)) return 0;
+    }
   }
   if (i != len) return 0;
   if (server != nullptr && server_n > 0) snprintf(server, server_n, "%s", srv);

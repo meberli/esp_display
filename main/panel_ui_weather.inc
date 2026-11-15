@@ -131,7 +131,7 @@ Section section_of(const LoxoneControl& ctrl) {
 }
 
 bool has_status(const LoxoneControl& ctrl) {
-  return ctrl.kind == kLoxoneSwitch || ctrl.kind == kLoxoneShutter;
+  return ctrl.kind == kLoxoneSwitch || ctrl.kind == kLoxoneShutter || ctrl.kind == kLoxoneTimer;
 }
 
 int compare_index(const void* left, const void* right) {
@@ -364,7 +364,15 @@ void style_control(int slot, LoxoneKind kind, bool is_known, bool on, const char
 void format_switch_sub(char* out, size_t n, int index) {
   const LoxoneControl& ctrl = controls[index];
   const char* mark = "";
-  if (known[index]) {
+  if (ctrl.kind == kLoxoneTimer) {
+    if (known[index]) {
+      static char lvl[16];
+      lox_format_level(position_pct[index], lvl, sizeof(lvl));
+      mark = lvl;
+    } else if (needs_read[index]) {
+      mark = "...";
+    }
+  } else if (known[index]) {
     mark = known_on[index] ? "An" : "Aus";
   } else if (needs_read[index]) {
     mark = "...";
@@ -481,6 +489,7 @@ void show_relay_tile(int slot) {
   bool on = panel_relay_is_on();
   lv_label_set_text(tile_name[slot], "Relais");
   lv_label_set_text(tile_sub[slot], on ? "An" : "Aus");
+  lv_obj_set_style_text_font(tile_icon[slot], &font_icons_32, 0);
   style_control(slot, kLoxoneSwitch, true, on, on ? ICON_TOGGLE : ICON_TOGGLE_OFF);
 }
 
@@ -499,8 +508,19 @@ void show_switch_tile(int slot, int index) {
   bool on = known[index] && known_on[index];
   bool light = current_section == kSecLight || ctrl.state_kind == kLoxoneStatePosition ||
                ctrl.state_kind == kLoxoneStateScene;
-  const char* icon = light ? ICON_BULB : ctrl.kind == kLoxonePulse ? ICON_TOGGLE : on ? ICON_TOGGLE : ICON_TOGGLE_OFF;
-  style_control(slot, ctrl.kind, known[index], known_on[index], icon);
+  const char* icon = ICON_TOGGLE_OFF;
+  if (ctrl.kind == kLoxoneTimer) {
+    icon = ICON_AIR;
+  } else if (light) {
+    icon = ICON_BULB;
+  } else if (ctrl.kind == kLoxonePulse) {
+    icon = ICON_TOGGLE;
+  } else if (on) {
+    icon = ICON_TOGGLE;
+  }
+  // ICON_AIR is in the 24 px icon font, not the 32 px tile subset.
+  lv_obj_set_style_text_font(tile_icon[slot], ctrl.kind == kLoxoneTimer ? &font_icons_24 : &font_icons_32, 0);
+  style_control(slot, ctrl.kind, known[index], known_on[index] || (ctrl.kind == kLoxoneTimer && known[index] && position_pct[index] > 0), icon);
 }
 
 void show_shutter_row(int row_slot, int index) {
@@ -588,6 +608,7 @@ void show_home() {
   page = -1;
   hide(cat_root);
   hide(wx_root);
+  hide(timer_root);
   hide(cam_root);
   hide(message);
   hide_settings();
@@ -618,6 +639,7 @@ void enter_section(Section section) {
   hide(home_root);
   hide(lox_root);
   hide(wx_root);
+  hide(timer_root);
   info_hide_views();
   show(cat_root);
   lv_obj_scroll_to_y(cat_list, 0, LV_ANIM_OFF);
@@ -650,6 +672,7 @@ void open_lox_menu() {
   hide(cat_root);
   hide(home_root);
   hide(wx_root);
+  hide(timer_root);
   info_hide_views();
   show(lox_root);
   lox_menu_refresh();
@@ -664,8 +687,16 @@ int sw_targets(int* out) {
     if (pages[p].section != kSecOther) continue;
     for (int r = 0; r < pages[p].nrows; ++r) {
       if (pages[p].rows[r].shutter) continue;
-      if (pages[p].rows[r].a != -1) out[n++] = pages[p].rows[r].a;
-      if (pages[p].rows[r].b != -1) out[n++] = pages[p].rows[r].b;
+      int pair[2] = {pages[p].rows[r].a, pages[p].rows[r].b};
+      for (int k = 0; k < 2; ++k) {
+        int idx = pair[k];
+        if (idx < 0) continue;
+        if (idx != kLocalRelay && static_cast<size_t>(idx) < control_count &&
+            controls[idx].kind == kLoxoneTimer) {
+          continue;
+        }
+        out[n++] = idx;
+      }
     }
   }
   return n;
@@ -716,7 +747,7 @@ void sw_cycle_target() {
   sw_home_refresh();
 }
 
-void queue_command(int index, const char* command);
+void queue_command(int index, const char* command, int level = 0, uint32_t seconds = 0);
 
 void sw_toggle() {
   if (!swt::may_fire(gesture_consumed, command_pending)) return;
@@ -751,6 +782,10 @@ void back_level() {
   if (message_open || nav == Nav::Home) return;
   if (nav == Nav::Category) {
     open_lox_menu();
+    return;
+  }
+  if (nav == Nav::Timer) {
+    close_timer();
     return;
   }
   if (nav == Nav::LoxMenu || nav == Nav::Weather || nav == Nav::Cameras || nav == Nav::Transit ||
@@ -858,6 +893,10 @@ void swipe_page(int dir) {
       wx_day = next;
       refresh_weather_day();
     }
+    return;
+  }
+  if (nav == Nav::Timer) {
+    if (dir < 0) close_timer();
     return;
   }
   if (nav == Nav::LoxMenu) {
@@ -994,15 +1033,19 @@ int control_for_slot(int slot) {
   return col == 0 ? current.rows[row_slot].a : current.rows[row_slot].b;
 }
 
-void queue_command(int index, const char* command) {
+void queue_command(int index, const char* command, int level, uint32_t seconds) {
   snprintf(pending.action, sizeof(pending.action), "%s", controls[index].action);
-  snprintf(pending.command, sizeof(pending.command), "%s", command);
+  snprintf(pending.command, sizeof(pending.command), "%s", command != nullptr ? command : "");
   pending.index = index;
+  pending.level = level;
+  pending.seconds = seconds;
   command_pending = true;
   if (!visible_pending()) {
     ui_set_status("Sende...");
   }
 }
+
+#include "panel_ui_lox_timer.inc"
 
 void on_tile(lv_event_t* event) {
   if (gesture_consumed) {
@@ -1024,6 +1067,10 @@ void on_tile(lv_event_t* event) {
     return;
   }
   const LoxoneControl& ctrl = controls[index];
+  if (ctrl.kind == kLoxoneTimer) {
+    open_timer(index);
+    return;
+  }
   const char* command = "Pulse";
   if (ctrl.kind == kLoxoneSwitch) {
     command = (known[index] && known_on[index]) ? "Off" : "On";
@@ -1143,6 +1190,34 @@ bool apply_state_value(int index, const char* value) {
     return false;
   }
   const LoxoneControl& ctrl = controls[index];
+  if (ctrl.kind == kLoxoneTimer) {
+    int level = static_cast<int>(parsed + (parsed < 0.f ? -0.5f : 0.5f));
+    if (level < kLoxTimerLevelMin) {
+      level = kLoxTimerLevelMin;
+    }
+    if (level > kLoxTimerLevelMax) {
+      level = kLoxTimerLevelMax;
+    }
+    position_pct[index] = level;
+    known_on[index] = level != 0;
+    known[index] = true;
+    override_s[index] = 0;
+    while (end != nullptr && (*end == ' ' || *end == '\t')) {
+      ++end;
+    }
+    if (end != nullptr && *end != '\0') {
+      char* end2 = nullptr;
+      long ov = strtol(end, &end2, 10);
+      if (end2 != end && ov >= 0) {
+        override_s[index] = ov > static_cast<long>(kLoxOverrideMaxSecs) ? static_cast<int>(kLoxOverrideMaxSecs)
+                                                                        : static_cast<int>(ov);
+      }
+    }
+    if (!timer_sel_dirty && index == timer_index) {
+      timer_sel_level = level;
+    }
+    return true;
+  }
   if (ctrl.kind == kLoxoneShutter) {
     float frac = parsed;
     if (parsed > 1.f) {
@@ -1189,6 +1264,8 @@ void refresh_visible() {
     refresh_category();
   } else if (nav == Nav::LoxMenu) {
     lox_menu_refresh();
+  } else if (nav == Nav::Timer) {
+    timer_refresh();
   } else {
     fill_home_cards();
     sw_home_refresh();

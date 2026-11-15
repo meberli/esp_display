@@ -37,6 +37,7 @@
 #include "material_icons.h"
 #include "settings.h"
 #include "loxone_host.h"
+#include "loxone_cmd.h"
 #include "meteo_plz.h"
 #include "co4_task.h"
 #include "co4_chart_plot.h"
@@ -84,7 +85,7 @@ constexpr int kGap = 12;
 constexpr int kTileW = 214;
 constexpr int kTileH = 156;
 constexpr int kContentY = 88;
-constexpr int kRowsPerPage = 48;  // one page per category (vertical scroll), = kLoxoneControlCap
+constexpr int kRowsPerPage = 48;  // one scrolling page can hold 48 rows (up to 96 half-tiles)
 constexpr int kPerPage = 2 * kRowsPerPage;
 constexpr int kMaxPages = 32;
 constexpr uint32_t kShutterRereadMs = 3000;
@@ -119,7 +120,7 @@ enum class Nav : uint8_t {
   Home, Category, Weather, Settings, WifiList, WifiPass, Location, Display, Time,
   Cameras, CamSettings, CamId, CamSearch, CamKey,
   Transit, Calendar, Rain, Radar, Warn, TransitSet, StationSearch, CalSet, TextEdit, Maint, RemSet, Energy, EnSet,
-  Playground, Co4, Co4Set, Co4Login, Co4Zones, LoxMenu, LoxSet, Scope
+  Playground, Co4, Co4Set, Co4Login, Co4Zones, LoxMenu, LoxSet, Scope, Timer
 };
 
 const char* kShutterLabel[2] = {"Auf", "Ab"};
@@ -151,6 +152,7 @@ char cur_cond[48] = "Wetter wird geladen";
 lv_obj_t* fc_icon[2] = {nullptr, nullptr};
 // Weather day detail screen.
 lv_obj_t* wx_root = nullptr;
+lv_obj_t* timer_root = nullptr;
 lv_obj_t* wx_title = nullptr;
 lv_obj_t* wx_page = nullptr;
 lv_obj_t* wx_dots = nullptr;  // weather day pager
@@ -650,6 +652,10 @@ void dots_set(lv_obj_t* s, int n, int active) {
 }
 
 
+void close_timer();
+void open_timer(int index);
+void timer_refresh();
+void build_timer_screen(lv_obj_t* screen);
 #include "panel_ui_weather.inc"
 #include "panel_ui_settings.inc"
 #include "panel_ui_cams.inc"
@@ -868,6 +874,13 @@ void ui_describe(char* out, size_t n) {
              disp.saver);
   } else if (nav == Nav::Location) {
     snprintf(out, n, "location %d searching=%d", ui_place_n, (loc_searching || settings_pending) ? 1 : 0);
+  } else if (nav == Nav::Timer) {
+    const char* name = (timer_index >= 0 && static_cast<size_t>(timer_index) < control_count)
+                           ? controls[timer_index].name
+                           : "";
+    int lvl = (timer_index >= 0) ? position_pct[timer_index] : 0;
+    int ov = (timer_index >= 0) ? override_s[timer_index] : 0;
+    snprintf(out, n, "timer %s level=%d override=%d", name, lvl, ov);
   } else {
     snprintf(out, n, "category %s %d/%d", section_name(current_section), section_page + 1,
              section_pages[current_section]);
@@ -1190,6 +1203,7 @@ static void ui_init_impl() {
   hide(lox_root);
 
   build_weather_screen(screen);
+  build_timer_screen(screen);
 
   msg_status = make_label(screen, &font_inter_14, lv_color_hex(kTextDim));
   lv_obj_set_pos(msg_status, 24, 28);
@@ -1333,6 +1347,7 @@ void ui_show_message(const char* title, const char* body, bool retry) {
   hide(home_root);
   hide(cat_root);
   hide(wx_root);
+  hide(timer_root);
   show(msg_status);
   show(message);
 }
@@ -1352,7 +1367,10 @@ void ui_show_controls(const LoxoneControl* items, size_t count, size_t supported
   memset(prefer, 0, sizeof(prefer));
   memset(moving, 0, sizeof(moving));
   memset(position_pct, 0, sizeof(position_pct));
+  memset(override_s, 0, sizeof(override_s));
   memset(reread_after, 0, sizeof(reread_after));
+  timer_index = -1;
+  timer_sel_dirty = false;
   for (size_t i = 0; i < count; ++i) {
     controls[i] = items[i];
     needs_read[i] = has_status(controls[i]);
@@ -1473,6 +1491,20 @@ void ui_command_finished(int index, bool ok, const char* command, const char* de
       needs_read[index] = true;
       prefer[index] = true;
       reread_after[index] = now_ms() + kShutterRereadMs;
+    } else if (controls[index].kind == kLoxoneTimer) {
+      needs_read[index] = true;
+      prefer[index] = true;
+      reread_after[index] = now_ms() + 400;
+      if (strcmp(command, "startOverride") == 0) {
+        position_pct[index] = pending.level;
+        if (position_pct[index] < 0) position_pct[index] = 0;
+        if (position_pct[index] > kLoxTimerLevelMax) position_pct[index] = kLoxTimerLevelMax;
+        known[index] = true;
+        known_on[index] = position_pct[index] != 0;
+        override_s[index] = static_cast<int>(pending.seconds);
+      } else if (strcmp(command, "stopOverride") == 0) {
+        override_s[index] = 0;
+      }
     }
   }
   if (!visible_pending()) {
@@ -1483,6 +1515,10 @@ void ui_command_finished(int index, bool ok, const char* command, const char* de
         ui_set_status("Storen auf");
       } else if (command != nullptr && strcmp(command, "FullDown") == 0) {
         ui_set_status("Storen ab");
+      } else if (command != nullptr && strcmp(command, "startOverride") == 0) {
+        ui_set_status("Handbetrieb gestartet");
+      } else if (command != nullptr && strcmp(command, "stopOverride") == 0) {
+        ui_set_status("Handbetrieb beendet");
       } else {
         ui_set_status("Gesendet");
       }

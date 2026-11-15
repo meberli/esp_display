@@ -203,6 +203,7 @@ void info_hide_all() {
 
 void info_hide_views() {
   radar_stop();
+  hide(timer_root);
   hide(tr_root);
   hide(calv_root);
   hide(rain_root);
@@ -221,6 +222,7 @@ void enter_view(Nav n, lv_obj_t* root) {
   hide(home_root);
   hide(cat_root);
   hide(wx_root);
+  hide(timer_root);
   hide(cam_root);
   hide_settings();
   info_hide_views();

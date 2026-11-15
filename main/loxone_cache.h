@@ -8,6 +8,8 @@
 #include "loxone_types.h"
 
 constexpr size_t kLoxCacheMax = 4096;  // NVS has 24 KB in total: never more than this
+// Packed format LXC2 (LXC1 blobs are ignored). Analog Daytimer extras are stored
+// only for kLoxoneTimer, so a full 64-control house still typically fits.
 
 // Pure (host-tested). pack returns the length, 0 if it does not fit into cap.
 size_t lox_cache_pack(const LoxoneControl* c, size_t n, const char* server, uint8_t* out, size_t cap);

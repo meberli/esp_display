@@ -40,7 +40,7 @@ Wichtige Module in `main/`:
 | `panel_ui.cpp` + `panel_ui_*.inc` | alle Screens (eine Übersetzungseinheit): Home, Einstellungen, Wetter, Info, Kameras, Energie, Co4, Erinnerungen, Playground, Oszi |
 | `net.cpp` | WLAN (Scan, Verbinden, Pause, 802.11k/v) |
 | `info_net.cpp`, `transit_parse.cpp`, `radar*.cpp`, `weather_derive.cpp` | Wetter, MeteoSchweiz, ÖV, Regenradar |
-| `loxone_client.cpp`, `loxone_structure.cpp`, `loxone_cache.cpp`, `loxone_auth.h` | Miniserver (HTTP, Basic Auth), `LoxAPP3.json`, Struktur-Cache in NVS |
+| `loxone_client.cpp`, `loxone_structure.cpp`, `loxone_cache.cpp`, `loxone_cmd.h`, `loxone_auth.h` | Miniserver (HTTP, Basic Auth), `LoxAPP3.json`, analoge Daytimer, Struktur-Cache in NVS |
 | `device_discover.cpp`, `device_discover_scan.cpp` | LAN-Suche (Suchen): mDNS, dann unauthentifiziertes HTTP GET (`/api/v1/system` bzw. `/jdev/cfg/api`), ~8 s, Vorschläge ohne Autoselect |
 | `webcams.cpp`, `ical.cpp`, `waste_api.cpp`, `waste_window.cpp` | Windy-Webcams, iCal, Abfallkalender |
 | `energy*.cpp`, `pv*.cpp` | whatwatt Go (Strom/Wasser), PV über Modbus-TCP-Gateway (nur lesen) |
@@ -120,6 +120,20 @@ Zeitkonstanten WLAN (`main.cpp`): `kWifiTimeoutMs = 30000`, `kWifiSwitchMs = 200
 
 ---
 
+
+### 2.3 Loxone-Steuerungen
+
+Die Struktur (`GET /data/LoxAPP3.json`) wird in `loxone_structure.cpp` gelesen. Unterstützte Typen: `Switch`, `TimedSwitch`, `LightController`, `Dimmer` (als Schalter), `Jalousie`, `Pushbutton` und analoge `Daytimer` (`details.analog` wahr) als `kLoxoneTimer`. Andere Typen, einschliesslich digitaler Schaltuhren, werden übersprungen.
+
+Ein analoger Daytimer erscheint unter seinem Namen aus der Struktur (keine fest verdrahteten UUIDs oder Haushaltsnamen). Der aktuelle Wert kommt über `GET /jdev/sps/io/<uuid>/all` (`LL.value`); die Restzeit des Handbetriebs, falls vorhanden, aus dem Ausgang `Rt` bzw. dem State `override`. Die Kachel zeigt den Wert, `0` als «Aus». Die Detailseite sendet nur strukturiert gebaute Pfade:
+
+- `startOverride/{0–10}/{Sekunden}` für 30 min, 1 h, 2 h, 4 h oder «Bis ich beende» (7 Tage; Loxone verlangt immer eine Dauer, Ende mit `stopOverride`)
+- `stopOverride`
+- `Pulse` an einen `Pushbutton` derselben Kategorie. Hat der Timer keine Kategorie, wird ein Taster gewählt, dessen Kategoriename dem Timernamen entspricht.
+
+Die Pfade entstehen in `loxone_cmd.h` aus geprüfter Action-UUID und ganzen Zahlen, nicht durch Lockern von `loxone_id_ok`. Das Wochenprogramm (`entriesAndDefaultValue`) braucht den Websocket-Statusstrom und ist nicht Teil dieser Stufe. Token-Auth bleibt ein Stub; lokales HTTP mit Basic Auth reicht für diesen Weg.
+
+
 ## 3. Build-System und Targets
 
 | `PANEL_BOARD` | Kconfig-Wahl | Projektname = Board-ID | Zusatz-Defaults | Partitionen | Treiber |
@@ -197,7 +211,7 @@ Alle Einstellungen liegen in NVS, Namespace `panel`.
 - **Interne Schlüssel** (`kKeyInternal`, z. B. `co4_rt` = Co4-Refresh-Token, Verläufe `en_hist`, `pv_hist`, `pv_hours`) werden nie exportiert.
 - **Geheimnisse** (`wifi_pass`, `lox_pass`, `windy_key`, `windy_dflt`, `ical_url`, `ical_dflt`) werden am Display maskiert, nie geloggt und nur nach Bestätigung am Panel exportiert.
 - Weitere Gruppen: Ort (`loc_*`), NTP/Zeitzone, Kameras (`cams_n`, `cam_ids`, max. 12), ÖV (`st0_*`, `st1_*`), Bildschirm (`scr_to`, `scr_hint`, `scr_saver`, `ui_design`), Kalender/Abfall (`ical_url`, `waste_api`, `waste_bfs`, `waste_zone`), OTA (`ota_url`, nur https), MeteoSchweiz (`meteo_plz`), Erinnerungen (`rem_*`, `cal_*`, `wst_*`), Loxone (`lox_*`), Energie (`en_*`, `wa_*`), PV (`pv_*`), Schalter-Taste (`sw_target`), Co4 (`co4_zone`, `co4_zname`, `co4_site`).
-- Der Struktur-Cache der Loxone-Steuerungen liegt ebenfalls in NVS (`loxone_cache.cpp`, max. 4 KB).
+- Der Struktur-Cache der Loxone-Steuerungen liegt ebenfalls in NVS (`loxone_cache.cpp`, Format `LXC2`, max. 4 KB). Ein älterer `LXC1`-Blob wird verworfen und die Struktur neu geladen. `kLoxoneControlCap` ist 64; zusätzliche Felder (Override-Status, verknüpfter Taster) werden nur für analoge Daytimer gespeichert.
 - **MeteoSchweiz-PLZ** (`meteo_plz`, `kTextPlz`): gespeichert wird die normale 4-stellige PLZ (`9470`). Eingabe am Gerät unter Orte & Infos › MeteoSchweiz-PLZ (Zahlentastatur, max. 4 Zeichen, Prüfung 1000–9999 mit `meteo_plz_valid()`). `settings_load_text()` normalisiert jeden Wert mit `meteo_plz_normalize()`: alte 6-stellige Werte mit Endung `00` aus NVS, Restore oder `sdkconfig` (`947000`) werden zu `9470`, Ungültiges fällt auf den Build-Default zurück. `settings_save_text()` speichert nur 4 Ziffern. Das Schema erlaubt 4–6 Ziffern, damit alte Sicherungen weiter importiert werden. Für die Anfrage an `app-prod-ws.meteoswiss-app.ch/v1/plzDetail` hängt `meteo_plz_query()` `00` an. Code: `main/meteo_plz.cpp`, Host-Test `tools/test_meteo_plz.cpp`.
 
 ---
@@ -271,7 +285,7 @@ Ein neues Image startet als `PENDING_VERIFY` und markiert sich gültig, sobald d
 
 ### 7.1 `ci.yml` (jeder Push, jeder PR)
 
-- **host-tests:** Mojibake-Prüfung aller Textdateien (ausser Schriften), danach alle Host-Tests mit `g++ -std=c++17` (iCal, OTA-Version/-Kanal/-Board, UI-Text, Retry, Loxone-Cache, MeteoSchweiz-PLZ, Settings-Schema, Abfall, Energie, CO4EN, Co4, PV, Wetter, Schalter-Ziel, ÖV, Radar, Karte, Scope inkl. `rp_scope.c`, LAN-Suche, Home-Kacheln).
+- **host-tests:** Mojibake-Prüfung aller Textdateien (ausser Schriften), danach alle Host-Tests mit `g++ -std=c++17` (iCal, OTA-Version/-Kanal/-Board, UI-Text, Retry, Loxone-Cache, MeteoSchweiz-PLZ, Settings-Schema, Abfall, Energie, CO4EN, Co4, PV, Wetter, Schalter-Ziel, ÖV, Radar, Karte, Scope inkl. `rp_scope.c`, LAN-Suche, Home-Kacheln, Loxone-Kommando-Pfade, Loxone-Struktur).
 - **build:** im Container `espressif/idf:v6.1` mit **Wegwerf-Schlüssel**: Guition, SenseCAP D1 und Panlee, danach `check_secrets.py --generic` für alle drei Images.
 
 ### 7.2 `test-image.yml` (signiertes Test-Image)

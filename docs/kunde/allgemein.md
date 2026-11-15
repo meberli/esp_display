@@ -84,6 +84,7 @@ Tipp: Lege für das Panel in der Loxone Config einen eigenen Benutzer an, der nu
 Danach liest das Panel die Steuerungen vom Miniserver und zeigt sie unter **Loxone** an:
 
 - **Favoriten**, **Licht**, **Storen** (Auf, Ab, Position), **Schalter**.
+- Analog programmierte Schaltuhren (z. B. eine Lüftungsstufe 0–10) erscheinen mit dem aktuellen Wert; 0 wird als **Aus** angezeigt. Ein Tipp auf die Kachel öffnet die Detailseite: Stufe 0–10 wählen, Dauer des Handbetriebs (30 min, 1 h, 2 h, 4 h oder bis du beendest), **Starten** oder **Handbetrieb beenden**. Ein Taster aus derselben Loxone-Kategorie (falls vorhanden) erscheint auf derselben Seite. Das Wochenprogramm selbst wird noch nicht angezeigt oder geändert.
 - Der Zustand wird beim Öffnen einer Seite frisch gelesen.
 - Ist der Miniserver nicht erreichbar, zeigt das Panel die zuletzt bekannten Kacheln (als offline markiert) und versucht es im Hintergrund erneut (nach 30 s, 2 min, 5 min, dann alle 15 min). Nach drei abgelehnten Anmeldungen (401/403) stoppt das Panel, bis du neu startest oder die Zugangsdaten änderst. Befehle werden erst wieder angenommen, wenn er antwortet.
 

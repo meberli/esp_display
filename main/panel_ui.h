@@ -16,6 +16,8 @@ struct LoxoneCommandRequest {
   char action[40];
   char command[16];
   int index;
+  int level;          // startOverride: 0..10
+  uint32_t seconds;   // startOverride duration
 };
 
 struct LoxoneStateRequest {

@@ -11,6 +11,7 @@
 #include "config_load.h"
 #include "loxone_err.h"
 #include "loxone_host.h"
+#include "loxone_cmd.h"
 #include "loxone_types.h"
 #include "net.h"
 #include "settings.h"
@@ -73,8 +74,12 @@ LoxoneHttpResult loxone_get(LoxoneAuthorizer& auth, const char* path, uint8_t* b
     snprintf(result.detail, sizeof(result.detail), "Auth scheme \"%s\" is not available", auth.name());
     return result;
   }
-  char url[192];
-  snprintf(url, sizeof(url), "http://%s:%d%s", host, static_cast<int>(port), path);
+  char url[256];
+  int nurl = snprintf(url, sizeof(url), "http://%s:%d%s", host, static_cast<int>(port), path);
+  if (nurl <= 0 || static_cast<size_t>(nurl) >= sizeof(url)) {
+    set_detail(&result, str::kLoxPathTooLong);
+    return result;
+  }
 
   // 5 s per connect/read (was 20 s): an absent Miniserver must not block the
   // panel; http_get_raw additionally bounds the whole body to 6x this.
@@ -112,20 +117,8 @@ LoxoneHttpResult loxone_get(LoxoneAuthorizer& auth, const char* path, uint8_t* b
   return result;
 }
 
-LoxoneHttpResult loxone_send_command(LoxoneAuthorizer& auth, const char* action, const char* command) {
+LoxoneHttpResult loxone_send_path(LoxoneAuthorizer& auth, const char* path) {
   LoxoneHttpResult result = {};
-  if (!loxone_id_ok(action, 40) || !loxone_id_ok(command, 16)) {
-    set_detail(&result, str::kLoxIdRejected);
-    return result;
-  }
-
-  char path[96];
-  int wrote = snprintf(path, sizeof(path), "/jdev/sps/io/%s/%s", action, command);
-  if (wrote <= 0 || static_cast<size_t>(wrote) >= sizeof(path)) {
-    set_detail(&result, str::kLoxPathTooLong);
-    return result;
-  }
-
   uint8_t body[640];
   size_t length = 0;
   result = loxone_get(auth, path, body, sizeof(body), &length);
@@ -155,6 +148,29 @@ LoxoneHttpResult loxone_send_command(LoxoneAuthorizer& auth, const char* action,
     }
   }
   return result;
+}
+
+LoxoneHttpResult loxone_send_command(LoxoneAuthorizer& auth, const char* action, const char* command) {
+  return loxone_send_io(auth, action, command, 0, 0);
+}
+
+LoxoneHttpResult loxone_send_io(LoxoneAuthorizer& auth, const char* action, const char* command,
+                                int level, uint32_t seconds) {
+  LoxoneHttpResult result = {};
+  char path[160];
+  bool ok = false;
+  if (command != nullptr && strcmp(command, "startOverride") == 0) {
+    ok = lox_path_start_override(action, level, seconds, path, sizeof(path));
+  } else if (command != nullptr && strcmp(command, "stopOverride") == 0) {
+    ok = lox_path_stop_override(action, path, sizeof(path));
+  } else {
+    ok = lox_path_named(action, command, path, sizeof(path));
+  }
+  if (!ok) {
+    set_detail(&result, str::kLoxIdRejected);
+    return result;
+  }
+  return loxone_send_path(auth, path);
 }
 
 bool copy_number_text(const char* text, char* out, size_t out_n) {
@@ -248,7 +264,7 @@ bool copy_all_value(JsonVariant raw, LoxoneKind kind, bool shutter_position_only
 
 bool fetch_ll_value(LoxoneAuthorizer& auth, const char* id, const char* command, JsonDocument& doc,
                     JsonVariant* raw, LoxoneHttpResult* result) {
-  char path[96];
+  char path[160];
   int wrote = snprintf(path, sizeof(path), "/jdev/sps/io/%s/%s", id, command);
   if (wrote <= 0 || static_cast<size_t>(wrote) >= sizeof(path)) {
     set_detail(result, str::kLoxPathTooLong);
@@ -293,14 +309,70 @@ bool fetch_ll_value(LoxoneAuthorizer& auth, const char* id, const char* command,
   return true;
 }
 
+int32_t timer_override_from_all(JsonObject ll) {
+  if (ll.isNull()) {
+    return -1;
+  }
+  if (ll.containsKey("override")) {
+    char buf[32];
+    if (copy_variant_number(ll["override"], buf, sizeof(buf))) {
+      char* end = nullptr;
+      long v = strtol(buf, &end, 10);
+      if (end != buf && v >= 0 && v <= static_cast<long>(kLoxOverrideMaxSecs)) {
+        return static_cast<int32_t>(v);
+      }
+    }
+  }
+  for (JsonPair kv : ll) {
+    const char* key = kv.key().c_str();
+    if (strncmp(key, "output", 6) != 0) {
+      continue;
+    }
+    JsonObject o = kv.value().as<JsonObject>();
+    if (o.isNull()) {
+      continue;
+    }
+    const char* name = o["name"] | "";
+    if (strcmp(name, "Rt") != 0 && strcasecmp(name, "override") != 0) {
+      continue;
+    }
+    char buf[32];
+    if (!copy_object_number(o, "value", buf, sizeof(buf))) {
+      continue;
+    }
+    char* end = nullptr;
+    long v = strtol(buf, &end, 10);
+    if (end != buf && v >= 0 && v <= static_cast<long>(kLoxOverrideMaxSecs)) {
+      return static_cast<int32_t>(v);
+    }
+  }
+  return -1;
+}
+
+void apply_timer_override(JsonDocument& doc, char* value, size_t value_n, int32_t* override_s) {
+  int32_t ov = timer_override_from_all(doc["LL"].as<JsonObject>());
+  if (override_s != nullptr) {
+    *override_s = ov;
+  }
+  if (ov >= 0 && value != nullptr && value_n > 0) {
+    size_t used = strlen(value);
+    if (used + 2 < value_n) {
+      snprintf(value + used, value_n - used, " %ld", static_cast<long>(ov));
+    }
+  }
+}
+
 LoxoneHttpResult loxone_read_state(LoxoneAuthorizer& auth, const char* action, const char* state,
-                                   LoxoneKind kind, char* value, size_t value_n) {
+                                   LoxoneKind kind, char* value, size_t value_n, int32_t* override_s) {
   LoxoneHttpResult result = {};
   if (value == nullptr || value_n == 0) {
     set_detail(&result, str::kLoxStateIdRejected);
     return result;
   }
   value[0] = '\0';
+  if (override_s != nullptr) {
+    *override_s = -1;
+  }
 
   EXT_RAM_BSS_ATTR static StaticJsonDocument<1536> doc;
   char fallback[48];
@@ -324,6 +396,9 @@ LoxoneHttpResult loxone_read_state(LoxoneAuthorizer& auth, const char* action, c
         return all;
       }
       if (kind != kLoxoneShutter && copy_all_value(raw, kind, false, value, value_n)) {
+        if (kind == kLoxoneTimer) {
+          apply_timer_override(doc, value, value_n, override_s);
+        }
         set_detail(&all, "OK");
         return all;
       }
