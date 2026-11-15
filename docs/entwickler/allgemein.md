@@ -128,7 +128,7 @@ Die Struktur (`GET /data/LoxAPP3.json`) wird in `loxone_structure.cpp` gelesen. 
 Ein analoger Daytimer erscheint unter seinem Namen aus der Struktur (keine fest verdrahteten UUIDs oder Haushaltsnamen). Der aktuelle Wert kommt über `GET /jdev/sps/io/<uuid>/all` (`LL.value`); die Restzeit des Handbetriebs, falls vorhanden, aus dem Ausgang `Rt` bzw. dem State `override`. Die Kachel zeigt den Wert, `0` als «Aus». Die Detailseite sendet nur strukturiert gebaute Pfade:
 
 - `startOverride/{0–10}/{Sekunden}` für 30 min, 1 h, 2 h, 4 h oder «Bis ich beende» (7 Tage; Loxone verlangt immer eine Dauer, Ende mit `stopOverride`)
-- `stopOverride`
+- `stopOverride` (ohne Wert). Die Taste «Handbetrieb beenden» bleibt anklickbar, auch wenn `/all` den Ausgang `Rt` als 0 liefert; ein deaktivierter Button hatte keinen eigenen Disabled-Stil und verschluckte den Tipp. Nach `startOverride` ohne `Rt > 0` zeigt die Detailseite «Kein Handbetrieb».
 - `Pulse` an einen `Pushbutton` derselben Kategorie. Hat der Timer keine Kategorie, wird ein Taster gewählt, dessen Kategoriename dem Timernamen entspricht.
 
 Die Pfade entstehen in `loxone_cmd.h` aus geprüfter Action-UUID und ganzen Zahlen, nicht durch Lockern von `loxone_id_ok`. Die Zuordnungstabelle Kategorie↔Taster liegt im PSRAM, nicht auf dem 8-KB-Stack von `lox_task` (sonst überläuft der Frame, sobald `kLoxoneControlCap` 64 ist). Das Wochenprogramm (`entriesAndDefaultValue`) braucht den Websocket-Statusstrom und ist nicht Teil dieser Stufe. Token-Auth bleibt ein Stub; lokales HTTP mit Basic Auth reicht für diesen Weg.

@@ -17,6 +17,7 @@ lv_obj_t* timer_pulse_lbl = nullptr;
 int timer_index = -1;
 int timer_sel_level = 0;
 bool timer_sel_dirty = false;
+bool timer_expect_override = false;  // startOverride sent; reread has not shown Rt > 0
 LoxDurationId timer_dur = kLoxDur1h;
 
 int override_s[kLoxoneControlCap] = {};
@@ -94,6 +95,7 @@ void on_timer_start(lv_event_t* event) {
   }
   uint32_t secs = lox_duration_seconds(timer_dur);
   queue_command(timer_index, "startOverride", timer_sel_level, secs);
+  timer_expect_override = true;
   timer_refresh();
 }
 
@@ -106,6 +108,7 @@ void on_timer_stop(lv_event_t* event) {
     return;
   }
   queue_command(timer_index, "stopOverride");
+  timer_expect_override = false;
   timer_refresh();
 }
 
@@ -158,14 +161,22 @@ void timer_refresh() {
 
   char rem[48];
   rem[0] = '\0';
-  if (command_pending && pending.index == timer_index && strcmp(pending.command, "startOverride") == 0) {
+  const bool pending_here =
+      command_pending && pending.index == timer_index &&
+      (strcmp(pending.command, "startOverride") == 0 || strcmp(pending.command, "stopOverride") == 0);
+  if (pending_here) {
     snprintf(rem, sizeof(rem), "Sende...");
   } else if (known[timer_index] && override_s[timer_index] > 0) {
+    timer_expect_override = false;
     lox_format_remaining(override_s[timer_index], rem, sizeof(rem));
     size_t n = strlen(rem);
     if (n > 0 && n + 13 < sizeof(rem)) {
       snprintf(rem + n, sizeof(rem) - n, " Handbetrieb");
     }
+  } else if (timer_expect_override && known[timer_index]) {
+    // startOverride returned OK, but /all has Rt = 0. The stop button stays
+    // usable so a later stopOverride can still be sent and the level reread.
+    snprintf(rem, sizeof(rem), "Kein Handbetrieb");
   }
   lv_label_set_text(timer_remain, rem);
 
@@ -193,10 +204,15 @@ void timer_refresh() {
     }
   } else {
     lv_obj_clear_state(timer_start, LV_STATE_DISABLED);
+    // Always leave stop clickable (except while a command is in flight). There
+    // is no LV_STATE_DISABLED style on these buttons, so a disabled stop still
+    // looked "aktiv" but swallowed the tap. stopOverride is a no-op when Rt is
+    // already 0, and the following reread updates a stale level.
+    lv_obj_clear_state(timer_stop, LV_STATE_DISABLED);
     if (known[timer_index] && override_s[timer_index] > 0) {
-      lv_obj_clear_state(timer_stop, LV_STATE_DISABLED);
+      lv_obj_add_state(timer_stop, LV_STATE_CHECKED);
     } else {
-      lv_obj_add_state(timer_stop, LV_STATE_DISABLED);
+      lv_obj_clear_state(timer_stop, LV_STATE_CHECKED);
     }
     if (timer_pulse != nullptr) {
       lv_obj_clear_state(timer_pulse, LV_STATE_DISABLED);
@@ -233,6 +249,7 @@ void open_timer(int index) {
     return;
   }
   timer_index = index;
+  timer_expect_override = false;
   if (!timer_sel_dirty || !known[index]) {
     timer_sel_level = known[index] ? position_pct[index] : 0;
     if (timer_sel_level < kLoxTimerLevelMin) {
