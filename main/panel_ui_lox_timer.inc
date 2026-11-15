@@ -274,7 +274,7 @@ void build_timer_screen(lv_obj_t* screen) {
   lv_obj_add_flag(back, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_add_event_cb(back, on_timer_back, LV_EVENT_CLICKED, nullptr);
   lv_obj_t* back_l = make_label(back, &font_inter_16, lv_color_hex(kTextDim));
-  lv_label_set_text(back_l, "ZurÃ¼ck");
+  lv_label_set_text(back_l, "Zurück");
   lv_obj_center(back_l);
 
   timer_title = make_label(timer_root, &font_inter_20, lv_color_hex(kText));
