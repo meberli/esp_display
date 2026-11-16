@@ -31,7 +31,7 @@ Echte Screenshots vom Panel (über den Test-Harness aufgenommen). Netzwerk- und 
 - **ÖV** – Abfahrtstafel über transport.opendata.ch, Haltestellensuche, Kurzinfo auf Home.
 - **Kalender & Abfall** – privater iCal-Familienkalender und Abfuhrkalender (Abfallkalender-API Kanton St. Gallen, Gemeinde per BFS-Nr. wählbar, Abruf beim Start und einmal täglich), Übersicht auf eigener Seite und Kurzinfo auf Home.
 - **Erinnerungen** – Karte auf Home und Bildschirmschoner mit „OK“-Quittung (gespeichert in NVS). Vorlauf: 15 min, 1 Std., 3 Std., 1 Tag, Vorabend 18:00, Morgens 07:00 – getrennt für Termine und Abfuhr.
-- **Bildschirmschoner** – Timeout (Aus … 10 min), Schwarz mit wanderndem „wake me up“, Digitaluhr oder Schweizer Bahnhofsuhr (Sekundenzeiger 58,5 s mit Stopp bei 12). Backlight-Fade per LEDC; der Weck-Touch löst nichts aus.
+- **Bildschirmschoner** – Timeout (Aus … 10 min), Schwarz mit wanderndem „wake me up“, Digitaluhr oder Schweizer Bahnhofsuhr (Sekundenzeiger 58,5 s mit Stopp bei 12). Helligkeit der Uhren in Stufen 10–100 % (Standard 40 %). Backlight-Fade per LEDC; der Weck-Touch löst nichts aus.
 - **NTP & Zeitzone** – `esp_netif_sntp`, Server und Zeitzone wählbar (Standard `ch.pool.ntp.org`, Europe/Zurich).
 - **OTA** – Update vom GitHub-Release (oder eigener URL) direkt am Panel, zwei OTA-Slots, Einstellungen bleiben erhalten.
 - **Backup** – Web-Wartung im Browser: Einstellungen als JSON sichern (wahlweise ohne Geheimnisse), wiederherstellen, Firmware hochladen.
@@ -213,7 +213,7 @@ Partitionen (`partitions.csv` bzw. `partitions_sensecap.csv`): NVS, otadata, PHY
 |---|---|
 | WLAN | Netzsuche, Passwort, Fallback auf alte Zugangsdaten bei Fehler |
 | Wetter-Ort | Suche über Open-Meteo-Geocoding (Standard Buchs SG) |
-| Bildschirm | Timeout, Bildschirmschoner (Schwarz / Digital / Analog), Hinweis an/aus, Design (Dark Glass / Co4, mit Neustart) |
+| Bildschirm | Timeout, Bildschirmschoner (Schwarz / Digital / Analog), Hinweis an/aus, Helligkeit der Uhren (10–100 %, Standard 40 %), Design (Dark Glass / Co4, mit Neustart) |
 | Uhrzeit | NTP-Server (Presets oder eigener), Zeitzone |
 | Kameras | Windy-Webcams hinzufügen/löschen, eigener API-Key (maskiert) |
 | ÖV | Haltestelle suchen |

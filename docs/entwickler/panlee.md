@@ -42,7 +42,7 @@ Quellen laut `main/board_pins_panlee.h`: Wireless-Tag-Datenblatt WT32S3-86S / ZX
 - GC9503V-Init per Bit-Banging über die RGB-Datenleitungen B0/B1, danach Rückgabe an `LCD_DATA_OUT0/1` (wie LGFX).
 - RGB-Timing nach ha_deck: HSYNC FP 8 / Puls 10 / BP 50, VSYNC FP 8 / Puls 10 / BP 20. PCLK 12 MHz wie Guition (LGFX nutzt 15 MHz) für Reserve bei der PSRAM-Bandbreite.
 - Ein Framebuffer in PSRAM, Bounce-Buffer **2 × 20 Zeilen** (ca. 38 KB internes DMA-RAM).
-- Backlight GPIO5 über LEDC, 10 Bit.
+- Backlight GPIO5 über LEDC, 10 Bit, 1000 Hz. Dieselbe `panel_backlight(Prozent)`-API wie auf den anderen Boards; die Uhr-Helligkeit im Schoner (`scr_bl`) gilt hier unverändert.
 - Touch-Rohkoordinaten werden direkt verwendet (keine Rotation).
 - SHT20 wird beim Start nur erkannt und in `DIAGHW` gemeldet (`sht20=0/1`). Messwerte werden **nicht** angezeigt.
 - RS485 und die J2-IOs werden von der Firmware **nicht** angesteuert.

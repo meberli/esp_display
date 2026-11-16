@@ -221,8 +221,9 @@ lv_obj_t* disp_saver_btn[3] = {};
 // Display settings screen and the screen-off layer
 lv_obj_t* disp_root = nullptr;
 lv_obj_t* disp_to_btn[kTimeoutChoiceN] = {};
+lv_obj_t* disp_bl_btn[kSaverBlChoiceN] = {};
 lv_obj_t* disp_hint_sw = nullptr;
-DisplaySettings disp = {120, true, kSaverBlack};
+DisplaySettings disp = {120, true, kSaverBlack, kSaverBlDefault};
 uint16_t scr_timeout_s = 120;  // effective timeout (harness SCRTO may override)
 bool scr_off = false;
 bool wake_swallow = false;
@@ -239,11 +240,9 @@ lv_timer_t* saver_timer = nullptr;
 int saver_last_min = -1;
 float sec_angle = -1.f;  // second hand angle drawn last (deg)
 lv_area_t sec_area = {};  // its bounding box (absolute coords)
-constexpr uint8_t kClockBacklight = 40;  // percent while a clock saver shows
 constexpr int kClockD = 440;             // analog clock object size
 uint32_t hint_moved_ms = 0;
 constexpr uint32_t kHintMoveMs = 45000;
-constexpr uint8_t kHintBacklight = 4;  // percent
 lv_obj_t* wl_root = nullptr;
 lv_obj_t* wl_list = nullptr;
 lv_obj_t* wl_status = nullptr;
@@ -870,8 +869,8 @@ void ui_describe(char* out, size_t n) {
   } else if (nav == Nav::Time) {
     snprintf(out, n, "time server=%s tz=%s synced=%d", tset.server, tset.tz_name, clock_synced() ? 1 : 0);
   } else if (nav == Nav::Display) {
-    snprintf(out, n, "display timeout=%u hint=%d saver=%d", static_cast<unsigned>(disp.timeout_s), disp.hint ? 1 : 0,
-             disp.saver);
+    snprintf(out, n, "display timeout=%u hint=%d saver=%d blpct=%u", static_cast<unsigned>(disp.timeout_s),
+             disp.hint ? 1 : 0, disp.saver, static_cast<unsigned>(settings_clamp_saver_bl(disp.bl_pct)));
   } else if (nav == Nav::Location) {
     snprintf(out, n, "location %d searching=%d", ui_place_n, (loc_searching || settings_pending) ? 1 : 0);
   } else if (nav == Nav::Timer) {

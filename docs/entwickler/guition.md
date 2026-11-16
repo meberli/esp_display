@@ -20,7 +20,7 @@ Pins: `main/board_pins_guition.h`. Die vollständige Pin-Tabelle und die Quellen
 
 - RGB-Timing nach Arduino_GFX (`ESP32_4848S040_86BOX_GUITION`): PCLK 12 MHz, HSYNC FP 10 / Puls 8 / BP 50, VSYNC FP 10 / Puls 8 / BP 20, Init-Sequenz `st7701_type9_init_operations`.
 - Framebuffer in PSRAM, Bounce-Buffer 2 × 10 Zeilen im internen RAM.
-- Backlight GPIO38 über LEDC-PWM, mit Fade für den Bildschirmschoner.
+- Backlight GPIO38 über LEDC-PWM (150 Hz, 10 Bit), mit Fade für den Bildschirmschoner. 150 Hz ist nötig, damit niedrige Stufen (Hinweis 4 %, Uhr ab 10 %) nicht ausbleiben; bei 20 kHz blieb unter etwa 85 % alles dunkel.
 - Touch-Mapping: `x = raw_y`, `y = 480 − raw_x`. Punktdaten ab Register `0x814F` (Status `0x814E`). Release-Debounce gegen einzelne leere Samples.
 - GPIO20 ist Datenleitung des LCD (G1), deshalb gibt es kein USB-CDC und die Konsole läuft über den CH340.
 

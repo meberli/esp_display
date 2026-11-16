@@ -10,7 +10,7 @@ Target `sensecap_d1`. Projektname bzw. Board-ID `loxone_panel_sensecap_d1`, Imag
 | Display | 4" 480×480 RGB, Controller **ST7701S**. SPI-Init auf GPIO41/48, CS und Reset über den I/O-Expander |
 | I/O-Expander | PCA9535 auf I²C (0x20, Fallback 0x39): LCD-CS (4), LCD-Reset (5), Touch-Reset (7), RP2040-Reset (8) |
 | Touch | **FT6336U** am selben Bus (0x48, Fallback 0x38), SDA GPIO39 / SCL GPIO40 |
-| Backlight | GPIO45, LEDC-PWM |
+| Backlight | GPIO45, LEDC-PWM, 1000 Hz, 10 Bit. Dieselbe `panel_backlight(Prozent)`-API; Uhr-Helligkeit im Schoner über `scr_bl` |
 | Relais | keines |
 | Koprozessor | RP2040, UART zum ESP32: ESP GPIO19 (TX) → RP GPIO17, RP GPIO16 → ESP GPIO20 (RX) |
 | Konsole ESP32 | UART0 (GPIO43/44) über CH340, unter Linux `/dev/ttyUSB0` |

@@ -187,7 +187,7 @@ bool settings_reset_location() {
 }
 
 DisplaySettings settings_load_display() {
-  DisplaySettings d = {120, true, kSaverBlack};
+  DisplaySettings d = {120, true, kSaverBlack, kSaverBlDefault};
   nvs_handle_t h;
   if (nvs_open(kNs, NVS_READONLY, &h) != ESP_OK) return d;
   uint16_t t = 0;
@@ -196,6 +196,8 @@ DisplaySettings settings_load_display() {
   if (nvs_get_u8(h, "scr_hint", &hint) == ESP_OK) d.hint = hint != 0;
   uint8_t saver = 0;
   if (nvs_get_u8(h, "scr_saver", &saver) == ESP_OK && saver <= kSaverAnalog) d.saver = saver;
+  uint8_t bl = 0;
+  if (nvs_get_u8(h, "scr_bl", &bl) == ESP_OK) d.bl_pct = settings_clamp_saver_bl(bl);
   nvs_close(h);
   return d;
 }
@@ -205,6 +207,7 @@ bool settings_save_display(const DisplaySettings& d) {
   tx.u16("scr_to", d.timeout_s);
   tx.u8("scr_hint", d.hint ? 1 : 0);
   tx.u8("scr_saver", d.saver);
+  tx.u8("scr_bl", settings_clamp_saver_bl(d.bl_pct));
   return tx.commit();
 }
 

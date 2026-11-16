@@ -99,7 +99,7 @@ Danach liest das Panel die Steuerungen vom Miniserver und zeigt sie unter **Loxo
 | Gruppe | Einträge |
 |---|---|
 | **Netzwerk & Zeit** | WLAN, Uhrzeit (Zeitserver und Zeitzone), Miniserver |
-| **Anzeige** | Ausschalten nach, Bildschirmschoner, Design |
+| **Anzeige** | Ausschalten nach, Bildschirmschoner, Helligkeit der Uhren, Design |
 | **Orte & Infos** | Wetter-Ort, MeteoSchweiz-PLZ, ÖV, Kalender, Kameras, Erinnerungen, Schalter-Taste |
 | **Energie-Quellen** | Co4, whatwatt Go & PV |
 | **System** | Wartung & Update, Playground |
@@ -116,6 +116,7 @@ Alle Einstellungen bleiben bei Updates und Stromausfällen erhalten. Passwörter
 
 - **Ausschalten nach:** Aus (Bildschirm bleibt an), 30 s, 1, 2, 5 oder 10 Minuten.
 - **Bildschirmschoner:** Schwarz (optional mit dezentem Hinweis „wake me up“), Digitaluhr oder Analoguhr im Stil der Schweizer Bahnhofsuhr.
+- **Helligkeit der Uhren:** 10 %, 20 %, 40 % (Standard, unverändert zum bisherigen Verhalten), 60 %, 80 % oder 100 %. Gilt nur für Digital- und Analoguhr. Der Bildschirm bleibt mindestens bei 10 % und damit lesbar. Bei Schwarz bleibt das Licht aus, mit Hinweis sehr schwach („wake me up“). Nach dem Aufwecken gilt wieder die normale Helligkeit.
 - **Design:** „Dark Glass“ (Standard) oder „Co4“. Nach dem Wechsel startet das Panel neu.
 
 | ![Digitaluhr](../screenshots/uhr_digital.png) | ![Analoguhr](../screenshots/uhr_analog.png) |

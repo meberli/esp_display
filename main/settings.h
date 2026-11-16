@@ -51,16 +51,34 @@ bool settings_reset_location();  // back to the default (erases the NVS keys)
 
 // Display: screen timeout in seconds (0 = never) and the off-mode hint.
 // saver: what the screen shows after the timeout.
+// bl_pct: backlight percent for the digital/analog clock savers (not Schwarz).
 enum Saver : uint8_t { kSaverBlack = 0, kSaverDigital = 1, kSaverAnalog = 2 };
+constexpr uint8_t kSaverBlMin = 10;
+constexpr uint8_t kSaverBlDefault = 40;
+constexpr uint8_t kHintBacklight = 4;  // percent for kSaverBlack with the hint
+constexpr uint8_t kSaverBlChoices[] = {10, 20, 40, 60, 80, 100};
+constexpr int kSaverBlChoiceN = 6;
 struct DisplaySettings {
   uint16_t timeout_s;
   bool hint;      // kSaverBlack only: dim "wake me up" instead of a dark panel
   uint8_t saver;  // Saver
+  uint8_t bl_pct; // clock-saver backlight, kSaverBlMin..100
 };
 constexpr uint16_t kTimeoutChoices[] = {0, 30, 60, 120, 300, 600};
 constexpr int kTimeoutChoiceN = 6;
-DisplaySettings settings_load_display();  // default 120 s, hint on, black
+DisplaySettings settings_load_display();  // default 120 s, hint on, black, 40 %
 bool settings_save_display(const DisplaySettings& d);
+
+// Backlight percent to apply while the screensaver is showing.
+inline uint8_t settings_clamp_saver_bl(uint8_t pct) {
+  if (pct < kSaverBlMin) return kSaverBlMin;
+  if (pct > 100) return 100;
+  return pct;
+}
+inline uint8_t settings_saver_backlight(const DisplaySettings& d) {
+  if (d.saver == kSaverBlack) return d.hint ? kHintBacklight : 0;
+  return settings_clamp_saver_bl(d.bl_pct);
+}
 
 // Design (UiDesign in ui_theme.h): 0 Dark Glass (default), 1 Co4. Read at boot.
 uint8_t settings_load_design();

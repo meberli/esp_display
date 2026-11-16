@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "settings.h"
 #include "settings_schema.h"
 
 static int fails = 0;
@@ -69,6 +70,26 @@ int main() {
   CHECK(!str("wifi_pass", longs));
   // ranges
   CHECK(num("scr_saver", 2) && !num("scr_saver", 3));
+  CHECK(num("scr_bl", 10) && num("scr_bl", 40) && num("scr_bl", 100));
+  CHECK(!num("scr_bl", 9) && !num("scr_bl", 0) && !num("scr_bl", 101));
+  DisplaySettings d = {120, true, kSaverDigital, kSaverBlDefault};
+  CHECK(settings_saver_backlight(d) == kSaverBlDefault);
+  d.bl_pct = 10;
+  CHECK(settings_saver_backlight(d) == 10);
+  d.bl_pct = 100;
+  CHECK(settings_saver_backlight(d) == 100);
+  d.bl_pct = 0;
+  CHECK(settings_saver_backlight(d) == kSaverBlMin);
+  d.bl_pct = 255;
+  CHECK(settings_saver_backlight(d) == 100);
+  d.saver = kSaverAnalog;
+  d.bl_pct = 20;
+  CHECK(settings_saver_backlight(d) == 20);
+  d.saver = kSaverBlack;
+  d.hint = true;
+  CHECK(settings_saver_backlight(d) == kHintBacklight);
+  d.hint = false;
+  CHECK(settings_saver_backlight(d) == 0);
   CHECK(num("wst_until", 1440) && !num("wst_until", 1441));
   CHECK(!num("lox_port", 0) && num("lox_port", 80));
   CHECK(!num("rem_lcal", -1));

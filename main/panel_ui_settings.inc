@@ -129,7 +129,8 @@ void refresh_display_settings() {
   } else if (disp.saver == kSaverBlack) {
     snprintf(buf, sizeof(buf), "Nach %s: Schwarz, Hinweis %s", timeout_text(disp.timeout_s), disp.hint ? "an" : "aus");
   } else {
-    snprintf(buf, sizeof(buf), "Nach %s: %s", timeout_text(disp.timeout_s), kSaverName[disp.saver]);
+    snprintf(buf, sizeof(buf), "Nach %s: %s, %u %%", timeout_text(disp.timeout_s), kSaverName[disp.saver],
+             static_cast<unsigned>(settings_clamp_saver_bl(disp.bl_pct)));
   }
   for (int i = 0; i < 3; ++i) {
     if (disp_saver_btn[i] == nullptr) continue;
@@ -153,6 +154,14 @@ void refresh_display_settings() {
       lv_obj_add_state(disp_hint_sw, LV_STATE_CHECKED);
     } else {
       lv_obj_clear_state(disp_hint_sw, LV_STATE_CHECKED);
+    }
+  }
+  for (int i = 0; i < kSaverBlChoiceN; ++i) {
+    if (disp_bl_btn[i] == nullptr) continue;
+    if (kSaverBlChoices[i] == settings_clamp_saver_bl(disp.bl_pct)) {
+      lv_obj_add_state(disp_bl_btn[i], LV_STATE_CHECKED);
+    } else {
+      lv_obj_clear_state(disp_bl_btn[i], LV_STATE_CHECKED);
     }
   }
 }
@@ -201,6 +210,15 @@ void on_hint_row(lv_event_t*) {
   disp.hint = !disp.hint;
   disp_save_later();
   console_printf("Screen hint %d\n", disp.hint ? 1 : 0);
+  refresh_display_settings();
+}
+
+void on_bl_btn(lv_event_t* e) {
+  if (gesture_consumed) return;
+  int i = static_cast<int>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e)));
+  disp.bl_pct = kSaverBlChoices[i];
+  disp_save_later();
+  console_printf("Screen saver backlight %u %%\n", static_cast<unsigned>(disp.bl_pct));
   refresh_display_settings();
 }
 
@@ -395,9 +413,10 @@ void screen_off() {
     lv_timer_set_period(saver_timer, disp.saver == kSaverAnalog ? 80 : 1000);
     lv_timer_resume(saver_timer);
   }
-  panel_backlight(clock ? kClockBacklight : disp.hint ? kHintBacklight : 0, 600);
+  panel_backlight(settings_saver_backlight(disp), 600);
   rem_tick(true);
-  console_printf("Screen off (saver %d hint %d)\n", disp.saver, disp.hint ? 1 : 0);
+  console_printf("Screen off (saver %d hint %d bl %u)\n", disp.saver, disp.hint ? 1 : 0,
+                 static_cast<unsigned>(settings_saver_backlight(disp)));
 }
 
 void go_home();
@@ -1228,7 +1247,7 @@ void build_settings_screens(lv_obj_t* screen) {
   struct Group { const char* name; const char* sub; const char* icon; uint32_t color; const char* key; const SetLeaf* leaf; int n; };
   const Group groups[kSetGroups] = {
       {"Netzwerk & Zeit", "WLAN \xC2\xB7 Zeit \xC2\xB7 Miniserver", ICON_WIFI3, kAccent, "set:g:net", g_net, 3},
-      {"Anzeige", "Ausschalten \xC2\xB7 Bildschirmschoner \xC2\xB7 Design", ICON_SCREEN, kPurple, "set:disp", nullptr, 0},
+      {"Anzeige", "Ausschalten \xC2\xB7 Bildschirmschoner \xC2\xB7 Helligkeit \xC2\xB7 Design", ICON_SCREEN, kPurple, "set:disp", nullptr, 0},
       {"Orte & Infos", "Wetter \xC2\xB7 PLZ \xC2\xB7 \xC3\x96V \xC2\xB7 Kalender \xC2\xB7 Kameras \xC2\xB7 Erinnerungen \xC2\xB7 Schalter", ICON_PLACE, kAmber, "set:g:info", g_info, 7},
       {"Energie-Quellen", "Co4 \xC2\xB7 whatwatt Go \xC2\xB7 PV", ICON_BOLT, kGreen, "set:g:energy", g_en, 2},
       {"System", "Info \xC2\xB7 Update \xC2\xB7 Diagnose \xC2\xB7 Playground", ICON_MEMORY, kOrange, "set:g:sys", g_sys, 2},
@@ -1253,7 +1272,7 @@ void build_settings_screens(lv_obj_t* screen) {
   lv_obj_set_size(pad, 10, 8);
   style_plain(pad);
 
-  // Bildschirm: timeout, screensaver and the black-mode hint.
+  // Bildschirm: timeout, screensaver, clock-saver brightness and the black-mode hint.
   disp_root = make_screen_root(screen, "Bildschirm");
   make_caption(disp_root, 58, "Ausschalten nach");
   for (int i = 0; i < kTimeoutChoiceN; ++i) {
@@ -1287,13 +1306,22 @@ void build_settings_screens(lv_obj_t* screen) {
   lv_obj_set_style_bg_color(disp_hint_sw, lv_color_hex(kBorder), static_cast<lv_style_selector_t>(LV_PART_MAIN));
   lv_obj_set_style_bg_color(disp_hint_sw, lv_color_hex(kAccent), static_cast<lv_style_selector_t>(LV_PART_INDICATOR) | LV_STATE_CHECKED);
 
+  make_caption(disp_root, 396, "Helligkeit der Uhren");
+  for (int i = 0; i < kSaverBlChoiceN; ++i) {
+    char key[10], lab[8];
+    snprintf(key, sizeof(key), "sbl:%d", i);
+    snprintf(lab, sizeof(lab), "%u %%", static_cast<unsigned>(kSaverBlChoices[i]));
+    disp_bl_btn[i] = make_choice(disp_root, kMargin + (i % 3) * 148, 418 + (i / 3) * 60, 136, 50,
+                                 lab, on_bl_btn, i, key);
+  }
+
   // Design: Dark Glass or Co4. Fixed per boot, so a change restarts after asking.
   make_page_scrollable(disp_root);
-  make_caption(disp_root, 400, "Design");
+  make_caption(disp_root, 544, "Design");
   for (int i = 0; i < kDesignCount; ++i) {
     char key[10];
     snprintf(key, sizeof(key), "design:%d", i);
-    lv_obj_t* b = make_choice(disp_root, kMargin + i * 222, 422, 210, 56, ui_theme_get(i).name, on_design_btn, i, key);
+    lv_obj_t* b = make_choice(disp_root, kMargin + i * 222, 566, 210, 56, ui_theme_get(i).name, on_design_btn, i, key);
     if (&ui_theme_get(i) == g_theme) lv_obj_add_state(b, LV_STATE_CHECKED);
   }
   build_design_confirm(lv_obj_get_screen(disp_root));

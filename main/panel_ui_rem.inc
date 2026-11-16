@@ -98,8 +98,7 @@ void rem_consider(const CalEvent& e, int64_t now) {
 
 void rem_restore_backlight() {
   if (!scr_off) return;
-  bool clock = disp.saver != kSaverBlack;
-  panel_backlight(clock ? kClockBacklight : disp.hint ? kHintBacklight : 0, 300);
+  panel_backlight(settings_saver_backlight(disp), 300);
 }
 
 // The card shows on the home screen and over every screensaver (not over
